@@ -9,6 +9,7 @@
   cursor: pointer;
   user-select: none;
   color: var(--dsw-alias-label-primary);
+  scroll-margin-top: calc((var(--dsh-workspace-depth, 0) + 1) * 36px);
 }
 
 .projectRow:hover,

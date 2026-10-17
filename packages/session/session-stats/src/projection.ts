@@ -1,6 +1,6 @@
 /**
  * The `sessionStats` projection unit: a pure fold of step boundaries, stream
- * embedded streams, tool pairs, and assembled assistant messages into whole-log counts
+ * embedded streams, tool and compaction pairs, and assembled messages into whole-log counts
  * and wall times.
  *
  * `step/end` — not `assistant/message` — is the counted step event because it
@@ -12,7 +12,7 @@
  *
  * The wall-time folds mirror the client window fold field by field
  * (`deriveStats` in dsh-client-ui-conversation, that fold's whole-window
- * fallback role): model time is `step/start` → `assistant/message`, first
+ * fallback role): model time is `step/start` → `assistant/message` excluding compaction, first
  * token is the first non-empty delta chunk and survives an in-step
  * `llm/retry`, decode spans first token → assembled message on steps that
  * also report output tokens, and tool time pairs `tool/call` → `tool/result`
@@ -25,6 +25,7 @@
 
 import { z } from 'zod'
 import { assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-compaction/types'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 
 
@@ -38,6 +39,8 @@ interface SessionStatsTotals {
   llmMs: number
   /** Summed matched tool call→result wall time, ms. */
   toolMs: number
+  /** Completed compaction attempts, including failed attempts, ms. */
+  compactionMs: number
   /** Summed first-token latency over `ttftSteps`, ms. */
   ttftMs: number
   /** Steps carrying a recorded first token. */
@@ -58,9 +61,11 @@ interface SessionStatsState extends SessionStatsTotals {
   /** Turn of the last counted `step/end`; null before the first. */
   lastTurn: number | null
   /** The open step's boundary facts; null outside a step or after its message assembled. */
-  openStep: { turn: number; step: number; startTime: number; firstTokenTime: number | null } | null
+  openStep: { turn: number; step: number; startTime: number; firstTokenTime: number | null; compactionSpans: { startTime: number; endTime: number }[] } | null
   /** Dispatch times of tool calls whose result has not landed, by callId. */
   pendingCalls: Record<string, number>
+  /** Start times of compaction attempts awaiting their matching end. */
+  pendingCompactions: Record<string, number>
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -74,6 +79,7 @@ const sessionStatsSchema = z.object({
   steps: z.number().int().nonnegative(),
   llmMs: z.number().nonnegative(),
   toolMs: z.number().nonnegative(),
+  compactionMs: z.number().nonnegative().default(0),
   ttftMs: z.number().nonnegative(),
   ttftSteps: z.number().int().nonnegative(),
   decodeMs: z.number().nonnegative(),
@@ -87,15 +93,24 @@ const sessionStatsSchema = z.object({
  * `sessionStatsSchema` (the wire output boundary) with the boundary fields.
  */
 const sessionStatsStateSchema = sessionStatsSchema.extend({
+  compactionMs: z.number().nonnegative(),
   lastTurn: z.number().int().nonnegative().nullable(),
   openStep: z.object({
     turn: z.number().int().nonnegative(),
     step: z.number().int().nonnegative(),
     startTime: z.number().nonnegative(),
     firstTokenTime: z.number().nonnegative().nullable(),
+    compactionSpans: z.array(z.object({ startTime: z.number().nonnegative(), endTime: z.number().nonnegative() })),
   }).nullable(),
   pendingCalls: z.record(z.string(), z.number().nonnegative()),
+  pendingCompactions: z.record(z.string(), z.number().nonnegative()),
 })
+
+/** Model interval excluding disjoint, session-serialized compaction attempts. */
+function modelElapsed(start: number, end: number, spans: readonly { startTime: number; endTime: number }[]): number {
+  const excluded = spans.reduce((sum, span) => sum + Math.max(0, Math.min(end, span.endTime) - Math.max(start, span.startTime)), 0)
+  return Math.max(0, end - start - excluded)
+}
 
 /**
  * Provider-reported completion tokens, guarded the way the window fold guards
@@ -112,13 +127,14 @@ function usageOutputTokens(usage: unknown): number | null {
 /** The `sessionStats` unit registered on `ctx.sessionProjections` (exported for the unit spec). */
 export const sessionStatsProjectionDefinition = {
   key: 'sessionStats',
-  stateVersion: 1,
+  stateVersion: 2,
   stateSchema: sessionStatsStateSchema,
   init: () => ({
     turns: 0,
     steps: 0,
     llmMs: 0,
     toolMs: 0,
+    compactionMs: 0,
     ttftMs: 0,
     ttftSteps: 0,
     decodeMs: 0,
@@ -126,6 +142,7 @@ export const sessionStatsProjectionDefinition = {
     lastTurn: null,
     openStep: null,
     pendingCalls: {},
+    pendingCompactions: {},
   }),
   apply: (state, event) => {
     // Every uninteresting event returns the same reference (Object.is gates the change feed).
@@ -133,8 +150,22 @@ export const sessionStatsProjectionDefinition = {
       case 'step/start':
         return {
           ...state,
-          openStep: { turn: event.data.turn, step: event.data.step, startTime: event.time, firstTokenTime: null },
+          openStep: { turn: event.data.turn, step: event.data.step, startTime: event.time, firstTokenTime: null, compactionSpans: [] },
         }
+      case 'compaction/start':
+        return { ...state, pendingCompactions: { ...state.pendingCompactions, [event.data.compactionId]: event.time } }
+      case 'compaction/end': {
+        const id = event.data.compactionId
+        const start = Object.hasOwn(state.pendingCompactions, id) ? state.pendingCompactions[id] : undefined
+        if (start === undefined) return state
+        return {
+          ...state,
+          compactionMs: state.compactionMs + Math.max(0, event.time - start),
+          pendingCompactions: Object.fromEntries(Object.entries(state.pendingCompactions).filter(([key]) => key !== id)),
+          openStep: state.openStep === null ? null : { ...state.openStep,
+            compactionSpans: [...state.openStep.compactionSpans, { startTime: start, endTime: event.time }] },
+        }
+      }
       case 'assistant/attempt': {
         const open = state.openStep
         if (open === null || open.turn !== event.data.turn || open.step !== event.data.step) return state
@@ -150,15 +181,15 @@ export const sessionStatsProjectionDefinition = {
         // defensive duplicate cannot accrue twice.
         const next: SessionStatsState = {
           ...state,
-          llmMs: state.llmMs + Math.max(0, event.time - open.startTime),
+          llmMs: state.llmMs + modelElapsed(open.startTime, event.time, open.compactionSpans),
           openStep: null,
         }
         if (firstToken !== null) {
-          next.ttftMs += Math.max(0, firstToken - open.startTime)
+          next.ttftMs += modelElapsed(open.startTime, firstToken, open.compactionSpans)
           next.ttftSteps += 1
           const outputTokens = usageOutputTokens(event.data.usage)
           if (outputTokens !== null) {
-            next.decodeMs += Math.max(0, event.time - firstToken)
+            next.decodeMs += modelElapsed(firstToken, event.time, open.compactionSpans)
             next.decodeTokens += outputTokens
           }
         }
@@ -203,6 +234,7 @@ export const sessionStatsProjectionDefinition = {
       steps: state.steps,
       llmMs: state.llmMs,
       toolMs: state.toolMs,
+      compactionMs: state.compactionMs,
       ttftMs: state.ttftMs,
       ttftSteps: state.ttftSteps,
       decodeMs: state.decodeMs,

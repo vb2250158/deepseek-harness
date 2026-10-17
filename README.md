@@ -40,6 +40,10 @@ pnpm dsh web
 
 `pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
 
+### Sync to another machine
+
+Build the same upstream revision on each computer before installing external plugins. Local source changes require their own cumulative patch; plugin configuration does not transfer source edits. External plugin sources and fixed Git commits belong to their maintained repositories. Share portable configuration and encrypted credentials through the configured private environment repository; keep machine paths, devices, chat history and synchronization keys outside that snapshot.
+
 ## Community and support
 
 - Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).

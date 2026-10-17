@@ -222,6 +222,23 @@ declare module './types.ts' {
     followup(message: UserMessage): void
 
     /**
+     * Resume the last interrupted turn in this session without adding a message.
+     * Retain pending input; reject busy agents, stale turns, and explicit stops.
+     * Alternative drivers may omit this capability.
+     * @param startSeq - turn/start sequence of the interrupted turn.
+     * @returns Whether a new turn was synchronously started on this agent.
+     */
+    continueInterrupted?(startSeq: number): boolean
+
+    /**
+     * Resume the last QUOTA or legacy HTTP 402 failure without adding a message.
+     * Reject busy agents, stale turns, and other failures.
+     * @param startSeq - turn/start sequence of the failed turn.
+     * @returns Whether a new turn was synchronously started on this agent.
+     */
+    continueQuotaFailure?(startSeq: number): boolean
+
+    /**
    * Submit steering for the nearest step. An idle driver starts a turn;
    * a running driver consumes it at its next step boundary.
    * A rejected step leaves steering parked in the inbox until the next
@@ -335,6 +352,28 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
     */
     'agent/request'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<LlmCallConfig>): Promise<LlmCallConfig>
+    /**
+     * Reconcile logged input before freezing the complete model request. Listeners
+     * may commit surface replacements; accepted input and the registration-bound
+     * route are already durable. Cancellation preserves those committed facts.
+     * Every listener delegates with `next()`; failures prevent model dispatch.
+     * @param payload.agent - agent owning the admitted request.
+     * @param payload.turn - open turn number.
+     * @param payload.step - open step number.
+     * @param payload.signal - turn cancellation signal.
+     * @mode waterfall
+     */
+    'agent/request-context'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<void>): Promise<void>
+    /**
+     * Restore required logged context after all request compaction listeners settle.
+     * Listeners must delegate; failure prevents dispatch. The loop freezes input after this chain.
+     * @param payload.agent - agent owning the admitted request.
+     * @param payload.turn - open turn number.
+     * @param payload.step - open step number.
+     * @param payload.signal - turn cancellation signal.
+     * @mode waterfall
+     */
+    'agent/request-context-ready'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<void>): Promise<void>
     /**
      * Handle one failed model-request attempt before the loop retries or closes
      * its step. A listener returns `{ kind: 'retry' }` without calling `next()`

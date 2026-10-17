@@ -3,7 +3,9 @@
  * field is a single write-only **API key** input (the page never asks for an
  * environment-variable name — a typed key stores through `credentials/set`
  * under the profile's reference, deriving `<ROUTE>_API_KEY` when the profile
- * has none. The pi-ai profile records that derivation as `apiKeyEnv` only when
+ * has none. If that reference is supplied by the launch environment, a typed
+ * replacement uses a page-managed local reference so it can take effect. The
+ * pi-ai profile records the chosen reference as `apiKeyEnv` only when
  * a key is entered; a blank key materializes a reference-free profile for
  * provider-native authentication);
  * the collapsed 自定义设置 area carries the per-family extras (`baseURL` for
@@ -33,7 +35,7 @@ import {
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
-import { deriveKeyRef, protocolChoices } from './store.ts'
+import { deriveKeyRef, deriveLocalKeyRef, protocolChoices } from './store.ts'
 import { protocolLabel } from './protocol-label.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
@@ -260,11 +262,16 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
    */
   const applyOnce = async (): Promise<string | undefined> => {
     const ns = namespace.ns
-    // A pi-ai profile names the conventional reference only when this page is
-    // about to store a key. Otherwise the provider keeps its native auth path.
-    const next = layout === 'pi-ai' && stringAt(draft, 'apiKeyEnv') === undefined
-      && stringAt(fallback, 'apiKeyEnv') === undefined && keyValue.length > 0
-      ? schema.setPath(draft, ['apiKeyEnv'], keyRef)
+    // A launch-environment credential cannot be overwritten at its conventional
+    // reference, so a typed replacement moves the profile to a page-managed
+    // writable reference before storing the new value.
+    const credentialRef = props.credentialOnly !== true && keyState?.writable === false
+      ? deriveLocalKeyRef(props.provider)
+      : keyRef
+    const next = keyValue.length > 0 && (credentialRef !== keyRef
+      || (layout === 'pi-ai' && stringAt(draft, 'apiKeyEnv') === undefined
+        && stringAt(fallback, 'apiKeyEnv') === undefined))
+      ? schema.setPath(draft, ['apiKeyEnv'], credentialRef)
       : draft
     if (props.credentialOnly !== true) {
       // The same checker gates the submit button, so a card cannot reach this
@@ -299,7 +306,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       setDraft(next)
     }
     if (keyValue.length > 0) {
-      const stored = await operations.storeCredential(keyRef, keyValue)
+      const stored = await operations.storeCredential(credentialRef, keyValue)
       if (stored !== undefined) return stored
     }
     setKeyDraft('')
@@ -358,7 +365,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
     const defaultMaxTokens = schema.getPath(fallback, ['maxTokens'])
     const defaultInput = schema.getPath(fallback, ['defaultInput'])
     const keyPlaceholder = keyLocked
-      ? t('keyEnvLocked')
+      ? props.credentialOnly === true ? t('keyEnvLocked') : t('keyEnvOverride')
       : keyState?.configured === true && props.credentialRequired !== true
         ? t('keyStored')
         : family === 'pi-ai' ? t('keyPlaceholderNative') : t('keyPlaceholder')
@@ -390,7 +397,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
             aria-invalid={shownKeyFailure !== undefined}
             required={props.credentialRequired === true}
             autoFocus={props.autoFocusCredential === true}
-            disabled={disabled || keyLocked}
+            disabled={disabled || (props.credentialOnly === true && keyLocked)}
             onChange={(event) => { setKeyDraft(event.target.value) }}
           />
           {shownKeyFailure === undefined ? null : <p className={styles['error']}>{t(shownKeyFailure)}</p>}

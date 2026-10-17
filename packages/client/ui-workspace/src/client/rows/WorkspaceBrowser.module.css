@@ -444,6 +444,14 @@
   position: relative;
 }
 
+/* Keep the original controls above sessions; descendants sit below ancestors. */
+.groupHeader {
+  position: sticky;
+  top: calc(var(--dsh-workspace-depth, 0) * 36px);
+  z-index: calc(100 - var(--dsh-workspace-depth, 0));
+  background: var(--dsw-specific-sidebar-fill);
+}
+
 .groupSection + .groupSection {
   margin-top: 4px;
 }

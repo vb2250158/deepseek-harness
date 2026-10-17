@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-plugin-manager
 
+仅更新 lockfile 的操作先验证指定包的兼容性。已安装内容的兼容性检查和 bundle 激活在随后实际安装时执行，因为磁盘模块此时仍是旧版本。
+
 [English](README.md) | 中文
 
 应用拥有的 profile 通过启动器信息提供内置包管理器调用方式。它在包操作和 registry 检查中优先于 `pnpmCommand`；其环境仅应用于这些子进程。

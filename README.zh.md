@@ -44,6 +44,10 @@ pnpm dsh web
 
 `pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
 
+### 同步到另一台电脑
+
+每台电脑先构建相同的上游版本，再安装外部插件。本机源码改动需要单独的累计补丁；插件配置不会传递源码修改。外部插件源码和固定 Git 提交由各自的维护仓库提供。通过已配置的私有环境仓库共享可移植配置和加密凭据；机器路径、设备、聊天历史与同步密钥不进入该快照。
+
 ## 社区与支持
 
 - 通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。

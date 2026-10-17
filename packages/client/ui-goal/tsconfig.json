@@ -39,6 +39,9 @@
       "path": "../ui-slots"
     },
     {
+      "path": "../store"
+    },
+    {
       "path": "../../interaction/commands"
     },
     {

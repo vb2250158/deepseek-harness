@@ -87,7 +87,7 @@ class OverflowRecoveryAdapter extends LlmAdapter {
       provider,
       id: model,
       name: model,
-      context: { contextWindow: 128 },
+      context: { contextWindow: 20_000 },
     })
   }
 
@@ -229,7 +229,7 @@ describe('CBR-001: a real-loop checkpoint is a valid boundary on both sides', ()
     }
   })
 
-  it('runs automatic pressure between the completed tool step and the next step', async () => {
+  it('runs automatic pressure after next-step admission and before model dispatch', async () => {
     const { ctx } = await harness(8)
     try {
       const agent = await ctx.agentLoop.create(SessionId('post-step-order'), { provider: 'mock', model: 'mock' })
@@ -248,14 +248,14 @@ describe('CBR-001: a real-loop checkpoint is a valid boundary on both sides', ()
         && event.data.step === precedingResult.data.step
         && event.seq > precedingResult.seq,
       )
-      const nextStepStart = events.find(event =>
+      const nextStepStart = events.findLast(event =>
         event.type === 'step/start'
         && event.data.step === precedingResult.data.step + 1
-        && event.seq > compactStart!.seq,
+        && event.seq < compactStart!.seq,
       )
       expect(precedingResult.seq).toBeLessThan(compactStart!.seq)
       expect(precedingStepEnd!.seq).toBeLessThan(compactStart!.seq)
-      expect(compactStart!.seq).toBeLessThan(nextStepStart!.seq)
+      expect(nextStepStart!.seq).toBeLessThan(compactStart!.seq)
     } finally {
       await ctx.fiber.dispose()
     }

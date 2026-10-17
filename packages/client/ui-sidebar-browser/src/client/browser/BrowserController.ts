@@ -3,7 +3,7 @@ import { createSnapshotStore, type BoundActions, type SnapshotStore } from '@dee
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BrowserFrameState } from './BrowserFrame.ts'
-import type { BrowserPage, BrowserPageFactory } from './BrowserPage.ts'
+import type { BrowserPage, BrowserPageFactory, BrowserMessageTarget } from './BrowserPage.ts'
 import { currentBrowserTarget, type BrowserTabState } from './BrowserPersistence.ts'
 import type { BrowserStore } from './store.ts'
 import { parseBrowserAddress, type BrowserAddressFailure, type BrowserTarget } from './url.ts'
@@ -140,6 +140,12 @@ export class BrowserController implements HostObservable<BrowserControllerState>
   rebind(actions: BoundActions<BrowserStore>): void { this.actions = actions }
 
   /**
+   * Obtain a lease for messaging the current iframe.
+   * @returns current iframe message lease, absent after disposal or for a non-iframe carrier.
+   */
+  messageTarget(): BrowserMessageTarget | undefined { return this.disposed ? undefined : this.page.messageTarget?.() }
+
+  /**
    * Release the page and detach occurrence and state listeners.
    * @returns after page teardown; repeated callers join the same disposal.
    */
@@ -181,6 +187,8 @@ export interface BrowserMountRequest {
 
 /** Plain Slot callbacks and a framework-bound state source, not a desktop protocol. */
 export interface BrowserInjected {
+  /** @param tabId - owning occurrence. @returns current iframe message lease, if supported and mounted. */
+  messageTarget(tabId: TabId): BrowserMessageTarget | undefined
   readonly keyedHooks: {
     readonly browserState: (key: string) => HostObservable<BrowserControllerState> | undefined
   }
@@ -221,6 +229,7 @@ export function createBrowserControllers(actions: BoundActions<BrowserStore>, cr
   }>()
   const controller = (id: TabId): BrowserController | undefined => controllers.get(id)?.controller
   return {
+    messageTarget: id => controller(id)?.messageTarget(),
     keyedHooks: { browserState: key => controller(key as TabId) },
     mount(request) {
       const { tabId, signal } = request

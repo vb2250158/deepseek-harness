@@ -1,7 +1,8 @@
 /** Web SSE transport for page-owned client entry reconciliation and rebuilt code replacement. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { PluginsEventParseResult } from '../events.ts'
-import { EVENTS_ROUTE, parsePluginsEventFrame } from '../events.ts'
+import { parsePluginsEventFrame } from '../events.ts'
+import { subscribeSharedEvents } from './shared-events.ts'
 
 export type { PluginsEventFrame } from '../events.ts'
 
@@ -24,24 +25,20 @@ export function apply(ctx: Context): void {
     void run.catch((error: unknown) => { ctx.logger.error(error) })
   }
 
-  ctx.effect(() => {
-    const source = new EventSource(EVENTS_ROUTE)
-    source.addEventListener('message', (event: MessageEvent<string>) => {
+  ctx.effect(() => subscribeSharedEvents((data) => {
       let value: unknown
       try {
-        value = JSON.parse(event.data) as unknown
+        value = JSON.parse(data)
       } catch {
         // Wire boundary: a malformed transport frame is dropped loudly.
-        ctx.logger.warn(`client-hmr: unparseable event frame: ${event.data}`)
+        ctx.logger.warn(`client-hmr: unparseable event frame: ${data}`)
         return
       }
       const parsed = parsePluginsEventFrame(value)
       if (parsed.kind === 'invalid') {
-        ctx.logger.warn(`client-hmr: invalid event frame: ${event.data}`)
+        ctx.logger.warn(`client-hmr: invalid event frame: ${data}`)
       } else if (parsed.kind === 'frame') {
         handle(parsed.frame)
       }
-    })
-    return () => { source.close() }
-  }, 'client-hmr: event source')
+  }, (error) => { ctx.logger.error(error) }), 'client-hmr: shared event source')
 }

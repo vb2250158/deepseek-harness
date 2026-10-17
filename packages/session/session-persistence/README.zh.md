@@ -27,6 +27,8 @@ kind: "package-reference"
 
 挂载一个持久化后端即可让会话持久化。后端把自己注册为 `ctx.sessionPersistence`，并把每个已发布会话的实时事件路由进该会话的活跃写句柄；agent-loop——会话在生产环境中的发布点——在发布之前获取每个会话的写句柄，因此组合中的其他部分不变。
 
+`stat()` 与 `list()` 的快照可包含物理文件的修改时间 `modifiedAt`，单位为 Unix 毫秒。未落盘的会话或无法低成本取得该元数据的后端省略此字段；它不是事件时间或版本令牌。
+
 ### 选择后端
 
 seam 随产品交付 [JSONL](../session-persistence-jsonl/README.zh.md) 后端。它为每个会话存储一份仅追加的 `.jsonl.zstd` 日志。第三方后端可以直接实现该服务；必须遵守的[后端约定](#understand-the-implementation)见下文。
@@ -39,7 +41,7 @@ seam 随产品交付 [JSONL](../session-persistence-jsonl/README.zh.md) 后端�
 const handle = await ctx.sessionPersistence.create(header)     // store a new session, take write ownership
 const handle = await ctx.sessionPersistence.open(id, 'write')  // claim single-writer ownership of an existing session
 const reader = await ctx.sessionPersistence.open(id, 'read')   // observe without ownership
-const snap = await ctx.sessionPersistence.stat(id)             // header + revision (+ eventCount / sizeBytes) without a log read
+const snap = await ctx.sessionPersistence.stat(id)             // header + revision (+ eventCount / sizeBytes / modifiedAt) without a log read
 const all = await ctx.sessionPersistence.list()                // one snapshot per visible stored session
 await ctx.sessionPersistence.flush()                           // backend-wide durability barrier over every active write handle
 ```

@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { JSDOM } from 'jsdom'
 import { authenticateWebHost, forwardWebRequest, serveWebDocument } from '../src/web-document.ts'
 
 const roots: string[] = []
@@ -25,6 +26,36 @@ it('serves the Web entry and assets without starting or contacting a Host', asyn
   expect(fetch).not.toHaveBeenCalled()
   expect((await serveWebDocument(new Request('dsh-app://app/%2e%2e%2fprivate'), root)).status).toBe(403)
   expect((await serveWebDocument(new Request('dsh-app://app/missing.js'), root)).status).toBe(404)
+})
+
+it('keeps shared index injections and adds native boot readiness before its scripts', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response('<html><head><script>webInjections()</script></head></html>', {
+    headers: { 'content-type': 'text/html', etag: '"web"' },
+  })))
+  const response = await forwardWebRequest(new Request('dsh-app://app/'), 'http://127.0.0.1:3180/', 'c', true)
+  const html = await response.text()
+  expect(html.indexOf('Promise.withResolvers()')).toBeLessThan(html.indexOf('webInjections()'))
+  expect(html.indexOf('globalThis.__DSH_TRANSPORT__')).toBeLessThan(html.indexOf('webInjections()'))
+  expect(html).toContain('"ownsHost":true,"streamBaseUrl":"http://127.0.0.1:3180"')
+  expect(response.headers.get('etag')).toBeNull()
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect(await (await forwardWebRequest(new Request('dsh-app://app/assets/index.js'), 'http://127.0.0.1:3180/', 'c', true)).text()).not.toContain('Promise.withResolvers')
+})
+
+it('selects durable settings when Web releases readiness before native boot IPC', async () => {
+  const source = '<html><head><script>globalThis.__DSH_BOOT_READY__={promise:Promise.resolve()};'
+    + 'globalThis.settingsPersistence=globalThis.__DSH_TRANSPORT__?.ownsHost===true?"host":"memory"</script></head></html>'
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(source, { headers: { 'content-type': 'text/html' } })))
+  const response = await forwardWebRequest(new Request('dsh-app://app/'), 'http://127.0.0.1:3180/', 'c', true)
+  const unadapted = new JSDOM(source, { runScripts: 'dangerously' })
+  const adapted = new JSDOM(await response.text(), { runScripts: 'dangerously' })
+  try {
+    expect(unadapted.window.settingsPersistence).toBe('memory')
+    expect(adapted.window.settingsPersistence).toBe('host')
+  } finally {
+    unadapted.window.close()
+    adapted.window.close()
+  }
 })
 
 it('requires the Host authentication exchange and retains only its cookie value', async () => {

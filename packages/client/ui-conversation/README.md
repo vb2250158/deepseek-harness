@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-conversation
 
+The single Session slot `conversation.input.completion` accepts an asynchronous text provider through `register`. The editor owns end-of-draft eligibility, composition, cancellation, ghost presentation, and Tab insertion. Providers supply debounce, timeout, and character limits. Ghost text stays outside the draft; Enter sends only accepted content. Insertion preserves reference nodes and adds one undo step; command and reference menus keep keyboard priority.
+
 English | [中文](README.zh.md)
 
 Desktop product events use the optional [product analytics service](../product-analytics/README.md); ordinary Web interactions are excluded.

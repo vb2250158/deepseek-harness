@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-09-22-legacy-session-configuration-migration.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-22-legacy-session-configuration-migration.md
+/agent-note-legacy-session-configuration-migration:
+  en: 8621e6782f0d19f5
+  zh: dece9b00ea9dd15a
+/agent-note-legacy-session-configuration-migration/problem:
+  en: 12734860d04adba3
+  zh: e88426b3b6007d62
+/agent-note-legacy-session-configuration-migration/decision:
+  en: f353299004c9d1bf
+  zh: b40c8a5464f0f35a
+/agent-note-legacy-session-configuration-migration/alternatives-considered:
+  en: f365802c3f3e2a99
+  zh: 1670d5375433be6e
+/agent-note-legacy-session-configuration-migration/consequences:
+  en: b6f8f840230abf57
+  zh: 64371bcbb14c3bca

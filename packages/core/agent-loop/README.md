@@ -79,6 +79,8 @@ Each step sends the session's derived history — with the latest non-empty `sys
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+`requestContextVersion` identifies the driver’s complete-request reconciliation support. After admitted users, system prompt, tools, and bound capacity are logged, `agent/request-context` runs before request freezing; `agent/request-context-ready` follows completed compaction, identified by `requestContextFinalizeVersion`. Surface changes start a new logged request series. Runtime snapshots compare their original contributed sections so a compact view does not cause unchanged state to be reinjected.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 
@@ -145,6 +147,11 @@ The package-level contract is enough for most consumers; read these when you nee
 - [Core group map](../README.md) — how the core packages compose.
 
 -----
+
+<a id="original-session-recovery"></a>
+## Original Session recovery
+
+`continueInterrupted(startSeq)` accepts only the last interrupted turn of a live, idle Agent; `continueQuotaFailure(startSeq)` accepts only the last QUOTA or legacy PI_AI_ERROR/HTTP 402 failure. Recovery reuses the original log and pending input without replaying historical tools or adding a recovery message. Pre-step rejection and cancellation remain effective. Repeated requests for the same turn start it once; maintenance tasks prevent startup.
 
 <a id="model-experience"></a>
 ## Model Experience

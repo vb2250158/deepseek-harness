@@ -31,6 +31,16 @@ declare module '@deepseek-ai/dsh-llm' {
 /** Why automatic policy is asking a backend to consider compaction. */
 export type CompactionTrigger = 'pressure' | 'context-overflow'
 
+/** Concrete request-pressure budgets supplied by one compaction policy. */
+export interface CompactionPressurePolicy {
+  /** Request size at which automatic reduction starts. */
+  thresholdTokens: number
+  /** Request size automatic reduction must reach before it succeeds. */
+  targetTokens: number
+  /** Recent message tokens retained verbatim. */
+  retainTokens: number
+}
+
 /** Expected failure classes for an explicit idle-session compaction request. */
 export type ManualCompactionErrorCode =
   | 'busy'
@@ -90,6 +100,17 @@ declare module '@deepseek-ai/cordis' {
     compaction: CompactionEngine
   }
   interface Events {
+    /**
+     * Resolve pressure budgets for the complete admitted request. Implementations
+     * preserve `0 <= retainTokens < targetTokens <= thresholdTokens` and keep the
+     * threshold below capacity minus reserved completion tokens.
+     * @param payload.agent - owner of the priced session.
+     * @param payload.contextWindow - capacity bound to the admitted request.
+     * @param payload.reservedCompletionTokens - effective output reservation.
+     * @param next - resolve the backend's configured budgets.
+     * @mode waterfall
+     */
+    'compaction/pressure-policy'(payload: { agent: CompactionAgentContext; contextWindow: number; reservedCompletionTokens: number }, next: () => CompactionPressurePolicy): CompactionPressurePolicy
     /**
      * Recover a failed summary request by synchronously recording a durable
      * change to its selected input. Return true only after making progress;

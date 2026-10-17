@@ -12,7 +12,7 @@ import type { Session, SessionSeq } from '@deepseek-ai/dsh-session'
 import { CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
@@ -155,24 +155,25 @@ export class BasicCompactionEngine extends CompactionEngine {
       )
     }
 
-    ctx.on('agent/pre-step', async (
+    ctx.on('agent/request-context', async (
       { agent, signal },
       next,
-    ): Promise<PreStepDecision> => {
+    ): Promise<void> => {
+      await next()
       if (!signal.aborted) {
         try {
           const result = await this.compactIfNeeded(agent, 'pressure', signal)
           if (result !== null) logResult(result, 'step pressure')
         } catch (error: unknown) {
           if (error instanceof TargetPressureConfigError) {
-            if (this.warnedPressureConfigTargets.has(error.targetKey)) return next()
+            if (this.warnedPressureConfigTargets.has(error.targetKey)) return
             this.warnedPressureConfigTargets.add(error.targetKey)
           }
           const message = error instanceof Error ? error.message : String(error)
-          ctx.logger.warn(`step compaction failed: ${message}; continuing the turn`)
+          signal.throwIfAborted()
+          ctx.logger.warn(`request compaction failed: ${message}; continuing the turn`)
         }
       }
-      return next()
     })
 
     ctx.on('agent/status', ({ agent, status }) => {
@@ -298,10 +299,13 @@ export class BasicCompactionEngine extends CompactionEngine {
       }
       const range = selectCompactableRange(agent.session, measurement, 0)
       if (range === null) return null
-      return this.compactRegion(range.start, range.end, agent, signal)
+      return this.compactOverflowSafe(range, agent, signal)
     }
 
-    const info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
+    const admitted = agent.session.requestContext()
+    const info = admitted?.provider === target.provider && admitted.model === target.model
+      ? { context: admitted.contextWindow === undefined ? undefined : { contextWindow: admitted.contextWindow }, defaultMaxTokens: undefined }
+      : await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
     assertNoActiveCompaction(agent.session, 'automatic pressure compaction')
     const targetKey = `${target.provider}/${target.model}`
     if (info.context === undefined) {
@@ -311,12 +315,18 @@ export class BasicCompactionEngine extends CompactionEngine {
         + 'configure contextWindow on that adapter model',
       )
     }
-    const spec = resolveCompactSpec(
-      policy,
-      info.context.contextWindow,
-      reservedCompletionTokens(agent, info.defaultMaxTokens),
-    )
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    const contextWindow = info.context.contextWindow
+    const pressure = this.ctx.waterfall('compaction/pressure-policy', {
+      agent,
+      contextWindow,
+      reservedCompletionTokens: reservedCompletionTokens(agent, info.defaultMaxTokens),
+    }, () => {
+      const spec = resolveCompactSpec(policy, contextWindow,
+        reservedCompletionTokens(agent, info.defaultMaxTokens))
+      return { thresholdTokens: spec.thresholdTokens, targetTokens: spec.thresholdTokens,
+        retainTokens: spec.retainTokens }
+    })
+    if (measurement.totalTokens < pressure.thresholdTokens) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
     // summary range, then remeasure through the singleton replay fold.
@@ -324,26 +334,56 @@ export class BasicCompactionEngine extends CompactionEngine {
       prune.pruneSession(agent.session)
       measurement = meter.measure(agent.session)
     }
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    if (measurement.totalTokens < pressure.thresholdTokens) return null
 
     let result: CompactionResult | null = null
-    for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
-      const range = selectCompactableRange(agent.session, measurement, spec.retainTokens)
+    for (let attempt = 0; attempt <= policy.compactionRetries; attempt += 1) {
+      const range = selectCompactableRange(agent.session, measurement, pressure.retainTokens)
       if (range === null) {
         /* v8 ignore else -- concrete replacement preserves a compactable checkpoint; subclass hooks cannot mutate it. */
         if (result === null) return null
         /* v8 ignore next -- paired with the defensive post-success branch above. */
         break
       }
-      result = await this.compactRegion(range.start, range.end, agent, signal)
+      result = await this.compactOverflowSafe(range, agent, signal)
       measurement = meter.measure(agent.session)
-      if (measurement.totalTokens < spec.thresholdTokens) return result
+      if (measurement.totalTokens < pressure.targetTokens) return result
     }
 
     throw new Error(
-      `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
-      + `(${measurement.totalTokens} estimated tokens >= threshold ${spec.thresholdTokens})`,
+      `compaction still above threshold after ${policy.compactionRetries + 1} compaction attempts `
+      + `(${measurement.totalTokens} estimated tokens >= target ${pressure.targetTokens})`,
     )
+  }
+
+  /** Shrink an oversized summary prefix without dropping history or splitting tool pairs. */
+  private async compactOverflowSafe(
+    initial: { start: SessionSeq; end: SessionSeq },
+    agent: Agent,
+    signal: AbortSignal,
+  ): Promise<CompactionResult> {
+    let range = initial
+    for (;;) {
+      signal.throwIfAborted()
+      try {
+        return await this.compactRegion(range.start, range.end, agent, signal)
+      } catch (error: unknown) {
+        signal.throwIfAborted()
+        if (!(error instanceof Error) || !('code' in error)
+          || error.code !== CONTEXT_WINDOW_EXCEEDED_CODE) throw error
+        const measurement = this.ctx.tokenMeter.measure(agent.session)
+        const nodes = measurement.nodes
+        const startIdx = nodes.findIndex(node => node.seq === range.start)
+        const endIdx = nodes.findIndex(node => node.seq === range.end)
+        if (startIdx < 0 || endIdx <= startIdx) throw error
+        const tokens = nodes.slice(startIdx, endIdx + 1).reduce((sum, node) => sum + node.tokens, 0)
+        const smaller = selectCompactableRange(agent.session, measurement, 0, Math.floor(tokens / 2))
+        if (smaller === null || smaller.start !== range.start
+          || nodes.findIndex(node => node.seq === smaller.end) >= endIdx) throw error
+        range = smaller
+        this.ctx.logger.info('summary context overflow: retrying a smaller balanced history prefix')
+      }
+    }
   }
 
   /**

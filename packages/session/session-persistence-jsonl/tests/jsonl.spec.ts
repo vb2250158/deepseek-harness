@@ -2,6 +2,7 @@ import { MessageId, createMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises'
+import * as fileSystem from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { scheduler } from 'node:timers/promises'
@@ -743,6 +744,38 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     }
   })
 
+  it('reuses unchanged generation headers and rereads changed or malformed files', async () => {
+    const header = meta('cached-generation-header', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    const opened = vi.spyOn(fileSystem, 'open')
+    const opens = () => opened.mock.calls.filter(args => String(args[0]) === path).length
+    const [first] = await ctx.sessionPersistence.list()
+    expect(first?.header.createdAt).toBe(header.createdAt)
+    const initialReads = opens()
+    expect(initialReads).toBeGreaterThan(0)
+    mutableHeader(first!.header).createdAt += 100
+    expect((await ctx.sessionPersistence.list())[0]?.header.createdAt).toBe(header.createdAt)
+    expect(opens()).toBe(initialReads)
+    await rewriteHeader(path, value => { value.createdAt = header.createdAt + 1 })
+    expect((await ctx.sessionPersistence.list())[0]?.header.createdAt).toBe(header.createdAt + 1)
+    expect(opens()).toBeGreaterThan(initialReads)
+    await writeFile(path, 'malformed header\n')
+    expect(await ctx.sessionPersistence.list()).toEqual([])
+  })
+
+  it('selects a future successor instead of a cached readable generation', async () => {
+    const header = meta('cached-header-future-successor', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    expect((await ctx.sessionPersistence.list())[0]?.header.id).toBe(header.id)
+    const futurePath = generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION + 1, 'none')
+    await writeFile(futurePath, `${JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION + 1, id: header.id })}\n`)
+    expect(await ctx.sessionPersistence.list()).toEqual([])
+  })
+
   it('projects a released v0 header through stat and list without reading or mutating its body', async () => {
     const header = meta('released-v0-metadata', '/work')
     const sourcePath = historicalLogPath(root, header.cwd, header.id)
@@ -1394,14 +1427,20 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     const pendingRows = await ctx.sessionPersistence.list()
     expect(pendingRows.map(s => s.header.id)).toContain(m.id)
     expect(pending?.sizeBytes).toBeUndefined()
+    expect(pending?.modifiedAt).toBeUndefined()
+    expect(pendingRows.find(s => s.header.id === m.id)?.modifiedAt).toBeUndefined()
     expect(pending?.formatStatus).toBeUndefined()
     expect(pendingRows.find(s => s.header.id === m.id)?.formatStatus).toBeUndefined()
 
     await handle.append(oneTurnLog())
+    await handle.flush()
     expect((await stat(dir)).isDirectory()).toBe(true)
     expect((await stat(rawLogPath(root, '/work', m.id))).isFile()).toBe(true)
     expect((await ctx.sessionPersistence.list()).map(s => s.header.id)).toContain(m.id)
     expect((await ctx.sessionPersistence.stat(m.id))?.formatStatus).toBe('current')
+    const identity = await stat(rawLogPath(root, '/work', m.id), { bigint: true })
+    expect((await ctx.sessionPersistence.stat(m.id))?.modifiedAt).toBe(Number(identity.mtimeMs))
+    expect((await ctx.sessionPersistence.list()).find(s => s.header.id === m.id)?.modifiedAt).toBe(Number(identity.mtimeMs))
     await handle.close()
   })
 
@@ -2080,7 +2119,7 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     queueMicrotask(() => { controller.abort(reason) })
 
     await expect(pending).rejects.toBe(reason)
-    expect(discovery).toHaveBeenCalledWith(controller.signal)
+    expect(discovery.mock.calls[0]?.[0]).toBe(controller.signal)
   })
 })
 
