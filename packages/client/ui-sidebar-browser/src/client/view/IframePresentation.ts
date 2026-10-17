@@ -1,6 +1,7 @@
 /** Iframe DOM and revision-tagged load observations. */
 import type { BrowserTarget } from '../browser/url.ts'
 import type { BrowserPresentation } from './BrowserPresentation.ts'
+import type { BrowserMessageTarget } from '../browser/BrowserPage.ts'
 import css from './Browser.module.css'
 
 /** Fixed iframe policy; top navigation and downloads are not granted directly. */
@@ -61,6 +62,30 @@ export class IframePresentation implements BrowserPresentation {
     this.element = undefined
     this.host = undefined
     this.document = undefined
+  }
+
+  /**
+   * Obtain a message lease without reading the frame's document.
+   * @returns a lease for the current physical frame.
+   */
+  messageTarget(): BrowserMessageTarget | undefined {
+    const element = this.element
+    const source = element?.contentWindow
+    if (element === undefined || source === null || source === undefined) return undefined
+    const isVisible = (): boolean => {
+      if (this.element !== element || !element.isConnected
+        || !Array.from(element.getClientRects()).some(rect => rect.width > 0 && rect.height > 0)) return false
+      for (let parent: HTMLElement | null = element; parent !== null; parent = parent.parentElement) {
+        const style = getComputedStyle(parent)
+        if (parent.hidden || parent.inert || parent.getAttribute('aria-hidden') === 'true'
+          || style.display === 'none' || style.opacity === '0' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+      }
+      return true
+    }
+    return { source, isVisible, send: (value) => {
+      if (!isVisible()) throw new Error('Browser iframe lease is no longer visible')
+      source.postMessage(value, '*')
+    } }
   }
 
   private render(): void {

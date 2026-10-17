@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-client-ui-conversation
 
+`conversation.input.completion` 单占会话插槽允许注册异步文本补齐供应器。供应器通过 `register` 返回卸载函数，并提供停顿、超时和字符上限；编辑器负责输入法、末尾光标资格、取消、灰字以及 Tab 插入。灰字不进入草稿；Enter 只发送已接受文字，接受建议保持引用节点和独立撤销步骤。命令和引用菜单优先处理按键。
+
 [English](README.md) | 中文
 
 桌面端产品事件使用可选的[产品埋点服务](../product-analytics/README.zh.md)，不包含普通 Web 交互。

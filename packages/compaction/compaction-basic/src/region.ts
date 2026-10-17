@@ -112,12 +112,14 @@ function systemHead(session: Session, headSeq: SessionSeq): SessionEvent<'system
  * @param session - session supplying authoritative current surface positions.
  * @param measurement - unified pressure and surface measurement from the conversation meter.
  * @param retainTokens - minimum recent tail budget retained verbatim.
+ * @param maxCompactTokens - optional bound on the priced prefix; complete tool pairs stay together.
  * @returns the inclusive positional seq range to compact, or `null`.
  */
 export function selectCompactableRange(
   session: Session,
   measurement: TokenMeasurement,
   retainTokens: number,
+  maxCompactTokens = Number.POSITIVE_INFINITY,
 ): { start: SessionSeq; end: SessionSeq } | null {
   const pricedNodes = measurement.nodes
   if (pricedNodes.length === 0) return null
@@ -145,6 +147,18 @@ export function selectCompactableRange(
     if (toolPairingBalancedBefore(session, surfaceNodes[keepFromIdx]!)) break
     keepFromIdx -= 1
   }
+  if (keepFromIdx <= firstIdx) return null
+
+  let prefixTokens = 0
+  let boundedKeepFromIdx = firstIdx
+  for (const [index, pricedNode] of pricedNodes.entries()) {
+    if (index < firstIdx) continue
+    if (index >= keepFromIdx) break
+    prefixTokens += pricedNode.tokens
+    if (prefixTokens > maxCompactTokens) break
+    if (toolPairingBalancedAfter(session, pricedNode.seq)) boundedKeepFromIdx = index + 1
+  }
+  keepFromIdx = boundedKeepFromIdx
   if (keepFromIdx <= firstIdx) return null
 
   // oxlint-disable-next-line typescript/no-non-null-assertion

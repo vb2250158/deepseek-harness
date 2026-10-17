@@ -41,7 +41,8 @@ Mount the plugin beside the session store and the projection registry when clien
 |---|---|
 | `turns` | Distinct turns with at least one closed step; rejected or empty turns are uncounted |
 | `steps` | Closed steps — completed, failed, cancelled, and max-tokens steps all count |
-| `llmMs` | Summed model wall time over steps that assembled a message |
+| `llmMs` | Summed model wall time over message-assembling steps, excluding overlapping compaction |
+| `compactionMs` | Matched compaction start-to-end wall time, including failed attempts; unfinished attempts are not yet counted |
 | `toolMs` | Summed matched `tool/call` → `tool/result` wall time |
 | `ttftMs` / `ttftSteps` | Summed first-token latency and the steps carrying it |
 | `decodeMs` / `decodeTokens` | Summed decode wall time and provider output tokens over usage-reporting steps |
@@ -76,11 +77,12 @@ The unit is a pure fold over committed session events: `step/end` is the counted
 
 ### Data model
 
-The fold state holds the eight totals plus in-flight boundaries: `lastTurn` (turn of the last counted `step/end`), `openStep` (the open step's boundary facts, closed by its `assistant/message`), and `pendingCalls` (tool dispatch times by callId). The wire view is a strict subset — the eight totals — so the persisted-cache state schema extends the view schema with the boundary fields.
+State version 2 rebuilds prior cached totals from the original log. The fold state holds nine totals plus in-flight boundaries: `lastTurn` (turn of the last counted `step/end`), `openStep` (the open step's boundary facts, closed by its `assistant/message`), and `pendingCalls` (tool dispatch times by callId). The wire view is a strict subset — the nine totals — so the persisted-cache state schema extends the view schema with the boundary fields.
 
 ### Fold rules
 
 - Uninteresting events return the same state reference; the registry's `Object.is` gate keeps the change feed quiet.
+- Compaction is paired by transaction id. Its overlap is removed from model, first-token, and decode intervals; standalone compaction contributes only its own duration.
 - First-token latency records the first non-empty delta chunk and survives an in-step `llm/retry`.
 - Decode time and tokens accrue only over steps carrying both a first token and a valid provider usage report; malformed usage is ignored like the window fold guards node usage.
 - Tool time pairs `tool/call` → `tool/result` by callId; unresolved calls are dropped at `turn/end` because results land within their turn, and a callId colliding with an `Object` prototype name reads as unmatched.

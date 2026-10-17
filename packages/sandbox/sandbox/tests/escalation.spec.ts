@@ -50,8 +50,8 @@ describe('the model-facing markers', () => {
   })
 
   it('the sandbox_permissions description names the family subject', () => {
-    expect(sandboxPermissionsDescription('command')).toBe('The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.')
-    expect(sandboxPermissionsDescription('operation')).toBe('The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.')
+    expect(sandboxPermissionsDescription('command')).toBe('The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.')
+    expect(sandboxPermissionsDescription('operation')).toBe('The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.')
   })
 
   it('the hint marker names the family subject', () => {
@@ -109,7 +109,7 @@ describe('approveEscalation', () => {
     await expect(approveEscalation(req({ requestedMode: 'read-only', effectiveMode: 'workspace-write' }), spy))
       .rejects.toThrow(/not strictly wider than this call's current "workspace-write" mode/)
     await expect(approveEscalation(req({ requestedMode: 'workspace-write', effectiveMode: 'danger-full-access' as never }), spy))
-      .rejects.toThrow(/not strictly wider/)
+      .resolves.toBe('danger-full-access')
     await expect(approveEscalation(req({ requestedMode: 'unknown-mode' }), spy))
       .rejects.toThrow(/not strictly wider/)
     expect(seen).toEqual([])

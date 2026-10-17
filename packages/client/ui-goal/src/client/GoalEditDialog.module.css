@@ -1,0 +1,57 @@
+/* Goal-edit dialog: the Modal card geometry widened for a multi-line objective,
+   matching the feedback dialog's card language. The doubled selector overrides
+   the Modal card geometry. */
+
+.dialog.dialog {
+  gap: 26px;
+  width: min(520px, 100%);
+  border-radius: 18px;
+}
+
+/* The objective field starts at roughly four lines and grows with its text
+   where supported, scrolling after the cap. A goal objective is free-form
+   prose, so this reads as a document rather than a chat input. */
+.objective {
+  display: block;
+  width: 100%;
+  min-height: 132px;
+  max-height: 320px;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  field-sizing: content;
+  resize: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.objective:focus {
+  outline: none;
+  border-color: var(--dsw-alias-border-l3);
+  box-shadow: 0 0 0 1px var(--dsw-alias-border-l3);
+}
+
+.error {
+  display: block;
+  margin-top: 10px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* The primary action keeps its natural width so the pair reads as a decision
+   rather than a full-width call to action. */
+.save {
+  min-width: 88px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .objective {
+    transition: none;
+  }
+}

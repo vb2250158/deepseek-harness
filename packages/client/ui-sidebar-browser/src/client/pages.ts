@@ -15,5 +15,5 @@ export function createIframePage(options: BrowserPageOptions): BrowserPage {
     remounted: () => { frame.reload() },
   })
   const frame = new IframeImpl(options, presentation)
-  return { frame, presentation }
+  return { frame, presentation, messageTarget: () => presentation.messageTarget() }
 }

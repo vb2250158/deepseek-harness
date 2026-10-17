@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { EventSourceParserStream } from 'eventsource-parser/stream'
 import type { PluginsEventParseResult } from '../events.ts'
 import { EVENTS_ROUTE, parsePluginsEventFrame } from '../events.ts'
+import { subscribeSharedEvents } from './shared-events.ts'
 
 export type { PluginsEventFrame } from '../events.ts'
 
@@ -80,8 +81,6 @@ export function apply(ctx: Context): void {
       })
       return () => { controller.abort() }
     }
-    const source = new EventSource(EVENTS_ROUTE)
-    source.addEventListener('message', (event: MessageEvent<string>) => { receive(event.data) })
-    return () => { source.close() }
+    return subscribeSharedEvents(receive, (error) => { ctx.logger.error(error) })
   }, 'client-hmr: event source')
 }

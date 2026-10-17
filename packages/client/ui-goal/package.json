@@ -46,7 +46,8 @@
   },
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "workspace:~"
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-client-store": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-api-remotes": "workspace:*",
@@ -66,7 +67,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "@deepseek-ai/dsh-session": "workspace:*",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:*"
+    "@deepseek-ai/dsh-typert-protocol": "workspace:*",
+    "@deepseek-ai/dsh-client-store": "workspace:*"
   },
   "files": [
     "locale/*.json",

@@ -22,7 +22,7 @@ import { makeTranslate, RemoteError, TestSessions } from '@deepseek-ai/dsh-clien
 import type { SessionFixture } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { GoalActivationSnapshot, GoalBarActions, GoalBarInjected } from '../src/client/slots.ts'
+import type { GoalActivationSnapshot, GoalBarActions, GoalBarInjected, GoalEditDialogInjected } from '../src/client/slots.ts'
 import { apply, inject } from '../src/client/index.ts'
 import { GoalDock } from '../src/client/GoalBar.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -137,6 +137,7 @@ async function bench(options: {
   ctx.slots.register({
     name: 'root', children: {
       'conversation.input.dock': { kind: 'list', scope: 'session' },
+      'conversation.input.overlay': { kind: 'list', scope: 'session' },
       'conversation.chat.node': { kind: 'keyed', scope: 'session' },
     },
   } as never, (() => null) as never)
@@ -162,6 +163,10 @@ async function bench(options: {
       }
     },
     chatEntry: () => ctx.slots.entries('conversation.chat.node')[0],
+    dialog: () => {
+      const entry = ctx.slots.entries('conversation.input.overlay')[0]
+      return (entry?.inject as ((sessionId: SessionId) => GoalEditDialogInjected) | undefined)?.(sid('s1'))
+    },
   }
 }
 
@@ -237,13 +242,19 @@ describe('ui-goal browser plugin', () => {
   })
 
   it('verbs read the CAS ref from the current projected value at call time', async () => {
-    const b = await bench({ projection: makeProjection(5) })
+    const b = await bench({ projection: makeProjection(3) })
     await b.fiber.await()
     const verbs = b.entry()!.inject!(sid('s1'))
     // The strip forwards the Remote value verbatim; `answered` is the fake's
     // reply, unrelated to the CAS ref the call carries.
     const answered = { id: 'g-1', revision: 3 }
-    expect(await verbs.onEdit('New objective')).toEqual({ ok: true, value: { ref: answered } })
+    verbs.onEdit('Original objective')
+    expect(b.calls).toEqual([])
+    const dialog = b.dialog()!
+    dialog.edit('New objective')
+    await b.sessions.setProjection('s1', 'goal', makeProjection(5))
+    await dialog.submit()
+    expect(dialog.hooks.goalEditDialog.getSnapshot()).toMatchObject({ open: false, failure: null })
     expect(await verbs.onPause()).toEqual({ ok: true, value: { ref: answered } })
     expect(await verbs.onResume()).toEqual({ ok: true, value: { ref: answered } })
     expect(await verbs.onClear()).toEqual({ ok: true, value: answered })
@@ -289,13 +300,15 @@ describe('ui-goal browser plugin', () => {
     const b = await bench({ projection: makeProjection() })
     await b.fiber.await()
     const verbs = b.entry()!.inject!(sid('s1'))
+    verbs.onEdit('x')
+    const dialog = b.dialog()!
     b.unmountGoals()
 
     // A missing namespace is an assembly fault, not a call outcome: this plugin
     // declares remote.goals in `inject`, so cordis disposes the dock entry along
     // with the namespace. Only a React closure that outlived that disposal can
     // reach these verbs, so no consumer-side guard renders it as an error.
-    for (const verb of [() => verbs.onEdit('x'), () => verbs.onPause(), () => verbs.onResume(), () => verbs.onClear()]) {
+    for (const verb of [() => dialog.submit(), () => verbs.onPause(), () => verbs.onResume(), () => verbs.onClear()]) {
       await expect(verb()).rejects.toThrow(TypeError)
     }
     expect(b.calls).toHaveLength(0)
@@ -306,7 +319,11 @@ describe('ui-goal browser plugin', () => {
       const b = await bench({ projection })
       await b.fiber.await()
       const verbs = b.entry()!.inject!(sid('s1'))
-      for (const result of [await verbs.onEdit('x'), await verbs.onPause(), await verbs.onResume(), await verbs.onClear()]) {
+      verbs.onEdit('x')
+      const dialog = b.dialog()!
+      await dialog.submit()
+      expect(dialog.hooks.goalEditDialog.getSnapshot()).toMatchObject({ open: true, draft: 'x', failure: 'no-current-goal' })
+      for (const result of [await verbs.onPause(), await verbs.onResume(), await verbs.onClear()]) {
         expect(result).toEqual({ ok: false, error: { code: 'no-current-goal', message: 'no current goal to mutate' } })
       }
       expect(b.calls).toHaveLength(0)
@@ -320,7 +337,11 @@ describe('ui-goal browser plugin', () => {
     })
     await b.fiber.await()
     const verbs = b.entry()!.inject!(sid('s1'))
-    expect(await verbs.onEdit('x')).toMatchObject({ ok: false, error: { code: 'gateway/internal', message: 'stale revision' } })
+    verbs.onEdit('x')
+    const dialog = b.dialog()!
+    await dialog.submit()
+    expect(dialog.hooks.goalEditDialog.getSnapshot()).toMatchObject({ open: true, draft: 'x', failure: 'gateway/internal' })
+    expect(await verbs.onPause()).toMatchObject({ ok: false, error: { code: 'gateway/internal', message: 'stale revision' } })
   })
 
   it('drops the dock entry when the plugin fiber unloads (HMR safety)', async () => {

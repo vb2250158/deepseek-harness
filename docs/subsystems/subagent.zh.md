@@ -488,6 +488,16 @@ async sendMessage( sender: Agent, targetId: SessionId, content: ContentBlock[], 
 interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void
 
 /**
+ * Resume the observed interrupted turn in a direct child without another message.
+ * @param parent - exact live direct parent authorizing recovery.
+ * @param childId - persisted direct-child identity.
+ * @param startSeq - observed interrupted turn start sequence.
+ * @param signal - cancellation before driver admission.
+ * @returns whether the original child started another turn.
+ */
+async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean>
+
+/**
  * Close subagent admission below exact live parent Agents, stop only their
  * visible descendant Activations synchronously, then await admitted scoped
  * materializations and release those forests child-first. The scoped cutoff

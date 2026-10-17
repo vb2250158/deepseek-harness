@@ -59,6 +59,8 @@ kind: "package-reference"
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+`compaction/pressure-policy` 为已接纳请求提供触发、压缩目标和尾部保留预算。策略保证 `0 <= retainTokens < targetTokens <= thresholdTokens` 并预留有效输出额度；容量取自本次绑定的请求准备结果。
+
 <details>
 <summary>实现细节——点击展开</summary>
 

@@ -63,8 +63,10 @@ it('retains required cwd in the first request after proactive compaction with op
     const events = agent.session.snapshotEvents()
     const summary = events.find(event => event.type === 'compaction/summary')
     const snapshots = events.filter(event => event.type === 'user/message' && event.data.source.kind === 'runtime-context')
-    expect(summary?.data.shadowedSeqs).toContain(snapshots[0]?.seq)
-    expect(snapshots).toHaveLength(2)
+    expect(summary).toBeDefined()
+    expect(snapshots).toHaveLength(1)
+    expect(summary?.seq).toBeGreaterThan(snapshots[0]?.seq ?? -1)
+    expect(summary?.data.shadowedSeqs).not.toContain(snapshots[0]?.seq)
     expect(adapter.summaries).toHaveLength(1)
     expect(adapter.conversation).toHaveLength(2)
     for (const request of adapter.conversation) {

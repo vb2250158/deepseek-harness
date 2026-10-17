@@ -312,6 +312,8 @@ class JsonlSessionPersistence extends SessionPersistence {
   private readonly coldLogMemo = new Map<SessionId, StoredLog>()
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
+  /** Validated headers for selected physical file revisions; directory enumeration evicts retired paths. */
+  private readonly generationHeaders = new Map<string, { revision: PersistenceRevision; metadata: GenerationHeader }>()
 
   constructor(ctx: Context, public config: Config, private readonly tracker: JsonlBackendTracker) {
     super(ctx)
@@ -504,6 +506,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal)}`)
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
+        modifiedAt: Number(identity.mtimeMs),
       }
     } catch (error: unknown) {
       options?.signal?.throwIfAborted()
@@ -526,9 +529,10 @@ class JsonlSessionPersistence extends SessionPersistence {
     // append lands mid-scan is then still in this snapshot (its artifact may
     // predate the scan), so create-to-list visibility never has a hole.
     const pending = [...this.tracker.pendingEntries()]
-    const artifacts = await this.listArtifacts(signal)
+    let generations: readonly ResolvedJsonlGeneration[] | undefined
+    const artifacts = await this.listArtifacts(signal, (selected) => { generations = selected })
     const corpusRevision = artifacts.some(artifact => artifact.sourceVersion < SESSION_FORMAT_VERSION)
-      ? await this.historicalCorpusRevision(signal) : undefined
+      ? await this.historicalCorpusRevision(signal, generations) : undefined
     const statted = settledValues(await settleLimited(this.listLimit, artifacts, async (artifact) => {
       signal?.throwIfAborted()
       try {
@@ -552,6 +556,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           ? SessionPersistenceRevision(`${fileRevision(identity)}:${corpusRevision}`)
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
+        modifiedAt: Number(identity.mtimeMs),
       })
     }
     for (const [id, entry] of pending) {
@@ -1116,8 +1121,8 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   /** Historical logical events depend on the corpus, including members with unreadable headers. */
-  private async historicalCorpusRevision(signal?: AbortSignal): Promise<string> {
-    const paths = (await this.listGenerations(signal)).map(source => source.sourcePath).sort()
+  private async historicalCorpusRevision(signal?: AbortSignal, generations?: readonly ResolvedJsonlGeneration[]): Promise<string> {
+    const paths = (generations ?? await this.listGenerations(signal)).map(source => source.sourcePath).sort()
     const entries = settledValues(await settleLimited(this.listLimit, paths, async (path) => {
       signal?.throwIfAborted()
       try {
@@ -1135,11 +1140,17 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   private async listArtifacts(
     signal?: AbortSignal,
+    onDiscovery?: (generations: readonly ResolvedJsonlGeneration[]) => void,
   ): Promise<Array<GenerationHeader & { path: string; sourceVersion: number }>> {
     signal?.throwIfAborted()
     await this.ensureRootEncoding()
     signal?.throwIfAborted()
     const generations = await this.listGenerations(signal)
+    onDiscovery?.(generations)
+    const paths = new Set(generations.map(selected => selected.sourcePath))
+    for (const path of this.generationHeaders.keys()) {
+      if (!paths.has(path)) this.generationHeaders.delete(path)
+    }
     const headers = await settleLimited(this.listLimit, generations, async (selected) => {
       signal?.throwIfAborted()
       try {
@@ -1173,6 +1184,22 @@ class JsonlSessionPersistence extends SessionPersistence {
     expectedId?: SessionId,
     signal?: AbortSignal,
   ): Promise<GenerationHeader | undefined> {
+    let revision: PersistenceRevision
+    try {
+      revision = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (!isENOENT(error)) throw error
+      this.generationHeaders.delete(selected.sourcePath)
+      return undefined
+    }
+    signal?.throwIfAborted()
+    const cached = this.generationHeaders.get(selected.sourcePath)
+    if (cached?.revision === revision) {
+      await this.assertStoredIdentity(selected.sourcePath, selected.sourceVersion, cached.metadata.header, expectedId, signal)
+      return { ...cached.metadata, header: { ...cached.metadata.header } }
+    }
+    this.generationHeaders.delete(selected.sourcePath)
     let first: string | undefined
     try {
       first = this.compression === 'zstd'
@@ -1220,10 +1247,20 @@ class JsonlSessionPersistence extends SessionPersistence {
       expectedId,
       signal,
     )
-    return {
-      header,
-      formatStatus: result.status,
+    const metadata: GenerationHeader = { header, formatStatus: result.status }
+    let after: PersistenceRevision
+    try {
+      after = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (!isENOENT(error)) throw error
+      return undefined
     }
+    signal?.throwIfAborted()
+    if (after === revision) {
+      this.generationHeaders.set(selected.sourcePath, { revision, metadata: { ...metadata, header: { ...header } } })
+    }
+    return metadata
   }
 
   /** Convert format-catalog string identities to current branded Session metadata. */

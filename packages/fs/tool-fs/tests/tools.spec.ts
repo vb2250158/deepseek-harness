@@ -919,7 +919,7 @@ describe('sandbox escalation API (write/edit)', () => {
   function fsSchema(ctx: Context, name: 'write' | 'edit') {
     const schema = ctx.tools.schemas().find(s => s.name === name)
     if (!schema) throw new Error(`${name} tool not registered`)
-    return schema as unknown as { parameters: { properties: Record<string, { enum?: string[] }> } }
+    return schema as unknown as { parameters: { properties: Record<string, { description?: string; enum?: string[] }> } }
   }
 
   it('fails load when a confining filesystem has no shared sandbox-policy resolver', async () => {
@@ -946,6 +946,7 @@ describe('sandbox escalation API (write/edit)', () => {
     for (const name of ['write', 'edit'] as const) {
       const props = fsSchema(ctx, name).parameters.properties
       expect(props['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
+      expect(props['sandbox_permissions']?.description).toContain('Never set it when the standing policy is `danger-full-access`')
       expect(props['justification']).toBeDefined()
     }
   })

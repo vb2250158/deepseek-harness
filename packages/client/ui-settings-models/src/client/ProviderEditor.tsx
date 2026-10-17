@@ -3,7 +3,9 @@
  * field is a single write-only **API key** input (the page never asks for an
  * environment-variable name — a typed key stores through `credentials/set`
  * under the profile's reference, deriving `<ROUTE>_API_KEY` when the profile
- * has none. The pi-ai profile records that derivation as `apiKeyEnv` only when
+ * has none. If that reference is supplied by the launch environment, a typed
+ * replacement uses a page-managed local reference so it can take effect. The
+ * pi-ai profile records the chosen reference as `apiKeyEnv` only when
  * a key is entered; a blank key materializes a reference-free profile for
  * provider-native authentication);
  * the collapsed 自定义设置 area carries the per-family extras (`baseURL` for
@@ -35,7 +37,7 @@ import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
 import { validateReasoningEfforts } from './ModelReasoningEfforts.tsx'
 import type { ReasoningEffortsFailure } from './ModelReasoningEfforts.tsx'
-import { deriveKeyRef, protocolChoices, reasoningLevelChoices } from './store.ts'
+import { deriveKeyRef, deriveLocalKeyRef, protocolChoices, reasoningLevelChoices } from './store.ts'
 import { protocolLabel } from './protocol-label.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
@@ -198,6 +200,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const disabled = props.readOnly || busy
   const layout = layoutOf(namespace.ns)
   const keyRef = refFor(schema, namespace, settingsPath, props.provider)
+  const keyState = props.credentialChecks?.[keyRef] ?? props.credential
   // The same schema read the create card makes, so the choices offered here
   // and there cannot drift apart: both come from the adapter's own `Config`.
   // Only the pi-ai layout has a per-route protocol for the read to find, and
@@ -267,11 +270,16 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
    */
   const applyOnce = async (): Promise<string | undefined> => {
     const ns = namespace.ns
-    // A pi-ai profile names the conventional reference only when this page is
-    // about to store a key. Otherwise the provider keeps its native auth path.
-    const next = layout === 'pi-ai' && stringAt(draft, 'apiKeyEnv') === undefined
-      && stringAt(fallback, 'apiKeyEnv') === undefined && keyValue.length > 0
-      ? schema.setPath(draft, ['apiKeyEnv'], keyRef)
+    // A launch-environment credential cannot be overwritten at its conventional
+    // reference, so a typed replacement moves the profile to a page-managed
+    // writable reference before storing the new value.
+    const credentialRef = props.credentialOnly !== true && keyState?.writable === false
+      ? deriveLocalKeyRef(props.provider)
+      : keyRef
+    const next = keyValue.length > 0 && (credentialRef !== keyRef
+      || (layout === 'pi-ai' && stringAt(draft, 'apiKeyEnv') === undefined
+        && stringAt(fallback, 'apiKeyEnv') === undefined))
+      ? schema.setPath(draft, ['apiKeyEnv'], credentialRef)
       : draft
     if (props.credentialOnly !== true) {
       // The same checker gates the submit button, so a card cannot reach this
@@ -306,7 +314,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       setDraft(next)
     }
     if (keyValue.length > 0) {
-      const stored = await operations.storeCredential(keyRef, keyValue)
+      const stored = await operations.storeCredential(credentialRef, keyValue)
       if (stored !== undefined) return stored
     }
     setKeyDraft('')
@@ -399,9 +407,11 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
     )
     // A provider with no native key authentication has no key for this field to store.
     const keylessNativeAuth = nativeAuth?.env.length === 0 && nativeAuth.oauth
-    const keyPlaceholder = keyHint === undefined || props.credentialRequired === true
-      ? t('keyPlaceholder')
-      : t(savedCredential ? 'keyPlaceholderSaved' : 'keyPlaceholderFallback').replace('{hint}', () => keyHint)
+    const keyPlaceholder = keyState?.writable === false
+      ? props.credentialOnly === true ? t('keyEnvLocked') : t('keyEnvOverride')
+      : keyHint === undefined || props.credentialRequired === true
+        ? t('keyPlaceholder')
+        : t(savedCredential ? 'keyPlaceholderSaved' : 'keyPlaceholderFallback').replace('{hint}', () => keyHint)
     /** What both family editors take: the rows, whose layer owns them, and the two writes. */
     const catalogProps = {
       models,
@@ -431,7 +441,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
               aria-describedby={credentialHint === undefined ? undefined : `${props.provider}-credential-hint`}
               required={props.credentialRequired === true}
               autoFocus={props.autoFocusCredential === true}
-              disabled={disabled}
+              disabled={disabled || (props.credentialOnly === true && keyState?.writable === false)}
               onChange={(event) => { setKeyDraft(event.target.value) }}
             />
             {credentialHint === undefined ? null : <p id={`${props.provider}-credential-hint`} className={styles[missingRefs ? 'notice' : detectedRef === undefined ? 'advancedHint' : 'savedNotice']}>{credentialHint}</p>}

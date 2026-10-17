@@ -52,7 +52,7 @@ function appendEmptyAssistantMessage(session: Session, turn: number, step: numbe
 /** The all-zero projection value plus overrides, for exact fold expectations. */
 function totals(overrides: Partial<SessionStatsProjection> = {}): SessionStatsProjection {
   return {
-    turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
+    turns: 0, steps: 0, llmMs: 0, toolMs: 0, compactionMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
     ...overrides,
   }
 }
@@ -196,6 +196,52 @@ describe('sessionStats wall-time fold (controlled timestamps)', () => {
       ...usage === undefined ? {} : { usage },
     })
   }
+
+  it('separates pressure compaction from model and first-token time in the same step', () => {
+    expect(fold([
+      at(1_000, 'step/start', { turn: 1, step: 1 }),
+      at(1_200, 'compaction/start', { compactionId: 'pressure' }),
+      at(3_200, 'compaction/end', { compactionId: 'pressure' }),
+      messageAt(4_800, [{ time:3_800,chunk:{ type:'text-delta',index:0,text:'answer' } }], { inputTokens:10,outputTokens:60 }),
+      at(4_900, 'step/end', { turn:1,step:1 }),
+    ])).toEqual(totals({ turns:1,steps:1,llmMs:1_800,compactionMs:2_000,ttftMs:800,ttftSteps:1,decodeMs:1_000,decodeTokens:60 }))
+  })
+
+  it('excludes retry compaction after the first token from decoding, including failed attempts', () => {
+    expect(fold([
+      at(1_000,'step/start',{ turn:1,step:1 }),
+      attemptAt(1_600,[{ time:1_500,chunk:{ type:'text-delta',index:0,text:'partial' } }]),
+      at(1_800,'compaction/start',{ compactionId:'retry' }),
+      at(2_800,'compaction/end',{ compactionId:'retry',error:[] }),
+      messageAt(4_800,[],{ inputTokens:10,outputTokens:60 }),
+      at(4_900,'step/end',{ turn:1,step:1 }),
+    ])).toEqual(totals({ turns:1,steps:1,llmMs:2_800,compactionMs:1_000,ttftMs:500,ttftSteps:1,decodeMs:2_300,decodeTokens:60 }))
+  })
+
+  it('counts idle compaction once without reducing a later model interval', () => {
+    expect(fold([
+      at(100,'compaction/start',{ compactionId:'manual' }),
+      at(1_100,'compaction/end',{ compactionId:'manual' }),
+      at(1_150,'compaction/end',{ compactionId:'manual' }),
+      at(1_200,'step/start',{ turn:1,step:1 }),messageAt(2_200),
+    ])).toEqual(totals({ compactionMs:1_000,llmMs:1_000 }))
+  })
+
+  it('leaves unmatched ends and unfinished attempts uncounted and clamps clock rollback', () => {
+    expect(fold([
+      at(100,'compaction/end',{ compactionId:'missing' }),
+      at(200,'compaction/start',{ compactionId:'unfinished' }),
+      at(400,'compaction/start',{ compactionId:'clock' }),
+      at(300,'compaction/end',{ compactionId:'clock' }),
+    ])).toEqual(totals())
+  })
+
+  it('rejects the prior cached state so registry replay rebuilds timing with version two', () => {
+    expect(sessionStatsProjectionDefinition.stateVersion).toBe(2)
+    const { pendingCompactions: _pending,compactionMs: _elapsed,...old } = sessionStatsProjectionDefinition.init()
+    expect(sessionStatsProjectionDefinition.stateSchema.safeParse(old).success).toBe(false)
+    expect(sessionStatsProjectionDefinition.stateSchema.safeParse(sessionStatsProjectionDefinition.init()).success).toBe(true)
+  })
 
   it('accrues model, first-token, and decode time from one fully recorded step', () => {
     expect(fold([

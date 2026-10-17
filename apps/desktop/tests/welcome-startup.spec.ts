@@ -143,7 +143,12 @@ vi.mock('../src/welcome-backend.ts', () => ({
 }))
 vi.mock('node:fs/promises', async importOriginal => ({
   ...await importOriginal<typeof import('node:fs/promises')>(),
-  readFile: vi.fn(async () => '{}'),
+  readFile: vi.fn(async (path: unknown) => {
+    if (String(path).endsWith('desktop-backend.json')) {
+      throw Object.assign(new Error('missing connection settings'), { code: 'ENOENT' })
+    }
+    return '{}'
+  }),
 }))
 vi.mock('../src/update-dialog.ts', () => ({ DesktopUpdateDialog: class {
   constructor(_preload: string, locale: () => DesktopLocale) { state.dialogLocale = locale }

@@ -462,6 +462,28 @@ describe('composer stats pills', () => {
     expect(dialog.textContent).toContain('Tokens per second (TPS)20 tok/s')
   })
 
+  it('shows whole-log compaction separately in the localized dialog over an empty window', () => {
+    const { source } = makeSource()
+    const projected = { tokenUsage:USAGE,sessionStats:sessionStats({ turns:1,steps:1,llmMs:1_800,compactionMs:2_000 }) }
+    const view = render(<StatsPills {...props(source,projected)} t={t} />)
+    fireEvent.click(view.getAllByRole('button')[0]!)
+    const dialog = view.getByRole('dialog')
+    expect(dialog.textContent).toContain('模型用时1.8秒')
+    expect(dialog.textContent).toContain('上下文压缩用时2秒')
+    expect(dialog.querySelector('[data-session-stats-details]')?.textContent).toMatchInlineSnapshot('"模型用时1.8秒上下文压缩用时2秒"')
+  })
+
+  it('opens a compaction-only dialog and does not invent a duration for an older projection', () => {
+    const { source } = makeSource()
+    const view = render(<StatsPills {...props(source,{ sessionStats:sessionStats({ compactionMs:2_000 }) })} />)
+    fireEvent.click(view.getByRole('button'))
+    expect(view.getByRole('dialog').textContent).toContain('Context compaction time2s')
+    view.unmount()
+    const old = render(<StatsPills {...props(source,{ sessionStats:sessionStats({ turns:1,steps:1,llmMs:3_800 }) })} />)
+    fireEvent.click(old.getByRole('button'))
+    expect(old.getByRole('dialog').textContent).not.toContain('Context compaction time')
+  })
+
   it('omits the cache-hit segment when nothing was billed on the input side', () => {
     const { source } = makeSource({ nodes: [assistant(1, 1)] })
     const view = render(<StatsPills {...props(source, {

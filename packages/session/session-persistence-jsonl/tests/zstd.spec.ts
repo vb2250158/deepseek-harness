@@ -570,6 +570,7 @@ describe('JsonlSessionPersistence: default Zstandard encoding', () => {
       await writeLog(ctx.sessionPersistence, header, oneTurnLog())
       await ctx.sessionPersistence.list()
       const path = logPath(root, header.cwd, header.id, compression)
+      await appendFile(path, compression === 'zstd' ? await compressZstdFrame('\n') : '\n')
       const probe = await open(path, 'r')
       const prototype = Object.getPrototypeOf(probe) as { read: HeaderRead }
       const originalRead = prototype.read

@@ -157,6 +157,11 @@ Read these pages when the package-level contract is not enough. They move from t
 
 -----
 
+<a id="original-session-recovery"></a>
+## Original Session recovery
+
+`ctx.subagents.continueInterrupted(parent, childId, startSeq, signal)` resumes the last interrupted turn under the original parent Agent's authority and the child Session lock, without delivering a message. Cold loading reuses the descriptor, model, and identity. One-shot children, incorrect parent relations, stale turns, and cancelled requests are rejected. On failure or a stale turn, a newly mounted Activation releases its handles and concurrency slot.
+
 <a id="model-experience"></a>
 ## Model Experience
 

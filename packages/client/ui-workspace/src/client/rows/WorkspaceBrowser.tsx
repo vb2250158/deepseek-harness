@@ -520,7 +520,7 @@ function SessionTree({
     // (WorkspaceBrowser.module.css).
       <div
         key={group.key}
-        style={{ '--dsh-workspace-indent': `${depth * 12}px` } as CSSProperties}
+        style={{ '--dsh-workspace-indent': `${depth * 12}px`, '--dsh-workspace-depth': depth } as CSSProperties}
         className={clsx(
           css.groupSection,
           workspaceMarker === 'before' && css.workspaceDropBefore,
@@ -554,36 +554,40 @@ function SessionTree({
             }
           }}
       >
-        <ProjectRowItem
-          newShortcut={shortcuts.find(row => row.id === 'session.new')}
-          group={group}
-          containsCurrentDescendant={currentAncestors.has(group.key)}
-          home={home}
-          t={t}
-          onToggle={() => {
-            if (group.expanded) dropWatermarks(key => withinGroup(key, group.key))
-            setGroupExpanded(group.key, !group.expanded)
-          }}
-          onCreate={() => {
-            if (group.workspaceId !== undefined) {
-              setGroupExpanded(group.key, true)
-              startSession(group.workspaceId)
-            }
-          }}
-          drag={workspaceDragProps}
-          actions={group.workspaceId === undefined
-            ? undefined
-            : {
-              rename: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
-              },
-              delete: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
-              },
+        <div className={css.groupHeader} data-dsh-workspace-header={group.key}>
+          <ProjectRowItem
+            newShortcut={shortcuts.find(row => row.id === 'session.new')}
+            group={group}
+            containsCurrentDescendant={currentAncestors.has(group.key)}
+            home={home}
+            t={t}
+            onToggle={() => {
+              if (group.expanded) {
+                dropWatermarks(key => withinGroup(key, group.key))
+              }
+              setGroupExpanded(group.key, !group.expanded)
             }}
-        />
+            onCreate={() => {
+              if (group.workspaceId !== undefined) {
+                setGroupExpanded(group.key, true)
+                startSession(group.workspaceId)
+              }
+            }}
+            drag={workspaceDragProps}
+            actions={group.workspaceId === undefined
+              ? undefined
+              : {
+                rename: () => {
+                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                  if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
+                },
+                delete: () => {
+                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                  if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
+                },
+              }}
+          />
+        </div>
         {childRows.length > 0 && (
           <div role="group">
             {childRows}

@@ -18,6 +18,17 @@ import type { BrowserPageFactory } from './browser/BrowserPage.ts'
 import { BROWSER_ID, browserDefinition } from './definition.tsx'
 import { en, zh } from './locales.ts'
 import { createBrowserStore } from './browser/store.ts'
+import { SidebarBrowserBridge } from './bridge.ts'
+
+export { SidebarBrowserBridge } from './bridge.ts'
+export type { BrowserMessageTarget } from './browser/BrowserPage.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Official Browser navigation and optional iframe messaging by Session and tab identity. */
+    sidebarBrowser: SidebarBrowserBridge
+  }
+}
 
 export type { BrowserBodyProps } from './view/BrowserBody.tsx'
 export type { BrowserControllerState, BrowserInjected, BrowserMountRequest } from './browser/BrowserController.ts'
@@ -65,6 +76,8 @@ export function apply(ctx: Context): void {
     }), 'ui-sidebar-browser: shortcut')
   })
   const store = createBrowserStore()
+  const bridge = new SidebarBrowserBridge()
+  ctx.provide('sidebarBrowser', bridge)
   const openTabs = ctx.sidebarRight.openTabs
   const carrier = (globalThis as typeof globalThis & {
     dshDesktop?: { readonly protocolVersion: number; readonly browser?: DesktopBrowserBridge }
@@ -74,8 +87,11 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.sidebarRightTabs.register({ ...browserDefinition(t), keepMounted: desktop !== undefined }), 'ui-sidebar-browser.type')
   const installFrames = (scope: Context, factory: (sessionId: BrowserBodyProps['sessionId']) => BrowserPageFactory): void => {
     const controllers = new Map<BrowserBodyProps['sessionId'], BrowserInjected>()
+    const releases = new Map<BrowserBodyProps['sessionId'], () => void>()
     scope.effect(() => async () => {
       const pending = [...controllers.values()].map(controller => controller.dispose())
+      for (const release of releases.values()) release()
+      releases.clear()
       controllers.clear()
       await Promise.all(pending)
     }, 'ui-sidebar-browser.frames')
@@ -90,6 +106,7 @@ export function apply(ctx: Context): void {
         const controller = createBrowserControllers(actions, factory(sessionId), tabId =>
           openTabs.getSnapshot().some(tab => tab.sessionId === sessionId && tab.tabId === tabId))
         controllers.set(sessionId, controller)
+        releases.set(sessionId, bridge.register(sessionId, controller))
         return controller
       },
     }, BrowserBody)), 'ui-sidebar-browser.body')

@@ -41,7 +41,8 @@ kind: "package-reference"
 |---|---|
 | `turns` | 含至少一个已关闭步的不同轮次；被拒绝或空轮不计 |
 | `steps` | 已关闭的步——完成、失败、取消与 max-tokens 的步全部计入 |
-| `llmMs` | 组装出消息的步的模型墙钟时间之和 |
+| `llmMs` | 组装出消息的步的模型墙钟时间之和，扣除与压缩重叠的部分 |
+| `compactionMs` | 匹配的压缩开始到结束墙钟时间，含失败尝试；未结束尝试暂不累计 |
 | `toolMs` | 匹配的 `tool/call` → `tool/result` 墙钟时间之和 |
 | `ttftMs` / `ttftSteps` | 首 token 延迟之和及其承载步数 |
 | `decodeMs` / `decodeTokens` | 上报用量的步的解码墙钟时间与提供方输出 token 之和 |
@@ -76,11 +77,12 @@ kind: "package-reference"
 
 ### 数据模型
 
-折叠状态保存八个总计外加进行中的边界：`lastTurn`（最近一次被计数 `step/end` 的轮次）、`openStep`（打开步的边界事实，由其 `assistant/message` 关闭）与 `pendingCalls`（按 callId 记录的工具分发时间）。wire 视图是严格子集——八个总计——因此持久缓存的状态 schema 以边界字段扩展视图 schema。
+折叠状态保存九个总计外加进行中的边界：`lastTurn`（最近一次被计数 `step/end` 的轮次）、`openStep`（打开步的边界事实，由其 `assistant/message` 关闭）与 `pendingCalls`（按 callId 记录的工具分发时间）。wire 视图是严格子集——九个总计——因此持久缓存的状态 schema 以边界字段扩展视图 schema。
 
 ### 折叠规则
 
 - 不相关事件返回同一状态引用；注册表的 `Object.is` 门禁保持变更流安静。
+- 压缩按事务身份配对；模型、首 token 和解码区间扣除重叠时段，独立压缩只贡献自身耗时。缓存状态版本升为 2，旧缓存从原日志重建。
 - 首 token 延迟记录首个非空 delta chunk，并在步内 `llm/retry` 后保留。
 - 解码时间与 token 只在同时携带首 token 与有效提供方用量报告的步上累加；与窗口折叠守卫节点用量一样忽略畸形用量。
 - 工具时间按 callId 配对 `tool/call` → `tool/result`；未解决的调用在 `turn/end` 时丢弃，因为结果总在其轮内落地，而撞上 `Object` 原型名的 callId 读作未匹配。

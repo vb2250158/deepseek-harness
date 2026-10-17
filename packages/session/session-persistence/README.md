@@ -33,13 +33,15 @@ The seam ships the [JSONL](../session-persistence-jsonl/README.md) backend: one 
 
 ### What the service provides
 
+Snapshots may include `modifiedAt`, the physical artifact modification time in Unix epoch milliseconds. It is absent for unmaterialized sessions or backends without cheap file metadata; it is neither an event timestamp nor a revision token.
+
 With a backend mounted, five service methods address stored sessions:
 
 ```text
 const handle = await ctx.sessionPersistence.create(header)     // store a new session, take write ownership
 const handle = await ctx.sessionPersistence.open(id, 'write')  // claim single-writer ownership of an existing session
 const reader = await ctx.sessionPersistence.open(id, 'read')   // observe without ownership
-const snap = await ctx.sessionPersistence.stat(id)             // header + revision (+ eventCount / sizeBytes) without a log read
+const snap = await ctx.sessionPersistence.stat(id)             // header + revision (+ eventCount / sizeBytes / modifiedAt) without a log read
 const all = await ctx.sessionPersistence.list()                // one snapshot per visible stored session
 await ctx.sessionPersistence.flush()                           // backend-wide durability barrier over every active write handle
 ```

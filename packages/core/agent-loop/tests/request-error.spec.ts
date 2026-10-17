@@ -3,14 +3,14 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import LlmRuntime, { createUserMessage, LlmError  } from '@deepseek-ai/dsh-llm'
-import type { LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, PreparedAdapterCall, LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
 
-async function harness(adapter: MockAdapter): Promise<Context> {
+async function harness(adapter: LlmAdapter): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
@@ -29,7 +29,53 @@ function fail(message: string, code: string): () => never {
   }
 }
 
+/** Fails preparation once after a second follow-up has reached the inbox. */
+class DelayedPreparationFailureAdapter extends LlmAdapter {
+  readonly preparationStarted = Promise.withResolvers<true>()
+  readonly failPreparation = Promise.withResolvers<true>()
+  readonly requests: GenerateOptions[] = []
+  private attempts = 0
+
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    this.attempts += 1
+    if (this.attempts === 1) {
+      this.preparationStarted.resolve(true)
+      await this.failPreparation.promise
+      throw new LlmError('model service is unavailable', 'SERVICE_UNAVAILABLE')
+    }
+    return super.prepareCall(provider, model, signal)
+  }
+
+  async * stream(options: GenerateOptions) {
+    this.requests.push(options)
+    yield* textResponse('recovered')
+  }
+}
+
 describe('agent/request-error', () => {
+  it('replays a follow-up queued while preparation fails', async () => {
+    const adapter = new DelayedPreparationFailureAdapter()
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('request-error-queued-follow-up'), { provider: 'mock', model: 'mock' })
+    const messages: string[] = []
+    const reasons: string[] = []
+    ctx.on('session/event', (session, event) => {
+      if (session !== agent.session) return
+      if (event.type === 'user/message' && event.data.content[0]?.type === 'text') messages.push(event.data.content[0].text)
+      if (event.type === 'turn/end') reasons.push(event.data.reason.kind)
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'first' }], source: { kind: 'user' } }))
+    await adapter.preparationStarted.promise
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'second' }], source: { kind: 'user' } }))
+    adapter.failPreparation.resolve(true)
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(messages).toEqual(['second'])
+    expect(reasons).toEqual(['error', 'completed'])
+  })
+
   it('does not offer middleware failures to request recovery', async () => {
     const adapter = new MockAdapter([textResponse('unused')])
     const ctx = await harness(adapter)

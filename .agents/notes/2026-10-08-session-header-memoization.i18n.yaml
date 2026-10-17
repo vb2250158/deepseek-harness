@@ -1,0 +1,7 @@
+# Bilingual-pair consistency record for 2026-10-08-session-header-memoization.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/2026-10-08-session-header-memoization.md
+/memoize-validated-jsonl-generation-headers:
+  en: 7c4708f239a79b12
+  zh: a1b8b5883506495a

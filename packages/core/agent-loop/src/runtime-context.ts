@@ -10,6 +10,7 @@ import type { ContextFormed, ContextSnapshotSection, Message } from '@deepseek-a
 import type { Session, SessionEvent, SessionSeq, SurfaceIntent, SystemMessage, UserMessage } from '@deepseek-ai/dsh-session'
 import { isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session'
 import type { Context } from '@deepseek-ai/cordis'
+import { joinContextSections } from '@deepseek-ai/dsh-system-prompt'
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'runtime-context': { kind: 'runtime-context' } & ContextFormed
@@ -24,6 +25,8 @@ function isOwned(message: UserMessage): boolean {
 }
 
 function textOf(message: Message): string | undefined {
+  if (message.source.kind === SOURCE && message.source.form === 'snapshot'
+    && message.source.sections !== undefined) return joinContextSections(message.source.sections)
   const [block] = message.content
   return message.content.length === 1 && block?.type === 'text' ? block.text : undefined
 }

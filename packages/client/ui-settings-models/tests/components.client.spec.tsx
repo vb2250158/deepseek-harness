@@ -1631,6 +1631,29 @@ describe('ModelsSection', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
+  it('allows replacing a launch-environment credential with a saved key', async () => {
+    const scripted = scriptedFace()
+    scripted.face.credentials.describe.mockImplementation((refs: string[]) => Promise.resolve(remoteOk(
+      Object.fromEntries(refs.map(ref => [ref, {
+        configured: ref === 'OPENAI_API_KEY', source: 'env', writable: false,
+      }])),
+    )))
+    const { mutate, set } = await mountFace(scripted)
+    fireEvent.click(screen.getByRole('button', { name: openaiCopy(en.editProvider) }))
+    const editorKey = await screen.findByLabelText<HTMLInputElement>(en.keyInput)
+    await waitFor(() => { expect(editorKey.placeholder).toBe(en.keyEnvOverride) })
+    expect(editorKey.disabled).toBe(false)
+
+    fireEvent.change(editorKey, { target: { value: 'sk-local' } })
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(set).toHaveBeenCalledWith('OPENAI_API_KEY_LOCAL', 'sk-local') })
+    expect(mutate).toHaveBeenCalledWith(
+      'llm-pi-ai',
+      [{ op: 'set', path: ['providers', 'openai', 'apiKeyEnv'], value: 'OPENAI_API_KEY_LOCAL' }],
+      0,
+    )
+  })
   it('keeps a failed credential describe silent and the input usable', async () => {
     const { face, set } = await mountSection()
     face.credentials.describe.mockImplementation(() => Promise.resolve(remoteFail('down', 'gateway/internal')))

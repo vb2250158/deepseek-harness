@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-session
 
+Non-surface events may explicitly use `append(type, data, { ignorable: true })` to retain auxiliary model-request source records without entering agent history. Unknown events follow the existing ignorable-event decoding behavior; the session format version is unchanged.
+
 English | [中文](README.zh.md)
 
 ## Summary

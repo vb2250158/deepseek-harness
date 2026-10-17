@@ -93,7 +93,7 @@ export function escalationHintMarker(subject: string): string {
  * @returns the parameter description, exactly as the model sees it.
  */
 export function sandboxPermissionsDescription(subject: string): string {
-  return `The narrowest wider sandbox mode for a one-shot retry of the exact ${subject} the sandbox just denied; the retry asks the user for approval.`
+  return `The narrowest wider sandbox mode for a one-shot retry of the exact ${subject} the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is \`danger-full-access\`: no wider DSH file policy exists.`
 }
 
 /**
@@ -170,7 +170,7 @@ export interface EscalationRequest {
  */
 export async function approveEscalation<A, C>(request: EscalationRequest, approval: EscalationApproval<A, C>): Promise<SandboxMode> {
   const { requestedMode: mode, effectiveMode, justification, subject } = request
-  if (mode === effectiveMode) return effectiveMode
+  if (mode === effectiveMode || effectiveMode === 'danger-full-access') return effectiveMode
   // Strict widening is an EXECUTION check against the call's effective mode —
   // deliberately not a schema constraint (the enum is the closed target
   // vocabulary; the effective mode is per-call truth).

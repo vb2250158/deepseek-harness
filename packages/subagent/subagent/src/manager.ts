@@ -1332,14 +1332,20 @@ export class SubagentManager {
     content: ContentBlock[],
     options: ChildDeliveryOptions,
   ): Promise<MessageId> {
+    const activation = await this.materializeChild(parent, childId, options.signal)
+    return await this.submitMaterialized(activation, content, options, parent)
+  }
+
+  /** Reconstruct one local child from its persisted continuation descriptor. */
+  private async materializeChild(parent: Agent, childId: SessionId, signal: AbortSignal): Promise<Activation> {
     const query = this.requireSessionQuery()
     let observation: SessionObservation
     try {
       observation = await query.observeSession(childId, {
-        signal: options.signal,
+        signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
     using source = observation
@@ -1373,14 +1379,54 @@ export class SubagentManager {
             : {},
         },
         composition: { agentPreset: agentPreset ?? undefined, persona: descriptor.persona, toolFilter: descriptor.toolFilter },
-        signal: options.signal,
+        signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       if (error instanceof SubagentError) throw error
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
-    return await this.submitMaterialized(activation, content, options, parent)
+    return activation
+  }
+
+  /**
+   * Resume an interrupted direct child without admitting another message.
+   * @param parent - exact live direct parent authorizing recovery.
+   * @param childId - persisted direct-child identity.
+   * @param startSeq - observed interrupted turn start sequence.
+   * @param signal - cancellation before driver admission.
+   * @returns whether the original child started another turn.
+   */
+  async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean> {
+    if (this.ctx.agents.get(parent.id) !== parent) throw new SubagentError('Parent is not live', 'UNAUTHORIZED')
+    this.assertAdmitting(parent)
+    const releaseHold = this.holdOwnership(parent, childId)
+    try {
+      return await this.locks.run(childId, async () => {
+        signal.throwIfAborted()
+        const existing = this.resident.get(childId)
+        const activation = existing ?? await this.materializeChild(parent, childId, signal)
+        try {
+          this.assertAdmitting(parent)
+          this.authorizeLineage(parent, childId, activation.parent.id)
+          signal.throwIfAborted()
+          if (activation.closing !== undefined) throw new SubagentError('Child is closing', 'ACTIVATION_CLOSING')
+          const local = requireLocalActivation(activation)
+          if (local.structured?.acceptsInput() === false) throw new SubagentError('Child input is closed', 'INPUT_CLOSED')
+          const agent = local.handle.agent
+          if (agent.continueInterrupted === undefined) throw new SubagentError('Driver does not support prompt-free continuation', 'NOT_RESUMABLE')
+          const started = agent.continueInterrupted(startSeq)
+          if (started) this.announce(activation)
+          else if (existing === undefined) await this.dispose(activation)
+          return started
+        } catch (error: unknown) {
+          if (existing === undefined) await this.dispose(activation)
+          throw error
+        }
+      })
+    } finally {
+      releaseHold()
+    }
   }
 
   /** Admit a materialized child, commit its creation fact, and release it on failure. */

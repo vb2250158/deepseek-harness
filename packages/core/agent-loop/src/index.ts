@@ -337,8 +337,16 @@ function validateConfiguredAgents(agents: Config['agents']): void {
   }
 }
 
+type RequestContextVersion = 1
+type RequestContextFinalizeVersion = 1
+
 /** Concrete agent factory and driver service. */
 export class AgentLoop extends Service implements AgentFactory {
+  /** Version of the complete-request context reconciliation event supported by this driver. */
+  readonly requestContextVersion: RequestContextVersion = 1
+  /** Post-compaction input-finalization extension version. */
+  readonly requestContextFinalizeVersion: RequestContextFinalizeVersion = 1
+
   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']
 
   /** Runtime schema for declarative agents. */

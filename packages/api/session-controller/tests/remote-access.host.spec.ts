@@ -143,6 +143,20 @@ describe('Session Controller access', () => {
     expect(owner.items.map(item => item.sessionId).sort()).toEqual([PRIVATE, SHARED].sort())
   })
 
+  it.each([{ paged: true }, { cursor: 'test-page:1' }])('filters paged Session lists with current permissions for %j', async (request) => {
+    const { ctx, as } = await harness()
+    await ctx.plugin(TypertGatewayService)
+    const held = guestPolicy(ctx, LIST_CALLS, READS_SHARED)
+    const owner = await as(OWNER, 'list').sessionController.list({}, new AbortController().signal)
+    const page = vi.spyOn(ApiSessionList.prototype, 'page').mockResolvedValue({ ...owner, nextCursor: 'test-page:2' })
+    const read = () => guestCall(ctx, 'list', { _request: request })
+    await expect(read()).resolves.toEqual({ items: owner.items.filter(item => item.sessionId === SHARED), nextCursor: 'test-page:2' })
+    expect(page.mock.calls[0]?.[0]).toEqual(request)
+    held.splice(0, held.length, LIST_CALLS)
+    await expect(read()).resolves.toEqual({ items: [], nextCursor: 'test-page:2' })
+    page.mockRestore()
+  })
+
   it('returns a non-owner only the session/search hits whose Session a Session role admits', async () => {
     const { ctx, as } = await harness()
     await ctx.plugin(TypertGatewayService)
