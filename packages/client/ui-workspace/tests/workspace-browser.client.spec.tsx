@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
+import type { GlobalStandardProps, RenderOpts } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { allowAllAccess, bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -99,10 +99,10 @@ function dragData(): Pick<DataTransfer, 'effectAllowed' | 'dropEffect' | 'setDat
 // The default child stub: an open directory flow shows its marker; the two
 // Session row lists stay empty (their entries have their own spec). A stub
 // satisfies the generic render signature only with an erased owner type.
-const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) =>
+const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object, opts?: RenderOpts) =>
   name === 'sidebar.workspaces.directoryFlow' && (owner as DirectoryFlowOwnerProps).open
     ? <div data-testid="directory-flow" />
-    : null
+    : opts?.fallback ?? null
 
 function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
   const controls = createWorkspaceShortcutControls()
@@ -729,9 +729,9 @@ describe('WorkspaceBrowser', () => {
 
   it('renders both Session row lists for every visible row in the grouped tree and the flat list', () => {
     const rendered = vi.fn()
-    const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) => {
+    const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object, opts?: RenderOpts) => {
       rendered(name, owner)
-      return null
+      return opts?.fallback ?? null
     }
     const b = mount({
       useSessions: hook(sessionState([summary('alpha-s', 1)])),
