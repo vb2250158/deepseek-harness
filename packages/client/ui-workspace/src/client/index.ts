@@ -271,6 +271,8 @@ export function apply(ctx: Context): void {
         'sidebar.workspaces.session.row.action': { kind: 'list', scope: 'root' },
         'sidebar.session.row.leading': { kind: 'list', scope: 'root' },
         'sidebar.session.row.hover': { kind: 'list', scope: 'root' },
+        'sidebar.session.row.badges': { kind: 'list', scope: 'root' },
+        'sidebar.session.row.title': { kind: 'single', scope: 'root' },
       },
       store: viewStore,
       inject: browserInjected,

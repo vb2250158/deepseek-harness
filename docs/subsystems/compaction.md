@@ -255,6 +255,28 @@ Source: [`packages/compaction/compaction-tool-result-pruner/src/index.ts`](../..
 
 ### `compaction/*` events
 
+<a id="compactionpressure-policy--waterfall"></a>
+
+#### `compaction/pressure-policy` — waterfall
+
+Resolve pressure budgets for the complete admitted request. Implementations preserve `0 <= retainTokens < targetTokens <= thresholdTokens` and keep the threshold below capacity minus reserved completion tokens.
+
+```ts cordis-catalog
+/**
+ * Resolve pressure budgets for the complete admitted request. Implementations
+ * preserve `0 <= retainTokens < targetTokens <= thresholdTokens` and keep the
+ * threshold below capacity minus reserved completion tokens.
+ * @param payload.agent - owner of the priced session.
+ * @param payload.contextWindow - capacity bound to the admitted request.
+ * @param payload.reservedCompletionTokens - effective output reservation.
+ * @param next - resolve the backend's configured budgets.
+ * @mode waterfall
+ */
+'compaction/pressure-policy'(payload: { agent: CompactionAgentContext; contextWindow: number; reservedCompletionTokens: number }, next: () => CompactionPressurePolicy): CompactionPressurePolicy
+```
+
+Source: [`packages/compaction/compaction/src/index.ts`](../../packages/compaction/compaction/src/index.ts)
+
 <a id="compactionsummary-error--waterfall"></a>
 
 #### `compaction/summary-error` — waterfall

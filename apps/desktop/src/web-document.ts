@@ -70,11 +70,12 @@ const PLUGIN_BUNDLE_PATH = /^\/plugins\//u
  * under a revision that changes every launch, so Chromium's disk cache would only accumulate bundles
  * no later launch can reuse.
  * @param request - Request from the application origin.
- * @param host - Owned Host URL.
+ * @param host - Selected Host URL.
  * @param cookie - Host-issued authentication cookie.
+ * @param bootDocument - Add the native boot gate to a shared Web entry document.
  * @returns Host response without connection-level headers.
  */
-export async function forwardWebRequest(request: Request, host: string, cookie: string): Promise<Response> {
+export async function forwardWebRequest(request: Request, host: string, cookie: string, bootDocument = false): Promise<Response> {
   const source = new URL(request.url)
   const origin = request.headers.get('origin')
   if (origin !== null && origin !== 'dsh-app://app') return new Response(null, { status: 403 })
@@ -89,5 +90,14 @@ export async function forwardWebRequest(request: Request, host: string, cookie: 
   const outgoing = new Headers(response.headers)
   for (const name of WITHHELD_RESPONSE_HEADERS) outgoing.delete(name)
   if (PLUGIN_BUNDLE_PATH.test(source.pathname)) outgoing.set('cache-control', 'no-store')
+  if (bootDocument && response.ok && request.method === 'GET'
+    && ['/', '/index.html'].includes(source.pathname) && outgoing.get('content-type')?.includes('text/html')) {
+    outgoing.delete('etag')
+    outgoing.set('cache-control', 'no-store')
+    // Served Web scripts can release their own boot gate before native boot IPC settles.
+    const transport = JSON.stringify({ ownsHost: true, streamBaseUrl: new URL(host).origin })
+    const bootstrap = BOOT + `<script>globalThis.__DSH_TRANSPORT__ = ${transport}</script>`
+    return new Response((await response.text()).replace('<head>', '<head>' + bootstrap), { status: response.status, headers: outgoing })
+  }
   return new Response(response.body, { status: response.status, headers: outgoing })
 }

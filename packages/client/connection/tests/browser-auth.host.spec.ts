@@ -3,7 +3,7 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
-import { BrowserAuth } from '../src/browser-auth.ts'
+import { BrowserAuth, createBrowserSessionCookie } from '../src/browser-auth.ts'
 import type { ConnectionIndexRequest, ConnectionIndexResponse } from '../src/rpc.ts'
 import { RecordCredentials } from './browser-credentials.ts'
 
@@ -58,6 +58,18 @@ function createAuth(
 ): Promise<BrowserAuth> {
   return BrowserAuth.create(processOwner, credentials(store), maxAgeDays)
 }
+
+it('accepts a native-carrier cookie only for the signing record authority and unexpired lifetime', async () => {
+  const store = new RecordCredentials()
+  const auth = await createAuth(store)
+  const cookie = createBrowserSessionCookie(store.record, '127.0.0.1:3080', 1000)
+  expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie }))).toBe(true)
+  expect(auth.isAuthenticated(request('/', '127.0.0.1:4190', { cookie }))).toBe(false)
+  expect(() => createBrowserSessionCookie(undefined, '127.0.0.1:3080', 1000)).toThrow('credential is missing')
+  expect(() => createBrowserSessionCookie(store.record, '127.0.0.1:3080', 0)).toThrow('invalid browser-cookie lifetime')
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 1001)
+  expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie }))).toBe(false)
+})
 
 function request(url: string, authority = '127.0.0.1:3080', init?: {
   cookie?: string

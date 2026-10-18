@@ -87,7 +87,7 @@ function normalizeReleasedV0Event(
   sessionId: string,
   state: LegacyNormalizationState,
 ): SessionFormatEvent {
-  const named = normalizeLegacyCompactionType(event)
+  const named = normalizeLegacyCompactionType(normalizeLegacyConfiguration(event))
   assertSupportedLegacyType(named, sessionId)
   const start = normalizeLegacyTurnStart(named, sessionId)
   const end = normalizeLegacyTurnEnd(start, sessionId)
@@ -100,6 +100,22 @@ function normalizeReleasedV0Event(
   const messageId = eventMessageId(message)
   if (messageId !== undefined) state.messageIds.set(message.seq, messageId)
   return message
+}
+
+function normalizeLegacyConfiguration(event: SessionFormatEvent): SessionFormatEvent {
+  if (event.type !== 'permission/preset' && event.type !== 'subagent/descriptor') return event
+  const data = releasedV0Record(event.data, `${event.type} ${event.seq} data`)
+  if (event.type === 'permission/preset' && data['origin'] === 'default') {
+    assertReleasedV0Keys(data, ['preset', 'origin'], [], `${event.type} ${event.seq} data`)
+    return { ...event, data: { preset: data['preset'] as SessionFormatJsonValue } }
+  }
+  if (event.type === 'subagent/descriptor' && data['version'] === 2) {
+    assertReleasedV0Keys(data, ['version', 'mode', 'provider'],
+      ['label', 'agentProvider', 'agentModel', 'persona', 'toolFilter'], `${event.type} ${event.seq} data`)
+    // Descriptor v3 adds only optional reasoning effort; an absent choice stays absent.
+    return { ...event, data: { ...data, version: 3 } }
+  }
+  return event
 }
 
 function normalizeLegacyCompactionType(event: SessionFormatEvent): SessionFormatEvent {

@@ -7,7 +7,7 @@ import { liveConfig } from '../../../settings/settings/tests/live-config.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
@@ -1079,6 +1079,36 @@ describe('direct-child Queue residency routing', () => {
     expect(userTexts(loaded.events)).toEqual(['child task', 'continue please'])
     // One descriptor only: cold resume never re-seeds it.
     expect(loaded.events.filter(event => event.type === 'subagent/descriptor')).toHaveLength(1)
+  })
+
+  it('continues the interrupted child under its original parent without delivering a message', async () => {
+    const { ctx, parent, adapter } = await setup([textResponse('first'), textResponse('parent notice'), textResponse('resumed'), textResponse('parent notice')])
+    try {
+      const started = await ctx.subagents.startContinuable(startSpec(parent))
+      await waitNoActivation(ctx, started.childId)
+      await parent.whenIdle()
+      const stored = await ctx.sessionPersistence.open(started.childId, 'write')
+      const prior = await stored.read()
+      const startSeq = prior.events.length
+      await stored.append([{ type: 'turn/start', seq: SessionSeq(startSeq), time: Date.now(), data: { turn: 2 } }])
+      await stored.close()
+      expect(await ctx.subagents.continueInterrupted(parent, started.childId, startSeq, testSignal)).toBe(true)
+      await waitNoActivation(ctx, started.childId)
+      await parent.whenIdle()
+      const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+      expect(userTexts(loaded.events)).toEqual(['child task'])
+      expect(loaded.events.filter(event => event.type === 'subagent/descriptor')).toHaveLength(1)
+      expect(loaded.events.filter(event => event.type === 'turn/start').map(event => event.data.turn)).toEqual([1, 2, 3])
+      expect(JSON.stringify(loaded.events.filter(event => event.type === 'assistant/message'))).toContain('resumed')
+      expect(adapter.requests).toHaveLength(4)
+      expect(await ctx.subagents.continueInterrupted(parent, started.childId, startSeq, testSignal)).toBe(false)
+      await waitNoActivation(ctx, started.childId)
+      await expect(ctx.subagents.continueInterrupted({ ...parent } as Agent, started.childId, startSeq, testSignal))
+        .rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      const cancelled = AbortSignal.abort(new Error('cancel recovery'))
+      await expect(ctx.subagents.continueInterrupted(parent, started.childId, startSeq, cancelled)).rejects.toThrow('cancel recovery')
+      expect(adapter.requests).toHaveLength(4)
+    } finally { await ctx.fiber.dispose() }
   })
 
   it('cold-resumes after the initial provider unregisters', async () => {

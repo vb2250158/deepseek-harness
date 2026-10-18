@@ -482,7 +482,8 @@ export class UiSession extends Service {
 
   private observeRunning(sessionId: SessionId, running: boolean): void {
     const previous = this.running.get(sessionId)
-    const beforeBaseline = this.sessions.list.getSnapshot().phase === 'pending'
+    const catalog = this.sessions.list.getSnapshot()
+    const beforeBaseline = catalog.phase === 'pending' || catalog.complete === false
     this.running.set(sessionId, running)
     if (running) this.completionUnread.delete(sessionId)
     else if ((previous === true || (previous === undefined && beforeBaseline))

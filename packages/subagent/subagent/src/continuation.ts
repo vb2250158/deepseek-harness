@@ -409,14 +409,20 @@ export class SubagentContinuationManager {
     content: ContentBlock[],
     options: ChildDeliveryOptions,
   ): Promise<MessageId> {
+    const activation = await this.materializeChild(parent, childId, options.signal)
+    return await this.submitMaterialized(activation, content, options, parent)
+  }
+
+  /** 从原描述符重建子 Agent，消息投递与中断恢复共用同一加载入口。 */
+  private async materializeChild(parent: Agent, childId: SessionId, signal: AbortSignal): Promise<Activation> {
     const query = this.requireSessionQuery()
     let observation: SessionObservation
     try {
       observation = await query.observeSession(childId, {
-        signal: options.signal,
+        signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
     using source = observation
@@ -445,14 +451,52 @@ export class SubagentContinuationManager {
             : {},
         },
         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
-        signal: options.signal,
+        signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       if (error instanceof SubagentError) throw error
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
-    return await this.submitMaterialized(activation, content, options, parent)
+    return activation
+  }
+
+  /**
+   * 在原父关系及子锁下恢复最后中断轮次；新挂载失败时释放句柄。
+   * @param parent - 授权恢复的当前存活父 Agent。
+   * @param childId - 已持久化的直接子会话身份。
+   * @param startSeq - 原中断轮次的 turn/start 序号。
+   * @param signal - 驱动启动前的取消信号。
+   * @returns 是否启动了原子会话的新轮次。
+   */
+  async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean> {
+    if (this.ctx.agents.get(parent.id) !== parent) throw new SubagentError('Parent is not live', 'UNAUTHORIZED')
+    this.activations.assertAdmitting(parent)
+    const releaseHold = this.activations.holdOwnership(parent, childId)
+    try {
+      return await this.activations.locks.run(childId, async () => {
+        signal.throwIfAborted()
+        const existing = this.activations.get(childId)
+        const activation = existing ?? await this.materializeChild(parent, childId, signal)
+        try {
+          this.activations.assertAdmitting(parent)
+          this.activations.authorizeLineage(parent, childId, activation.parentSession)
+          signal.throwIfAborted()
+          if (activation.inbox.closing !== undefined) throw new SubagentError('Child is closing', 'ACTIVATION_CLOSING')
+          const agent = activation.handle.agent
+          if (agent.continueInterrupted === undefined) throw new SubagentError('Driver does not support prompt-free continuation', 'NOT_RESUMABLE')
+          const started = agent.continueInterrupted(startSeq)
+          if (started) activation.announced = true
+          else if (existing === undefined) await this.activations.dispose(activation)
+          return started
+        } catch (error: unknown) {
+          if (existing === undefined) await this.activations.dispose(activation)
+          throw error
+        }
+      })
+    } finally {
+      releaseHold()
+    }
   }
 
   /** Admit a materialized child, commit its creation fact, and release it on failure. */

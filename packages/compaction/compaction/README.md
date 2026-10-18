@@ -59,6 +59,8 @@ Messages a backend wrote as summaries carry a stable marker, so any consumer can
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+`compaction/pressure-policy` resolves trigger, target, and retained-tail token budgets for one admitted request. Policy providers preserve `0 <= retainTokens < targetTokens <= thresholdTokens` and reserve the effective output budget. The complete request capacity comes from its bound preparation.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

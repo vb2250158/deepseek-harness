@@ -1,6 +1,7 @@
 /** Cold-safe Session list and search projection. */
 
 import { performance } from 'node:perf_hooks'
+import { randomUUID } from 'node:crypto'
 import { scheduler } from 'node:timers/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
@@ -18,7 +19,21 @@ import {
 import type {
   SessionListMetadata, SessionProjectionHints, SessionProjectionValues, SessionSearchItem,
   SessionSearchValue, SessionSummary,
+  SessionListRequest, SessionListValue,
 } from './types.ts'
+
+/** Resolved deployment limits for process-local list continuations. */
+interface ListPagePolicy {
+  readonly listPageSize: number
+  readonly listInitialPerWorkspace: number
+  readonly listSnapshotLimit: number
+  readonly listSnapshotTtlMs: number
+}
+
+interface ListCatalog {
+  readonly headers: readonly SessionHeader[]
+  readonly expiresAt: number
+}
 
 const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
@@ -76,11 +91,13 @@ export function truncateUnicodeCodePoints(value: string, maximum: number): strin
 
 /** Owns list projection registration, bounded cold summaries, and authorized search. */
 export class ApiSessionList {
+  private readonly catalogs = new Map<string, ListCatalog>()
   /**
    * @param ctx - Host context carrying Session, query, persistence, and projection services.
    * @param workSliceMs - Resolved positive integral list-work budget in milliseconds.
    */
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
+    ctx.effect(() => () => { this.catalogs.clear() }, 'api-session.listCatalogs')
     ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
       stateSchema: sessionListMetadataSchema,
@@ -102,6 +119,101 @@ export class ApiSessionList {
         stateVersion: 1,
       })
     })
+  }
+
+  /**
+   * Read recent workspace rows first, then bounded historical pages from the same ordering.
+   * @param request - opt-in first page or process-local continuation cursor.
+   * @param policy - resolved page size and snapshot retention limits.
+   * @param signal - cancellation of catalog reads and page projection.
+   * @returns one page and an optional continuation; cold Agents remain inactive.
+   */
+  async page(request: SessionListRequest, policy: ListPagePolicy, signal?: AbortSignal): Promise<SessionListValue> {
+    signal?.throwIfAborted()
+    const now = performance.now()
+    for (const [key, catalog] of this.catalogs) {
+      if (catalog.expiresAt <= now) this.catalogs.delete(key)
+    }
+    let token: string
+    let catalog: ListCatalog
+    let offset: number
+    if (request.cursor !== undefined) {
+      const parts = request.cursor.split(':')
+      token = parts[0] ?? ''
+      offset = Number(parts[1])
+      const existing = this.catalogs.get(token)
+      if (parts.length !== 2 || !/^[0-9]+$/.test(parts[1] ?? '')
+        || !Number.isSafeInteger(offset) || offset < 0 || existing === undefined
+        || offset >= existing.headers.length) {
+        throw new RemoteError('gateway/bad-request', 'session list cursor expired or invalid', {})
+      }
+      catalog = existing
+    } else {
+      const records = await this.ctx.sessionQuery.listSessions(signal)
+      const ranked: Array<{ header: SessionHeader; updatedAt: number; priority: boolean }> = []
+      let deadline = performance.now() + this.workSliceMs
+      for (const { header } of records) {
+        signal?.throwIfAborted()
+        const live = this.ctx.sessions.get(header.id)
+        if (live === undefined && header.cwd === undefined) continue
+        const block = live === undefined
+          ? this.ctx.get('sessionProjectionCache')?.cachedSnapshot(header, ['sessionListMetadata'])
+          : this.ctx.sessionProjections.cachedSnapshot(live, ['sessionListMetadata'])
+        const metadata = block?.values.sessionListMetadata
+        ranked.push({
+          header, updatedAt: updatedAt(header, metadata),
+          priority: this.ctx.agents.get(header.id)?.status === 'running' || metadata?.blank === true,
+        })
+        if (performance.now() >= deadline) {
+          await scheduler.yield()
+          deadline = performance.now() + this.workSliceMs
+        }
+      }
+      ranked.sort((left, right) => right.updatedAt - left.updatedAt
+        || (left.header.id < right.header.id ? -1 : left.header.id > right.header.id ? 1 : 0))
+      const initial: SessionHeader[] = []
+      const older: SessionHeader[] = []
+      const workspaceCounts = new Map<string | undefined, number>()
+      for (const row of ranked) {
+        const count = workspaceCounts.get(row.header.cwd) ?? 0
+        if (row.priority || (row.header.origin !== 'subagent' && count < policy.listInitialPerWorkspace)) {
+          initial.push(row.header)
+          if (!row.priority) workspaceCounts.set(row.header.cwd, count + 1)
+        } else older.push(row.header)
+      }
+      signal?.throwIfAborted()
+      token = randomUUID()
+      catalog = { headers: [...initial, ...older], expiresAt: performance.now() + policy.listSnapshotTtlMs }
+      offset = 0
+      while (this.catalogs.size >= policy.listSnapshotLimit) {
+        const first = this.catalogs.keys().next().value
+        if (first === undefined) break
+        this.catalogs.delete(first)
+      }
+      if (older.length > 0) this.catalogs.set(token, catalog)
+      return this.projectPage(catalog, token, offset, initial.length, signal)
+    }
+    return this.projectPage(catalog, token, offset, policy.listPageSize, signal)
+  }
+
+  private async projectPage(
+    catalog: ListCatalog, token: string, offset: number, limit: number, signal?: AbortSignal,
+  ): Promise<SessionListValue> {
+    const selected = catalog.headers.slice(offset, offset + limit)
+    const items: SessionSummary[] = []
+    let deadline = performance.now() + this.workSliceMs
+    for (const header of selected) {
+      signal?.throwIfAborted()
+      const live = this.ctx.sessions.get(header.id)
+      items.push(live === undefined ? this.summarizeCold(header) : this.summaryFor(live))
+      if (performance.now() >= deadline) {
+        await scheduler.yield()
+        deadline = performance.now() + this.workSliceMs
+      }
+    }
+    signal?.throwIfAborted()
+    const next = offset + selected.length
+    return { items, ...(next < catalog.headers.length ? { nextCursor: `${token}:${String(next)}` } : {}) }
   }
 
   /**

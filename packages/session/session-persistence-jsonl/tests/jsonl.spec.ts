@@ -1,7 +1,8 @@
 import { MessageId, createMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises'
+import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink, utimes } from 'node:fs/promises'
+import * as fileSystem from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { scheduler } from 'node:timers/promises'
@@ -741,6 +742,53 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     } finally {
       await handle.close()
     }
+  })
+
+  it('reports artifact modification times without reading session bodies', async () => {
+    const header = meta('modified-metadata', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    await utimes(path, 1000, 1000)
+    const read = vi.spyOn(fileSystem, 'readFile')
+    expect((await ctx.sessionPersistence.stat(header.id))?.modifiedAt).toBe(1000000)
+    expect((await ctx.sessionPersistence.list())[0]?.modifiedAt).toBe(1000000)
+    await utimes(path, 2000, 2000)
+    expect((await ctx.sessionPersistence.list())[0]?.modifiedAt).toBe(2000000)
+    expect((await ctx.sessionPersistence.stat(header.id))?.modifiedAt).toBe(2000000)
+    expect(read.mock.calls.filter(([filename]) => filename === path)).toHaveLength(0)
+  })
+
+  it('reuses unchanged generation headers and rereads changed or malformed files', async () => {
+    const header = meta('cached-generation-header', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    const opened = vi.spyOn(fileSystem, 'open')
+    const opens = () => opened.mock.calls.filter(([filename]) => filename === path).length
+    const [first] = await ctx.sessionPersistence.list()
+    expect(first?.header.createdAt).toBe(header.createdAt)
+    const initialReads = opens()
+    expect(initialReads).toBeGreaterThan(0)
+    mutableHeader(first!.header).createdAt += 100
+    expect((await ctx.sessionPersistence.list())[0]?.header.createdAt).toBe(header.createdAt)
+    expect(opens()).toBe(initialReads)
+    await rewriteHeader(path, (value) => { value.createdAt = header.createdAt + 1 })
+    expect((await ctx.sessionPersistence.list())[0]?.header.createdAt).toBe(header.createdAt + 1)
+    expect(opens()).toBeGreaterThan(initialReads)
+    await writeFile(path, 'malformed header\n')
+    expect(await ctx.sessionPersistence.list()).toEqual([])
+  })
+
+  it('selects a future successor instead of a cached readable generation', async () => {
+    const header = meta('cached-header-future-successor', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    expect((await ctx.sessionPersistence.list())[0]?.header.id).toBe(header.id)
+    const futurePath = generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION + 1, 'none')
+    await writeFile(futurePath, `${JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION + 1, id: header.id })}\n`)
+    expect(await ctx.sessionPersistence.list()).toEqual([])
   })
 
   it('projects a released v0 header through stat and list without reading or mutating its body', async () => {
@@ -1504,6 +1552,23 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     expect(readTally.bySuffix.get(path)).toBe(2)
   })
 
+  it('a collected cold log is decoded again without losing events', async () => {
+    const m = meta('memo-collected', '/work')
+    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
+    const path = rawLogPath(root, '/work', m.id)
+    readTally.enabled = true
+    expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(oneTurnLog())
+    const collected = vi.spyOn(WeakRef.prototype, 'deref').mockReturnValueOnce(undefined)
+    try {
+      expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(oneTurnLog())
+      expect(readTally.bySuffix.get(path)).toBe(2)
+    } finally {
+      collected.mockRestore()
+    }
+    expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(oneTurnLog())
+    expect(readTally.bySuffix.get(path)).toBe(2)
+  })
+
   it('a foreign write misses the memo through the revision guard', async () => {
     const m = meta('memo-foreign', '/work')
     await writeLog(ctx.sessionPersistence, m, oneTurnLog())
@@ -2044,7 +2109,7 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     queueMicrotask(() => { controller.abort(reason) })
 
     await expect(pending).rejects.toBe(reason)
-    expect(discovery).toHaveBeenCalledWith(controller.signal)
+    expect(discovery.mock.calls[0]?.[0]).toBe(controller.signal)
   })
 })
 

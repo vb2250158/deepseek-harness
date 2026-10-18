@@ -1,0 +1,8 @@
+- tree "Sessions":
+  - treeitem "{{workspace}}" [expanded]
+  - treeitem "New Session" [selected]
+  - treeitem "Paged conversation 0 {{age}}"
+  - treeitem "Paged conversation 1 {{age}}"
+  - treeitem "Paged conversation 2 {{age}}"
+  - treeitem "Paged conversation 3 {{age}}"
+  - treeitem "Paged conversation 4 {{age}}"

@@ -14,7 +14,7 @@ import type {
 import { mergeOrderedBaseline } from '../ordered-baseline.ts'
 import { isRemoteFailure } from '@deepseek-ai/dsh-api-gateway/client'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError, type RemoteFailure, type RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionListEntry, TitledSessionSummary } from './lineage.ts'
 import { flattenLineage } from './lineage.ts'
 // Type-only merge edge: the title domain's client-namespace outlet declares
@@ -53,6 +53,8 @@ export interface SessionListSnapshot {
   state: 'idle' | 'loading' | 'error'
   /** Arrival lifecycle (see {@link SessionListPhase}); `state` stays the pull-activity axis. */
   phase: SessionListPhase
+  /** False while older catalog pages have not arrived. */
+  complete: boolean
   error: RemoteFailure | null
   projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>
 
@@ -103,6 +105,7 @@ export class SessionManager {
   private listState: 'idle' | 'loading' | 'error' = 'idle'
   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
   private listPhase: SessionListPhase = 'pending'
+  private listComplete = false
   private listError: RemoteFailure | null = null
   private listInflight: Promise<void> | null = null
   /** Active list request's mutation log; its identity also fences completion after reconnect. */
@@ -377,7 +380,7 @@ export class SessionManager {
 
   private agentAvailable(sessionId: SessionId): boolean | undefined {
     return this.summaries.find(summary => summary.sessionId === sessionId)?.agentAvailable
-      ?? (this.listPhase === 'ready' ? false : undefined)
+      ?? (this.listComplete ? false : undefined)
   }
 
   private updateParentAvailability(): void {
@@ -389,57 +392,80 @@ export class SessionManager {
 
   // ---- List API ----
 
-  /** Full refresh via session.list (single-flight within one Host generation). */
+  /** Refresh pages in one Host generation, publishing each successful page immediately. */
   refreshList(): Promise<void> {
     if (this.listInflight !== null) return this.listInflight
     this.listState = 'loading'
     this.listError = null
+    this.listComplete = false
     const established = this.summaries
     const mutations: SessionListMutation[] = []
     this.listMutations = mutations
     this.notifier.markDirty()
     this.listInflight = (async () => {
       try {
-        const result = await this.remote.session.list({})
-        if (this.listMutations !== mutations) return
-        if (result.ok) {
-          const baseline: SessionSummary[] = this.listPhase === 'pending'
-            ? [...result.value.items]
-            : mergeOrderedBaseline(established, result.value.items, summary => summary.sessionId)
-          // A removal supersedes running observed in the pull, including after re-addition.
-          const removedSincePull = new Set<SessionId>()
-          for (const mutation of mutations) {
-            if (mutation.kind === 'remove') removedSincePull.add(mutation.sessionId)
+        const received = new Map<SessionId, SessionSummary>()
+        const seenCursors = new Set<string>()
+        let cursor: string | undefined
+        do {
+          const result = await this.remote.session.list({ paged: true, ...(cursor === undefined ? {} : { cursor }) })
+          if (this.listMutations !== mutations) return
+          if (result.ok) {
+            for (const item of result.value.items) received.set(item.sessionId, item)
+            cursor = result.value.nextCursor
+            if (cursor !== undefined && seenCursors.has(cursor)) {
+              this.listState = 'error'
+              this.listError = new RemoteError('gateway/internal', 'session list cursor did not advance', {})
+              return
+            }
+            if (cursor !== undefined) seenCursors.add(cursor)
+            this.listComplete = cursor === undefined
+            const fetched = [...received.values()]
+            const pendingIds = new Set(received.keys())
+            const available = this.listComplete ? fetched
+              : [...fetched, ...established.filter(summary => !pendingIds.has(summary.sessionId))]
+            const baseline: SessionSummary[] = this.listPhase === 'pending'
+              ? available
+              : mergeOrderedBaseline(established, available, summary => summary.sessionId)
+            // A removal supersedes running observed in the pull, including after re-addition.
+            const removedSincePull = new Set<SessionId>()
+            for (const mutation of mutations) {
+              if (mutation.kind === 'remove') removedSincePull.add(mutation.sessionId)
+            }
+            for (const s of baseline) {
+              if (s.running && !removedSincePull.has(s.sessionId)) this.engagedSessions.add(s.sessionId)
+            }
+            const summaries = mutations.reduce(applyMutation, baseline)
+            this.summaries = summaries
+            // A full list can remove identities without a removal frame.
+            if (this.listComplete) {
+              const retained = this.retainedIds(summaries)
+              for (const sessionId of this.engagedSessions) this.pruneEngagement(sessionId, retained)
+            }
+            this.listState = this.listComplete ? 'idle' : 'loading'
+            this.listPhase = 'ready'
+            this.updateParentAvailability()
+            // Resident Sessions and list rows share one display blank, reconciled with the metadata projection.
+            for (const s of this.summaries) {
+              const session = this.sessions.get(s.sessionId)
+              if (session === undefined) continue
+              session.handleBlank(this.effectiveBlank(s))
+              session.handleRunning(s.running)
+            }
+            // Land each row's projection block in the per-session value store
+            // (cold titles surface without opening the session). A list block is
+            // partial — only the keys its source holds — so an absent key never
+            // clears; how the present keys merge depends on the block's kind.
+            for (const s of result.value.items) {
+              if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
+            }
+            this.notifier.markDirty()
+          } else {
+            this.listState = 'error'
+            this.listError = result.error
+            return
           }
-          for (const s of baseline) {
-            if (s.running && !removedSincePull.has(s.sessionId)) this.engagedSessions.add(s.sessionId)
-          }
-          const summaries = mutations.reduce(applyMutation, baseline)
-          this.summaries = summaries
-          // A full list can remove identities without a removal frame.
-          const retained = this.retainedIds(summaries)
-          for (const sessionId of this.engagedSessions) this.pruneEngagement(sessionId, retained)
-          this.listState = 'idle'
-          this.listPhase = 'ready'
-          this.updateParentAvailability()
-          // Resident Sessions and list rows share one display blank, reconciled with the metadata projection.
-          for (const s of this.summaries) {
-            const session = this.sessions.get(s.sessionId)
-            if (session === undefined) continue
-            session.handleBlank(this.effectiveBlank(s))
-            session.handleRunning(s.running)
-          }
-          // Land each row's projection block in the per-session value store
-          // (cold titles surface without opening the session). A list block is
-          // partial — only the keys its source holds — so an absent key never
-          // clears; how the present keys merge depends on the block's kind.
-          for (const s of result.value.items) {
-            if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
-          }
-        } else {
-          this.listState = 'error'
-          this.listError = result.error
-        }
+        } while (cursor !== undefined)
       } catch (error) {
         if (!isRemoteFailure(error)) throw error
         if (this.listMutations !== mutations) return
@@ -789,6 +815,7 @@ export class SessionManager {
       items: this.itemsCache,
       state: this.listState,
       phase: this.listPhase,
+      complete: this.listComplete,
       error: this.listError,
       projectionsBySession: Object.fromEntries([...this.projectionStores].map(([sessionId, store]) => [
         sessionId,

@@ -27,8 +27,8 @@
   en: 15ce4783b53532a2
   zh: b04a18337281237a
 /deepseek-ai-dsh-agent-loop/understand-the-implementation:
-  en: ce7e776e9d516bdb
-  zh: 59d2751743db7795
+  en: 6750883441620f99
+  zh: f190f63b40512c5e
 /deepseek-ai-dsh-agent-loop/understand-the-implementation/design-concept:
   en: 030202c112f89366
   zh: 621d53ed755cafa3
@@ -110,3 +110,6 @@
 /deepseek-ai-dsh-agent-loop/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98
+/deepseek-ai-dsh-agent-loop/section:
+  en: c92a214692026d64
+  zh: c92a214692026d64

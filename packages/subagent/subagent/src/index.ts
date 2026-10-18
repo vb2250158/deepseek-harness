@@ -328,6 +328,18 @@ export class SubagentRuntime extends TypertRemoteService {
   }
 
   /**
+   * 不投递新消息，续跑原父 Agent 的指定中断子会话。
+   * @param parent - 授权恢复的当前存活父 Agent。
+   * @param childId - 已持久化的直接子会话身份。
+   * @param startSeq - 原中断轮次的 turn/start 序号。
+   * @param signal - 驱动启动前的取消信号。
+   * @returns 是否启动了原子会话的新轮次。
+   */
+  async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean> {
+    return this.requireContinuations().continueInterrupted(parent, childId, startSeq, signal)
+  }
+
+  /**
    * Close continuable admission below exact live parent Agents, stop only their
    * visible descendant Activations synchronously, then await admitted scoped
    * materializations and release those forests child-first. The scoped cutoff

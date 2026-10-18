@@ -22,6 +22,24 @@ Desktop Host 的 Platform API 请求与更新策略请求用相同的 Platform �
 
 按 F12（多媒体功能键键盘上为 Fn+F12）、macOS 的 Command+Option+I 或 Windows 的 Ctrl+Shift+I，可切换当前获得焦点的应用页面的 DevTools，打包版本同样支持。这些原生快捷键通过隐藏的应用菜单项注册。更新遮罩和打包版本的内嵌浏览器禁用 DevTools。
 
+<a id="shared-web-backend"></a>
+
+## 共享 Web 后端
+
+未明确选择时，Desktop 拥有下文所述的 Host、profile 和运行时。连接已运行的本机 Web 应用时，两端使用相同的 `DSH_HOME`，并保存 `$DSH_HOME/desktop-backend.json`：
+
+```json
+{"mode":"web","url":"http://127.0.0.1:3180/"}
+```
+
+`DSH_DESKTOP_WEB_BACKEND_URL` 为单个进程覆盖文件。只接受字面地址 `127.0.0.1` 或 `[::1]` 上的干净 HTTP 根路径 origin；拒绝凭据、查询参数和 fragment。可选 `timeoutMs` 为 1–60000，默认 10000；`cookieLifetimeMs` 为 1–300000，默认 60000。缺少配置时沿用独立 Host；配置无效、Web 不可用或鉴权失败时停止启动，不创建另一个 Host。
+
+共享模式把入口文档、资源、插件、HTTP 和 WebSocket 流量转发到该 Web 后端。因此插件、设置、主题、会话和运行中的任务属于同一进程及其 Web profile。Desktop 不安装自身 profile，不改变 Web 包环境，也不在退出或壳更新时停止或锁定 Web 任务。原生插件恢复不能禁用共享 Web 插件，需要通过 Web 修复。本机连接地址不属于跨机环境设置。
+
+转发入口在 Web 注入脚本运行前声明本地连接参数，因此设置表单会加载 Host 持久值，不会在原生启动 IPC 等待期间选择页面内存默认值。
+
+原生进程通过标准凭据解析器读取已有浏览器会话 grant，签发短期、绑定 authority 的 cookie。密钥和 cookie 仅保留在原生内存，不进入 renderer 存储、日志或配置。共享模式没有私有 Host IPC 提供嵌入 Platform 的账号凭据，因此嵌入 Platform 登录仍独立处理。原生账号 RPC 使用共享 Web 账号。此连接模式不代表任意 Desktop 与 Web 版本组合已通过独立验收。
+
 ## 终端命令
 
 应用菜单中的**管理 dsh 命令…**位于**检查更新…**下方，显示当前命令，并提供安装、修复和移除操作。命令复用 Desktop 已安装的运行时和普通 [dsh CLI](../cli/README.zh.md)，Desktop 应用关闭后也可以使用。安装后打开新终端，运行 `dsh --version`。

@@ -399,6 +399,8 @@ beforeEach(() => {
   vi.useFakeTimers()
   harness.reset()
   const userData = mkdtempSync(join(tmpdir(), 'dsh-main-user-data-'))
+  vi.stubEnv('DSH_HOME', userData)
+  vi.stubEnv('DSH_DESKTOP_WEB_BACKEND_URL', undefined)
   onTestFinished(() => { rmSync(userData, { recursive: true, force: true }) })
   harness.app.getPath.mockImplementation(name => name === 'userData' ? userData : `desktop-test-${name}`)
   harness.dialog.showMessageBox.mockImplementation((options: { title?: string }) => {
@@ -437,6 +439,31 @@ afterEach(async () => {
 })
 
 describe('desktop main startup', () => {
+  it('attaches to the selected Web backend without installing a Desktop profile or owning its shutdown', async () => {
+    vi.stubEnv('DSH_DESKTOP_WEB_BACKEND_URL', 'http://127.0.0.1:3180/')
+    const { DesktopSharedWebBackend } = await import('../src/shared-web-backend.ts')
+    vi.spyOn(DesktopSharedWebBackend.prototype, 'start').mockResolvedValue({ url: 'http://127.0.0.1:3180/', injections: [] })
+    vi.spyOn(DesktopSharedWebBackend.prototype, 'cookie').mockReturnValue('shared-cookie')
+    const stop = vi.spyOn(DesktopSharedWebBackend.prototype, 'stop')
+    await import('../src/main.ts')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.hosts).toHaveLength(0)
+    expect(harness.applyRelease).not.toHaveBeenCalled()
+    const { serveWebDocument, forwardWebRequest } = await import('../src/web-document.ts')
+    const handler = harness.protocolHandle.mock.calls.at(-1)![1]
+    for (const path of ['/', '/assets/index.js', '/api/session/list']) {
+      const request = new Request(`dsh-app://app${path}`)
+      await handler(request)
+      expect(forwardWebRequest).toHaveBeenLastCalledWith(request, 'http://127.0.0.1:3180/', 'shared-cookie', true)
+    }
+    expect(serveWebDocument).not.toHaveBeenCalled()
+    harness.app.quit()
+    await vi.advanceTimersByTimeAsync(0)
+    await harness.quitCompleted.promise
+    expect(stop).toHaveBeenCalledOnce()
+    expect(harness.hosts).toHaveLength(0)
+  })
+
   it('routes shell update documents and assets through the registered main protocol handler', async () => {
     const root = join(import.meta.dirname, '..')
     vi.spyOn(harness.app, 'getAppPath').mockReturnValue(root)

@@ -20,6 +20,7 @@ interface Row {
 }
 
 const contexts = new Set<Context>()
+const pagePolicy = { listPageSize: 2, listInitialPerWorkspace: 1, listSnapshotLimit: 2, listSnapshotTtlMs: 1000 }
 const immediates = new Set<ReturnType<typeof setImmediate>>()
 
 afterEach(async () => {
@@ -98,6 +99,58 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   vi.spyOn(performance, 'now').mockImplementation(() => clock.now)
   return { ctx, list, listSessions, trace, observer, attach, agents, detach, clock }
 }
+
+describe('Session-list pages', () => {
+  it('keeps running rows first without moving every attached idle Session into the first page', async () => {
+    const h = await harness(['a', 'b', 'c', 'd'].map(id => ({ id, phase: 'live' as const })), 0)
+    vi.spyOn(h.ctx.sessionProjections, 'cachedSnapshot').mockReturnValue({
+      asOfSeq: -1, values: { sessionListMetadata: { blank: false, lastPromptAt: null } },
+    })
+    h.agents.get('d')!.status = 'running'
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    expect(first.items.map(row => row.sessionId)).toEqual(['a', 'd'])
+    expect(first.nextCursor).toBeDefined()
+  })
+  it('serves each workspace newest first and reuses one scan for every continuation', async () => {
+    const h = await harness(Array.from({ length: 6 }, (_, i) => ({ id: `row-${i}`, phase: 'cold' as const })), 0)
+    const records = await h.listSessions()
+    h.listSessions.mockClear()
+    records.forEach((record, i) => {
+      record.header = { ...record.header, createdAt: i, cwd: i % 2 === 0 ? '/a' : '/b' }
+    })
+    const cache = vi.spyOn(h.ctx.sessionProjectionCache, 'cachedSnapshot')
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    expect(first.items.map(row => row.sessionId)).toEqual(['row-5', 'row-4'])
+    expect(cache.mock.calls.filter(([, keys]) => keys === undefined)).toHaveLength(2)
+    const second = await h.list.page({ cursor: first.nextCursor }, pagePolicy)
+    const last = await h.list.page({ cursor: second.nextCursor }, pagePolicy)
+    expect([...first.items, ...second.items, ...last.items].map(row => row.sessionId))
+      .toEqual(['row-5', 'row-4', 'row-3', 'row-2', 'row-1', 'row-0'])
+    expect(last.nextCursor).toBeUndefined()
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+    expect(h.ctx.sessions.list()).toEqual([])
+  })
+
+  it('rejects malformed, expired, and evicted cursors', async () => {
+    const h = await harness([{ id: 'one', phase: 'cold' }, { id: 'two', phase: 'cold' }], 0)
+    await expect(h.list.page({ cursor: 'bad' }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    h.clock.now = 1001
+    await expect(h.list.page({ cursor: first.nextCursor }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
+    h.clock.now = 0
+    const old = await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 1 })
+    await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 1 })
+    await expect(h.list.page({ cursor: old.nextCursor }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
+  })
+
+  it('keeps the full-list request complete and aborts page reads', async () => {
+    const h = await harness([{ id: 'one', phase: 'cold' }, { id: 'two', phase: 'cold' }], 0)
+    expect(await h.list.list()).toHaveLength(2)
+    const controller = new AbortController()
+    controller.abort(new Error('cancel listing'))
+    await expect(h.list.page({ paged: true }, pagePolicy, controller.signal)).rejects.toThrow('cancel listing')
+  })
+})
 
 describe('Session-list work slices', () => {
   it.each<Phase>(['live', 'cold'])('keeps cheap %s summaries in one synchronous slice', async (phase) => {

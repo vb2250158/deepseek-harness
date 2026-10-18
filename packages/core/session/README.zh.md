@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-session
 
+非 surface 事件可通过 `append(type, data, { ignorable: true })` 明确写入可忽略辅助记录，供补齐等独立模型请求保留来源。该记录不进入主模型历史；未识别事件沿用已有可忽略事件读取机制，不改变会话格式版本。
+
 [English](README.md) | 中文
 
 ## 概述

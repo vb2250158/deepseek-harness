@@ -1404,6 +1404,60 @@ describe('connected generation', () => {
   })
 })
 
+describe('progressive catalog loading', () => {
+  it('publishes the first page while older rows are pending and replays later removals', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    const older = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'older' }))
+    remote.session.list.mockReturnValueOnce(older.promise)
+    const refreshed = manager.refreshList()
+    await vi.waitFor(() => {
+      expect(manager.getListSnapshot()).toMatchObject({ phase: 'ready', state: 'loading', complete: false })
+      expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+    })
+    manager.handleSessionRemoved(S1)
+    manager.handleSessionActivity(S2, 900)
+    older.resolve(ok({ items: [summary(S1), summary(S2)] }))
+    await refreshed
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', complete: true })
+    expect(manager.getListSnapshot().items).toMatchObject([{ sessionId: S2, updatedAt: 900 }])
+    expect(remote.session.list.mock.calls.map(([request]) => request)).toEqual([
+      { paged: true }, { paged: true, cursor: 'older' },
+    ])
+  })
+
+  it('keeps received rows usable after an older-page failure and permits retry', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'older' }))
+    remote.session.list.mockResolvedValueOnce(err(new RemoteError('gateway/internal', 'older failed', {})))
+    await manager.refreshList()
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'error', complete: false, phase: 'ready' })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2)] }))
+    await manager.refreshList()
+    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', complete: true })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1, S2])
+  })
+
+  it('retains established rows until the complete refresh can reconcile removals', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2)] }))
+    await manager.refreshList()
+    const older = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'older' }))
+    remote.session.list.mockReturnValueOnce(older.promise)
+    const refreshed = manager.refreshList()
+    await vi.waitFor(() => { expect(remote.session.list).toHaveBeenCalledTimes(3) })
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1, S2])
+    older.resolve(ok({ items: [] }))
+    await refreshed
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+  })
+})
+
 describe('running facts without UI reminders', () => {
   it('replays running status during hydration without publishing a completion marker', async ({ mock, remote }) => {
     const response = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()

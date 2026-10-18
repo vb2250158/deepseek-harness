@@ -41,12 +41,17 @@ Mount the plugin beside the session store and the projection registry when clien
 |---|---|
 | `turns` | Distinct turns with at least one closed step; rejected or empty turns are uncounted |
 | `steps` | Closed steps — completed, failed, cancelled, and max-tokens steps all count |
-| `llmMs` | Summed model wall time over steps that assembled a message |
+| `turnMs` | Summed matched `turn/start` → `turn/end` wall time, including failed, cancelled and empty turns; time between turns is excluded |
+| `otherMs` | Closed-turn time outside recorded model, matched tool and compaction intervals; overlapping intervals count once for coverage |
+| `llmMs` | Summed model wall time over message-assembling steps, excluding overlapping compaction |
+| `compactionMs` | Matched compaction start-to-end wall time, including failed attempts; unfinished attempts are not yet counted |
 | `toolMs` | Summed matched `tool/call` → `tool/result` wall time |
 | `ttftMs` / `ttftSteps` | Summed first-token latency and the steps carrying it |
 | `decodeMs` / `decodeTokens` | Summed decode wall time and provider output tokens over usage-reporting steps |
 
 Every field is 0 until its first contributing event; the composed registry always serves the key, so clients read the value rather than key presence. Clients render whole-log figures through the projection seam's snapshot and change feed; the reference consumer is the web chat stats strip, whose window fold mirrors these field names as its no-unit fallback.
+
+Other time includes preparation before steps, stopping after steps, waits and incomplete steps without assembled messages. Parallel tools can make summed tool time exceed their covered wall time. Compaction outside a turn contributes to `compactionMs` only. Open turns contribute only after their matching end. Older providers and paged-node fallback omit these values. Cache state version 3 rebuilds them from the existing log.
 
 ### Failures and recovery
 
@@ -76,11 +81,12 @@ The unit is a pure fold over committed session events: `step/end` is the counted
 
 ### Data model
 
-The fold state holds the eight totals plus in-flight boundaries: `lastTurn` (turn of the last counted `step/end`), `openStep` (the open step's boundary facts, closed by its `assistant/message`), and `pendingCalls` (tool dispatch times by callId). The wire view is a strict subset — the eight totals — so the persisted-cache state schema extends the view schema with the boundary fields.
+State version 3 rebuilds prior cached totals from the original log. The fold state holds accumulated totals and current turn, step, tool-call and compaction intervals. The wire view contains only totals; persisted-cache validation also covers the current intervals.
 
 ### Fold rules
 
 - Uninteresting events return the same state reference; the registry's `Object.is` gate keeps the change feed quiet.
+- Compaction is paired by transaction id. Its overlap is removed from model, first-token, and decode intervals; standalone compaction contributes only its own duration.
 - First-token latency records the first non-empty delta chunk and survives an in-step `llm/retry`.
 - Decode time and tokens accrue only over steps carrying both a first token and a valid provider usage report; malformed usage is ignored like the window fold guards node usage.
 - Tool time pairs `tool/call` → `tool/result` by callId; unresolved calls are dropped at `turn/end` because results land within their turn, and a callId colliding with an `Object` prototype name reads as unmatched.
@@ -117,7 +123,7 @@ None; the package never assembles or sends provider requests.
 These limits define what the figures describe and when the unit is absent. They are current package constraints.
 
 - **Steps count work attempted, not visible output** — a step that failed before producing visible content still closes with `step/end` and counts; a step interrupted by a crash counts after the session reloads, when crash recovery appends its synthetic `step/end`.
-- **A cancelled step is counted but untimed** — no assistant message assembles, so its partial stream time enters no wall-time figure; a max-tokens usage-host message conversely contributes model time the surface does not show.
+- **Cancelled steps contribute to other closed-turn time** — without an assembled message they add no model or decode time; max-tokens usage-host messages contribute model time invisible on the surface.
 - **Counts are log-scoped, not surface-scoped** — steps whose messages were later compacted away stay counted; the figures describe the whole session, not the current model-visible surface.
 - **Mounted only where the projection registry is composed** — other assemblies serve no `sessionStats` key, and their consumers fall back to window-scoped counting.
 

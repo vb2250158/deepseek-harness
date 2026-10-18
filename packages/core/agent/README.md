@@ -71,6 +71,8 @@ The `agent/*` events let plugins act on live work without depending on the loop 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+`agent/request-context` reconciles the complete durable input and registration-bound request context before the loop freezes model history. Listeners commit logged replacements and delegate with `next()`. `agent/request-context-ready` restores required context after compaction settles. Cancellation retains admitted facts; failures prevent dispatch.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 
@@ -186,3 +188,7 @@ These limits define when this package needs special care. They are current packa
 This Dev Note is working context for maintainers; it is explicitly non-authoritative. Open, undecided directions: inter-agent channels beyond delegation — shared state, streaming child output, and background or poll semantics remain outside the current delegation seam; and the `SessionStartSource` values `'clear'`/`'compact'` are reserved with no emitter yet, pending the driving subsystems.
 
 </details>
+
+## 原会话恢复
+
+`Agent.continueInterrupted?(startSeq)` 和 `continueQuotaFailure?(startSeq)` 是可选驱动能力：不添加恢复消息，在原会话中开启新轮次，保留待处理队列。调用前须确认驱动支持；忙碌、主动停止、过期轮次及不匹配的失败均拒绝。

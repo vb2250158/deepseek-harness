@@ -98,7 +98,11 @@ export interface Config {
   root: string
   /** Physical encoding; defaults to checksummed Zstandard frames. */
   compression?: JsonlCompression
+  /** Maximum parallel directory, header, and metadata reads while listing Sessions. */
+  listConcurrency?: number
 }
+
+type ResolvedConfig = Config & { listConcurrency: number }
 
 /** One stored event graph whose producer has established immutable sharing. */
 interface FrozenStoredEvents extends SessionHandleReadResult {
@@ -243,9 +247,10 @@ function waitWithAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<
  * flush, and never existed if the process crashes before that.
  */
 class JsonlSessionPersistence extends SessionPersistence {
-  static Config: z<Config> = z.object({
+  static Config: z<Config, ResolvedConfig> = z.object({
     root: z.string().required(),
     compression: JsonlCompressionSchema,
+    listConcurrency: z.natural().min(1).max(64).default(16),
   })
 
   /** Backend label for diagnostics and effects; shadows `Service.name` without changing the service key. */
@@ -253,19 +258,24 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   private root: string
   private compression: JsonlCompression
+  private readonly listConcurrency: number
   private rootEncodingCheck: Promise<void> | undefined
   private readonly tracker = new JsonlBackendTracker(this.name)
   private readonly generationFormat: Omit<JsonlGenerationFormatAdapter, 'createRestore'>
   /**
-   * Bounded LRU of parsed, validated stored logs keyed by session id and
+   * Bounded weak LRU of parsed, validated stored logs keyed by session id and
    * guarded by the stat-derived revision, so an immediate cold-read handoff
-   * (observation then resume) parses the artifact once. Every local mutation
+   * (observation then resume) can reuse an uncollected artifact. The memo
+   * never keeps decoded histories alive after their consumers release them.
+   * Every local mutation
    * for an id invalidates its entry; a foreign write misses through the
    * revision guard.
    */
-  private readonly coldLogMemo = new Map<SessionId, StoredLog>()
+  private readonly coldLogMemo = new Map<SessionId, WeakRef<StoredLog>>()
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
+  /** Validated headers for selected physical file revisions; directory enumeration evicts retired paths. */
+  private readonly generationHeaders = new Map<string, { revision: PersistenceRevision; header: SessionHeader }>()
 
   constructor(ctx: Context, public config: Config) {
     super(ctx)
@@ -278,6 +288,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     // Resolve once so later process.cwd() changes cannot split one backend across roots.
     this.root = resolve(config.root)
+    this.listConcurrency = JsonlSessionPersistence.Config(config).listConcurrency
     this.compression = config.compression ?? DEFAULT_COMPRESSION
     this.generationFormat = {
       currentVersion: sessionFormatCatalog.currentVersion,
@@ -458,6 +469,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal)}`)
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
+        modifiedAt: Number(identity.mtimeMs),
       }
     } catch (error: unknown) {
       options?.signal?.throwIfAborted()
@@ -480,27 +492,31 @@ class JsonlSessionPersistence extends SessionPersistence {
     // append lands mid-scan is then still in this snapshot (its artifact may
     // predate the scan), so create-to-list visibility never has a hole.
     const pending = [...this.tracker.pendingEntries()]
-    const artifacts = await this.listArtifacts(signal)
+    let generations: readonly ResolvedJsonlGeneration[] | undefined
+    const artifacts = await this.listArtifacts(signal, (selected) => { generations = selected })
     const corpusRevision = artifacts.some(artifact => artifact.sourceVersion < SESSION_FORMAT_VERSION)
-      ? await this.historicalCorpusRevision(signal) : undefined
-    for (const artifact of artifacts) {
+      ? await this.historicalCorpusRevision(signal, generations) : undefined
+    const stored = await this.mapListing(artifacts, async (artifact) => {
       signal?.throwIfAborted()
       try {
         const identity = await stat(artifact.path, { bigint: true })
         signal?.throwIfAborted()
         listed.add(artifact.header.id)
-        snapshots.push({
+        return {
           header: artifact.header,
           revision: artifact.sourceVersion < SESSION_FORMAT_VERSION
             ? SessionPersistenceRevision(`${fileRevision(identity)}:${corpusRevision}`)
             : fileRevision(identity),
           sizeBytes: Number(identity.size),
-        })
+          modifiedAt: Number(identity.mtimeMs),
+        }
       } catch (error: unknown) {
         signal?.throwIfAborted()
         if (!isENOENT(error)) throw error
+        return undefined
       }
-    }
+    }, signal)
+    for (const snapshot of stored) if (snapshot !== undefined) snapshots.push(snapshot)
     for (const [id, entry] of pending) {
       if (!listed.has(id)) snapshots.push({ header: entry.header, revision: entry.revision })
     }
@@ -560,10 +576,10 @@ class JsonlSessionPersistence extends SessionPersistence {
       )
     }
     const probe = fileRevision(await stat(selected.sourcePath, { bigint: true }))
-    const memoized = this.coldLogMemo.get(id)
+    const memoized = this.coldLogMemo.get(id)?.deref()
     if (memoized?.status === 'current' && memoized.revision === probe) {
       this.coldLogMemo.delete(id)
-      this.coldLogMemo.set(id, memoized)
+      this.coldLogMemo.set(id, new WeakRef(memoized))
       return memoized
     }
     const current = await readStableJsonlFile(selected.sourcePath, signal)
@@ -584,7 +600,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     signal: AbortSignal,
   ): Promise<PreparedStoredLog> {
     signal.throwIfAborted()
-    const memoized = this.coldLogMemo.get(id)
+    const memoized = this.coldLogMemo.get(id)?.deref()
     if (memoized?.status === 'prepared' && memoized.revision === sourceRevision) {
       try {
         await memoized.validateRelatedSources()
@@ -593,7 +609,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         throw this.generationFailure(id, selected, error)
       }
       this.coldLogMemo.delete(id)
-      this.coldLogMemo.set(id, memoized)
+      this.coldLogMemo.set(id, new WeakRef(memoized))
       return memoized
     }
     return this.prepareStoredMigration(id, selected, signal)
@@ -696,7 +712,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       identity = await migration.value.publish()
     } catch (error: unknown) {
       /* v8 ignore else -- a newer preparation may have replaced this stale cache entry. */
-      if (this.coldLogMemo.get(id) === stored) this.coldLogMemo.delete(id)
+      if (this.coldLogMemo.get(id)?.deref() === stored) this.coldLogMemo.delete(id)
       throw this.generationFailure(id, migration.source, error)
     }
     const published: CurrentStoredLog = {
@@ -746,10 +762,10 @@ class JsonlSessionPersistence extends SessionPersistence {
   async readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<CurrentStoredLog> {
     signal?.throwIfAborted()
     const probe = fileRevision(await stat(path, { bigint: true }))
-    const memoized = this.coldLogMemo.get(expectedId)
+    const memoized = this.coldLogMemo.get(expectedId)?.deref()
     if (memoized?.status === 'current' && memoized.revision === probe) {
       this.coldLogMemo.delete(expectedId)
-      this.coldLogMemo.set(expectedId, memoized)
+      this.coldLogMemo.set(expectedId, new WeakRef(memoized))
       return memoized
     }
     const { bytes, identity } = await readStableJsonlFile(path, signal)
@@ -819,7 +835,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   /** Insert one parsed log into the bounded handoff cache. */
   private memoizeStoredLog(id: SessionId, stored: StoredLog): void {
     this.coldLogMemo.delete(id)
-    this.coldLogMemo.set(id, stored)
+    this.coldLogMemo.set(id, new WeakRef(stored))
     for (const oldest of this.coldLogMemo.keys()) {
       if (this.coldLogMemo.size <= COLD_LOG_MEMO_MAX_ENTRIES) break
       this.coldLogMemo.delete(oldest)
@@ -1023,22 +1039,41 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   /** Enumerate selected physical generations without interpreting their headers or bodies. */
   private async listGenerations(signal?: AbortSignal): Promise<ResolvedJsonlGeneration[]> {
-    const sources: ResolvedJsonlGeneration[] = []
-    for (const project of await this.listProjectDirs(signal)) {
-      for (const dir of await this.listSessionDirs(project, signal)) {
-        signal?.throwIfAborted()
-        const selected = await this.resolveGenerationInDirectory(dir, signal)
-        if (selected !== undefined) sources.push(selected)
+    const projects = await this.listProjectDirs(signal)
+    const directories = (await this.mapListing(projects, project => this.listSessionDirs(project, signal), signal)).flat()
+    const sources = await this.mapListing(directories, dir => this.resolveGenerationInDirectory(dir, signal), signal)
+    return sources.filter((source): source is ResolvedJsonlGeneration => source !== undefined)
+  }
+
+  private async mapListing<Value, Result>(
+    values: readonly Value[], read: (value: Value) => Promise<Result>, signal?: AbortSignal,
+  ): Promise<Result[]> {
+    const results = new Array<Result>(values.length)
+    let next = 0
+    let failure: { error: unknown } | undefined
+    const worker = async (): Promise<void> => {
+      try {
+        while (failure === undefined && next < values.length) {
+          signal?.throwIfAborted()
+          const index = next++
+          const value = values[index]
+          if (value !== undefined) results[index] = await read(value)
+        }
+      } catch (error: unknown) {
+        failure ??= { error }
       }
     }
-    return sources
+    await Promise.all(Array.from({ length: Math.min(this.listConcurrency, values.length) }, worker))
+    if (failure !== undefined) throw failure.error
+    signal?.throwIfAborted()
+    return results
   }
 
   /** Historical logical events depend on the corpus, including members with unreadable headers. */
-  private async historicalCorpusRevision(signal?: AbortSignal): Promise<string> {
-    const paths = (await this.listGenerations(signal)).map(source => source.sourcePath).sort()
+  private async historicalCorpusRevision(signal?: AbortSignal, generations?: readonly ResolvedJsonlGeneration[]): Promise<string> {
+    const paths = (generations ?? await this.listGenerations(signal)).map(source => source.sourcePath).sort()
     const hash = createHash('sha256')
-    for (const path of paths) {
+    const revisions = await this.mapListing(paths, async (path) => {
       signal?.throwIfAborted()
       let revision: string
       try {
@@ -1047,37 +1082,50 @@ class JsonlSessionPersistence extends SessionPersistence {
         if (!isENOENT(error)) throw error
         revision = 'missing'
       }
-      hash.update(JSON.stringify([path, revision]))
-    }
+      return JSON.stringify([path, revision])
+    }, signal)
+    for (const revision of revisions) hash.update(revision)
     signal?.throwIfAborted()
     return hash.digest('hex')
   }
 
   private async listArtifacts(
     signal?: AbortSignal,
+    onDiscovery?: (generations: readonly ResolvedJsonlGeneration[]) => void,
   ): Promise<Array<{ header: SessionHeader; path: string; sourceVersion: number }>> {
     signal?.throwIfAborted()
     await this.ensureRootEncoding()
     signal?.throwIfAborted()
     const artifacts: Array<{ header: SessionHeader; path: string; sourceVersion: number }> = []
     const ids = new Set<SessionId>()
-    for (const selected of await this.listGenerations(signal)) {
+    const generations = await this.listGenerations(signal)
+    onDiscovery?.(generations)
+    const paths = new Set(generations.map(selected => selected.sourcePath))
+    for (const path of this.generationHeaders.keys()) {
+      if (!paths.has(path)) this.generationHeaders.delete(path)
+    }
+    const headers = await this.mapListing(generations, async (selected) => {
       signal?.throwIfAborted()
       let header: SessionHeader | undefined
       try {
         header = await this.readGenerationHeader(selected, undefined, signal)
       } catch (error: unknown) {
-        if (error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError) continue
+        if (error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError) return undefined
         throw error
       }
       if (header === undefined) {
-        continue
+        return undefined
       }
+      return { header, path: selected.sourcePath, sourceVersion: selected.sourceVersion }
+    }, signal)
+    for (const artifact of headers) {
+      if (artifact === undefined) continue
+      const { header } = artifact
       if (ids.has(header.id)) {
         throw new Error(`duplicate JSONL session id "${header.id}" appears in multiple project directories`)
       }
       ids.add(header.id)
-      artifacts.push({ header, path: selected.sourcePath, sourceVersion: selected.sourceVersion })
+      artifacts.push(artifact)
     }
     signal?.throwIfAborted()
     return artifacts
@@ -1089,6 +1137,22 @@ class JsonlSessionPersistence extends SessionPersistence {
     expectedId?: SessionId,
     signal?: AbortSignal,
   ): Promise<SessionHeader | undefined> {
+    let revision: PersistenceRevision
+    try {
+      revision = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (!isENOENT(error)) throw error
+      this.generationHeaders.delete(selected.sourcePath)
+      return undefined
+    }
+    signal?.throwIfAborted()
+    const cached = this.generationHeaders.get(selected.sourcePath)
+    if (cached?.revision === revision) {
+      await this.assertStoredIdentity(selected.sourcePath, selected.sourceVersion, cached.header, expectedId, signal)
+      return { ...cached.header }
+    }
+    this.generationHeaders.delete(selected.sourcePath)
     let first: string | undefined
     try {
       first = this.compression === 'zstd'
@@ -1136,6 +1200,18 @@ class JsonlSessionPersistence extends SessionPersistence {
       expectedId,
       signal,
     )
+    let after: PersistenceRevision
+    try {
+      after = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (!isENOENT(error)) throw error
+      return undefined
+    }
+    signal?.throwIfAborted()
+    if (after === revision) {
+      this.generationHeaders.set(selected.sourcePath, { revision, header: { ...header } })
+    }
     return header
   }
 

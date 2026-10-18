@@ -119,6 +119,18 @@ export function deriveKeyRef(provider: string): string {
 }
 
 /**
+ * Derive the page-managed reference used to replace a launch-environment key.
+ * The environment layer wins over the conventional route reference and cannot
+ * be edited by the running process, so a UI replacement needs its own writable
+ * reference in the credentials file.
+ * @param provider - provider route id.
+ * @returns a writable reference owned by the Models page.
+ */
+export function deriveLocalKeyRef(provider: string): string {
+  return `${deriveKeyRef(provider)}_LOCAL`
+}
+
+/**
  * The wire protocols a hand-declared route may name, read out of the owning
  * namespace's own schema. This stays a schema read rather than a wire field so
  * the choices the page offers cannot drift from the ones the adapter accepts:

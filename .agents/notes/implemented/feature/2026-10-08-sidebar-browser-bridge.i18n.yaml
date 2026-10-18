@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-08-sidebar-browser-bridge.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-08-sidebar-browser-bridge.md
+/agent-note-sidebar-browser-extension-bridge:
+  en: e82e103f386450c2
+  zh: 5e6abca6f73f7679
+/agent-note-sidebar-browser-extension-bridge/problem:
+  en: b95866f97c702ba4
+  zh: 20d641cd371b61ea
+/agent-note-sidebar-browser-extension-bridge/decision:
+  en: 74027cdf73ff152d
+  zh: 27162fe782c31982
+/agent-note-sidebar-browser-extension-bridge/consequences:
+  en: 8b45219bcd0fbbc0
+  zh: b9238e4b934bc677
+/agent-note-sidebar-browser-extension-bridge/alternatives-considered:
+  en: 43c53a3a45d6eeb7
+  zh: 5789032f21581ff8
+/agent-note-sidebar-browser-extension-bridge/validation:
+  en: 5ccbdd2fa1041228
+  zh: acc108ff9b75d6a6

@@ -208,3 +208,7 @@ You are a delegated subagent: your permission scope was fixed when you were star
 - **host-user 投递**——未来的 host 适配器需要具体的经认证交互，该 seam 才能获得用户投递能力。
 
 </details>
+
+## 原会话恢复
+
+`ctx.subagents.continueInterrupted(parent, childId, startSeq, signal)` 在原父 Agent 授权及子会话锁下续跑最后中断轮次，不投递消息。冷加载复用原描述符、模型和身份；一次性子会话、错误父关系、过期轮次及取消请求拒绝。失败或轮次已失效时，新挂载的 Activation 释放句柄与并发名额。

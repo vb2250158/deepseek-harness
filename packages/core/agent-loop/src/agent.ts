@@ -47,7 +47,7 @@ type Phase =
     lastTurn: number
     wakeRequested: boolean
   }
-  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean }
+  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean; continueWithoutInput: boolean }
 
 type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
 
@@ -164,6 +164,35 @@ export class ReactLoopAgent implements Agent {
     this.send(input, 'next-turn', true)
   }
 
+  continueInterrupted(startSeq: number): boolean {
+    return this.continueTurn(startSeq, 'interrupted')
+  }
+
+  continueQuotaFailure(startSeq: number): boolean {
+    return this.continueTurn(startSeq, 'quota')
+  }
+
+  /** 恢复资格在启动驱动前同步核验，避免过期请求或重复请求开启新轮次。 */
+  private continueTurn(startSeq: number, kind: 'interrupted' | 'quota'): boolean {
+    if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
+    const events = this.session.snapshotEvents()
+    const start = events.findLast(event => event.type === 'turn/start'
+      && event.seq >= this.session.inheritedEventCount)
+    if (start === undefined || start.seq !== startSeq) return false
+    const end = events.findLast(event => event.type === 'turn/end' && event.seq > startSeq)
+    if (kind === 'interrupted') {
+      if (end?.type === 'turn/end' && end.data.reason.kind !== 'interrupted') return false
+    } else {
+      if (end?.type !== 'turn/end' || end.data.reason.kind !== 'error') return false
+      const failure = end.data.reason.error
+      if (failure.code !== 'QUOTA'
+        && !(failure.code === 'PI_AI_ERROR' && /402 status code/u.test(failure.message))) return false
+    }
+    if (end !== undefined && events.some(event => event.type === 'user/message' && event.seq > end.seq)) return false
+    this.wakeDriver(false, true)
+    return true
+  }
+
   steer(input: UserMessage): void {
     this.send(input, 'next-step', true)
   }
@@ -210,8 +239,9 @@ export class ReactLoopAgent implements Agent {
    * the queue no longer holds the wake.
    * @param wakeAfterAbort - the {@link send} classification, captured before
    *   the inbox insertion so a reentrant cancel cannot reclassify it.
+   * @param continueWithoutInput - 允许已核验的恢复轮次在无新输入时发起首次请求。
    */
-  private wakeDriver(wakeAfterAbort = false): void {
+  private wakeDriver(wakeAfterAbort = false, continueWithoutInput = false): void {
     if (this.phase.kind !== 'idle') {
       // Maintenance and aborted drivers cannot deliver the wake: latch it for
       // replay at convergence. Live drivers claim queued work themselves;
@@ -230,6 +260,7 @@ export class ReactLoopAgent implements Agent {
       turn: this.phase.lastTurn,
       step: 0,
       wakeRequested: false,
+      continueWithoutInput,
     })
     this.loopCtx.agents.withInitiator(this, () => this.kick()).then(driver.resolve, driver.reject)
   }
@@ -250,16 +281,20 @@ export class ReactLoopAgent implements Agent {
   }
 
   private async kick(): Promise<void> {
+    let failed = false
     try {
       while (await this.turn()) {}
-    } catch (_error) {
+    } catch (_error: unknown) {
       // Reported failures and cancellation are contained at the driver boundary.
+      failed = this.phase.kind === 'running' && !this.phase.abort.signal.aborted
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
-        if (wakeRequested && this.inbox.hasPending) this.wakeDriver()
+        // A non-cancelled failure can leave a waking message behind its terminal
+        // boundary. Replay it once idle instead of requiring another send.
+        if ((wakeRequested || failed) && this.inbox.hasPending) this.wakeDriver()
       }
     }
   }
@@ -321,11 +356,12 @@ export class ReactLoopAgent implements Agent {
         if (turnEnds && decision.messages.length === 0) break
         // A removed waking message or an enter decision rewritten to empty
         // still owns the initial turn boundary, but it spends no model call.
-        if (phase.step === 0 && decision.messages.length === 0) {
+        if (phase.step === 0 && decision.messages.length === 0 && !phase.continueWithoutInput) {
           turnEnds = { kind: 'completed' }
           return false
         }
         signal.throwIfAborted()
+        phase.continueWithoutInput = false
         this.session.append('step/start', { turn, step })
         phase.step = step
         const toolRecovery = new ToolCallRecovery()
@@ -422,7 +458,7 @@ export class ReactLoopAgent implements Agent {
         }
       }
       firstAttempt = false
-      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
+      const request = await this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
       const live = new AssistantStreamAttempt(
         this.session.id,
         ++this.assistantAttemptCounter,
@@ -596,14 +632,14 @@ export class ReactLoopAgent implements Agent {
   }
 
   /** Log the resolved envelope and derive a frozen request from the admitted surface. */
-  private buildRequest(
+  private async buildRequest(
     config: LlmCallConfig,
     preparedCall: PreparedLlmCall | undefined,
     tools: GenerateOptions['tools'] & object,
     position: { turn: number; step: number },
     startsRequestSeries: boolean,
     signal: AbortSignal,
-  ): GenerateOptions {
+  ): Promise<GenerateOptions> {
     const { session } = this
     const surfaceGeneration = session.surface.contentGeneration
     const header = canonicalHeader({
@@ -665,6 +701,16 @@ export class ReactLoopAgent implements Agent {
       session.append('request/context', requestContext)
     }
     signal.throwIfAborted()
+
+    const admittedGeneration = session.surface.contentGeneration
+    await this.dispatch.waterfall('agent/request-context', { ...position, signal }, async () => {})
+    signal.throwIfAborted()
+    await this.dispatch.waterfall('agent/request-context-ready', { ...position, signal }, async () => {})
+    signal.throwIfAborted()
+    if (session.surface.contentGeneration !== admittedGeneration) {
+      session.append('request/header', { header, reason: 'series' })
+      this.requestSurfaceGeneration = session.surface.contentGeneration
+    }
 
     // canonicalHeader is shallow; append logs a detached snapshot, not these local values.
     deepFreeze(header)

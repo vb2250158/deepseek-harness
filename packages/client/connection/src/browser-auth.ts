@@ -131,6 +131,28 @@ function encodeCookie(payload: BrowserCookiePayload, secret: Buffer): string {
   return `v1.${body}.${encodeBase64Url(signature(secret, body))}`
 }
 
+/**
+ * Sign a short-lived request cookie for a trusted local carrier without creating or changing credentials.
+ * @param record - Existing browser-session grant from the credential provider.
+ * @param authority - Canonical Host authority receiving the request.
+ * @param lifetimeMilliseconds - Positive cookie lifetime accepted by the Host's configured maximum.
+ * @returns Authority-bound Cookie request header; callers retain it outside renderer documents and logs.
+ */
+export function createBrowserSessionCookie(
+  record: CredentialRecord | undefined,
+  authority: string,
+  lifetimeMilliseconds: number,
+): string {
+  const secret = storedSecret(record)
+  if (secret === undefined) throw new Error('client-connection: browser-session credential is missing')
+  const issuedAt = Date.now()
+  const expiresAt = issuedAt + lifetimeMilliseconds
+  if (!Number.isSafeInteger(lifetimeMilliseconds) || lifetimeMilliseconds <= 0 || !Number.isSafeInteger(expiresAt)) {
+    throw new Error('client-connection: invalid browser-cookie lifetime')
+  }
+  return `${cookieName(authority)}=${encodeCookie({ version: COOKIE_PAYLOAD_VERSION, authority, issuedAt, expiresAt }, secret)}`
+}
+
 function decodeCookie(value: string, secret: Buffer): BrowserCookiePayload | undefined {
   const parts = value.split('.')
   const [version, body, encodedSignature] = parts

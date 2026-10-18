@@ -262,12 +262,17 @@ export interface SkillListValue {
 
 /** Session list request. */
 export interface SessionListRequest {
+  /** Opt into bounded pages; omitted requests retain the complete-list behavior. */
+  readonly paged?: boolean
+  /** Continuation of one process-local catalog snapshot. */
   readonly cursor?: string
 }
 
 /** Session list response value. */
 export interface SessionListValue {
   readonly items: readonly SessionSummary[]
+  /** Absent after the complete snapshot has been served. */
+  readonly nextCursor?: string
 }
 
 /** Session search request. */

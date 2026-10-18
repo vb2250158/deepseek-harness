@@ -18,6 +18,106 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
 
+it.each([false, true])('continues the original interrupted turn without recovery input (pending: %s)', async pending => {
+  const sessionId = SessionId('prompt-free-resume')
+  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+  await seedStoredSession(first, sessionId, [
+    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
+    { type: 'user/message', seq: SessionSeq(1), time: 2, surfaceOp: 'append', data: createUserMessage({
+      content: [{ type: 'text', text: 'Finish the original task' }], source: { kind: 'user' },
+    }) },
+  ])
+  await first.fiber.dispose()
+  const adapter = new MockAdapter([textResponse('continued')])
+  const ctx = await mountPersistentHarness(root, adapter)
+  try {
+    const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    const agent = handle.agent
+    if (pending) agent.inject(createUserMessage({ content: [{ type: 'text', text: 'retained result' }], source: { kind: 'user' } }))
+    expect(agent.continueInterrupted?.(99)).toBe(false)
+    expect(agent.continueInterrupted?.(0)).toBe(true)
+    expect(agent.continueInterrupted?.(0)).toBe(false)
+    await agent.whenIdle()
+    expect(adapter.requests).toHaveLength(1)
+    const events = agent.session.snapshotEvents()
+    expect(events.filter(event => event.type === 'user/message')).toHaveLength(pending ? 2 : 1)
+    expect(events.filter(event => event.type === 'turn/start').map(event => event.data.turn)).toEqual([1, 2])
+    expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('Finish the original task')
+    if (pending) expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('retained result')
+    expect(agent.continueInterrupted?.(0)).toBe(false)
+    const latest = events.findLast(event => event.type === 'turn/start')
+    expect(agent.continueInterrupted?.(latest?.seq ?? -1)).toBe(false)
+    await handle.dispose()
+    expect(agent.continueInterrupted?.(0)).toBe(false)
+  } finally { await ctx.fiber.dispose() }
+})
+
+it.each(['completed', 'blocked', 'aborted'] as const)('preserves a voluntarily %s turn during recovery', async kind => {
+  const sessionId = SessionId('recovery-denied-' + kind)
+  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+  await seedStoredSession(first, sessionId, [
+    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
+    { type: 'turn/end', seq: SessionSeq(1), time: 2, data: { turn: 1, reason: kind === 'aborted' ? { kind, reason: { kind: 'user' } } : { kind } } },
+  ])
+  await first.fiber.dispose()
+  const adapter = new MockAdapter([])
+  const ctx = await mountPersistentHarness(root, adapter)
+  try {
+    const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    expect(handle.agent.continueInterrupted?.(0)).toBe(false)
+    expect(adapter.requests).toHaveLength(0)
+    await handle.dispose()
+  } finally { await ctx.fiber.dispose() }
+})
+
+it.each(['reject', 'cancel', 'maintenance'] as const)('respects %s during native continuation', async mode => {
+  const sessionId = SessionId('recovery-policy-' + mode)
+  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+  await seedStoredSession(first, sessionId, [{ type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } }])
+  await first.fiber.dispose()
+  const adapter = new MockAdapter([])
+  const ctx = await mountPersistentHarness(root, adapter)
+  try {
+    const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    const agent = handle.agent
+    if (mode === 'maintenance') {
+      const gate = Promise.withResolvers<void>()
+      const work = agent.runMaintenance(() => gate.promise)
+      expect(agent.continueInterrupted?.(0)).toBe(false)
+      gate.resolve()
+      await work
+    } else {
+      if (mode === 'reject') agent.ctx.on('agent/pre-step', () => ({ kind: 'reject' }))
+      expect(agent.continueInterrupted?.(0)).toBe(true)
+      if (mode === 'cancel') agent.cancel({ kind: 'user' })
+      await agent.whenIdle()
+    }
+    expect(adapter.requests).toHaveLength(0)
+    await handle.dispose()
+  } finally { await ctx.fiber.dispose() }
+})
+
+it.each(['QUOTA', 'PI_AI_ERROR', 'UNKNOWN'] as const)('only continues an eligible quota failure (%s)', async code => {
+  const sessionId = SessionId('recovery-quota-' + code)
+  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+  await seedStoredSession(first, sessionId, [
+    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
+    { type: 'turn/end', seq: SessionSeq(1), time: 2, data: { turn: 1, reason: { kind: 'error', error: { code, message: '402 status code' } } } },
+  ])
+  await first.fiber.dispose()
+  const adapter = new MockAdapter([textResponse('continued')])
+  const ctx = await mountPersistentHarness(root, adapter)
+  try {
+    const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    expect(handle.agent.continueInterrupted?.(0)).toBe(false)
+    expect(handle.agent.continueQuotaFailure?.(0)).toBe(code !== 'UNKNOWN')
+    await handle.agent.whenIdle()
+    expect(adapter.requests).toHaveLength(code === 'UNKNOWN' ? 0 : 1)
+    expect(handle.agent.continueQuotaFailure?.(0)).toBe(false)
+    await handle.dispose()
+  } finally { await ctx.fiber.dispose() }
+})
+
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'tool-bash': { kind: 'tool-bash' } & ContextFormed

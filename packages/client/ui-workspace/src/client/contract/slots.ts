@@ -132,6 +132,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * its trailing status line. Mounted only while that card is open.
      */
     'sidebar.session.row.hover': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
+    /** Persistent noninteractive badges before the title, independent of activity and archive state. */
+    'sidebar.session.row.badges': { kind: 'list'; scope: 'root'; owner: SessionRowScheduleOwnerProps }
+    /** Display-only title replacement; the stored title and rename draft remain unchanged. */
+    'sidebar.session.row.title': { kind: 'single'; scope: 'root'; owner: { sessionId: SessionId; title: string } }
     /**
      * The rows of one Session's "..." menu, in ascending `order`. ui-workspace
      * registers the shipped rows here — `pin` (100), `rename` (200), `fork`
@@ -459,6 +463,8 @@ export type WorkspaceBrowserProps =
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.leading'
     | 'sidebar.session.row.hover'
+    | 'sidebar.session.row.badges'
+    | 'sidebar.session.row.title'
   >
   & PropsStore<WorkspaceViewStoreHandle>
   & Omit<WorkspaceBrowserInjected, 'hooks'>

@@ -30,6 +30,7 @@ import type {} from '@deepseek-ai/dsh-goal/client'
 import type { Translate } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ComposerBarProps } from '../contract/slots.ts'
 import { DraftEditor } from '../input/editor/DraftEditor.tsx'
+import { DraftCompletion } from '../input/editor/DraftCompletion.tsx'
 import {
   focusDraftEditor, installDraftFilePicker, installDraftKeymap, installDraftWheel,
   keepDraftFocus, revealDraftSelection,
@@ -57,6 +58,7 @@ export const InputBar = memo(function InputBar({
   const stopKeys = useStopShortcut(keys => keys)
   void useLexicon // hook seat stays bound by the inject compartment; text-ref decoration rides the shell's editor transforms
   const commandMenuOpen = useMenuLauncher(source => source === 'command')
+  const completionMenuOpen = useMenuLauncher(source => source !== null)
   const [activity, setActivity] = useState(false)
   useEffect(() => { setActivity(false) }, [sessionId])
   const promptError = useSession(s => s.promptError) ?? null
@@ -415,6 +417,14 @@ export const InputBar = memo(function InputBar({
           hint={hint}
           showPlaceholder={draft === '' && attachments.length === 0 && !claimActive}
         />
+        {sessionId !== undefined && (
+          <DraftCompletion
+            key={sessionId}
+            editor={editor}
+            enabled={editable && input?.phase === 'plain' && !completionMenuOpen}
+            renderProvider={owner => renderSlot('conversation.input.completion', owner)}
+          />
+        )}
         <div ref={rowRef} className={css.row}>
           <div className={css.tools} hidden={activity}>
             <Tooltip label={t('input.commands')} side="top" delayMs={500}>
