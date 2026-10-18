@@ -1713,11 +1713,12 @@ describe('default one-shot summarizer', () => {
 })
 
 describe('automatic listener and loader composition', () => {
-  async function preStep(ctx: Context, owner: Agent, signal = SIGNAL) {
-    await agentEvents(ctx, owner).waterfall(
-      'agent/request-context', { turn: 1, step: 1, signal }, async () => {},
+  function preStep(ctx: Context, owner: Agent, signal = SIGNAL) {
+    return agentEvents(ctx, owner).waterfall(
+      'agent/pre-step',
+      { messages: [], turn: 1, step: 1, signal },
+      () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
     )
-    return { kind: 'enter' as const, messages: [] }
   }
 
   function recover(

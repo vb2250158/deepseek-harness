@@ -94,7 +94,7 @@ Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
-Automatic pressure runs after complete request admission through `agent/request-context`, after downstream context reconciliation. An optional `compaction/pressure-policy` listener replaces the configured trigger, target, and retained-tail budgets. Bound request capacity is reused without a second model lookup. Condensation must reach the policy target; ordinary summary failures remain warnings and canonical overflow recovery stays available.
+Automatic pressure runs through `agent/pre-step` before input admission and runtime-context reconciliation. If compaction shadows the retained runtime-context snapshot, the loop appends a fresh snapshot before dispatching the next request. An optional `compaction/pressure-policy` listener replaces the configured trigger, target, and retained-tail budgets. Capacity from the latest matching durable request context is reused without a second model lookup. Condensation must reach the policy target; ordinary summary failures remain warnings and canonical overflow recovery stays available.
 
 When the summary request itself returns `CONTEXT_WINDOW_EXCEEDED`, automatic condensation retries a smaller priced history prefix at a balanced boundary. Each failure closes its log bracket; successful summaries replace only their selected spans, and the raw events remain available. Recovery stops if the first indivisible unit cannot fit or the turn is cancelled.
 
