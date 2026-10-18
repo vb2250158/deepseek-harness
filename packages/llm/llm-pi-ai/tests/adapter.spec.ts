@@ -124,6 +124,13 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
   })
 
+  it('replaces the OpenCode session header with the stable Harness session id', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(server.url, { headers: { 'x-opencode-session': 'configured-value' } })
+    await assemble(ctx, { model: 'deepseek-flash', messages: [], sessionId: 'open-code-session' as never })
+    expect(server.headers[0]?.['x-opencode-session']).toBe('open-code-session')
+  })
+
   it('forwards common stream options and profile reasoning', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url, {

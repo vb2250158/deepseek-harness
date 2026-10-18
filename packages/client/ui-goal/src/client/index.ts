@@ -27,17 +27,22 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: the `goal` SessionProjectionMap key merge (single source, the domain's pure outlet).
 import type { GoalProjection, GoalRef } from '@deepseek-ai/dsh-goal/client'
-import type { GoalActionResult, GoalBarInjected } from './slots.ts'
+import type { GoalActionResult, GoalBarInjected, GoalEditDialogInjected } from './slots.ts'
 import { createGoalActivationSource } from './activation-source.ts'
 import { GoalDock } from './GoalBar.tsx'
+import { GoalEditDialog } from './GoalEditDialog.tsx'
+import { GoalEditDialogController } from './dialog.ts'
 import { GoalCommandInputView } from './GoalCommandInputView.tsx'
 import { goalCommandInputDefinition } from './goal-command-input.ts'
 import { en, zh, type GoalKey } from './locales.ts'
 
 export { GoalBar, GoalDock } from './GoalBar.tsx'
+export { GoalEditDialog } from './GoalEditDialog.tsx'
+export { GoalEditDialogController } from './dialog.ts'
 export type {
-  GoalActionResult, GoalBarActions,
+  GoalActionResult, GoalBarActions, GoalEditDialogInjected,
 } from './slots.ts'
+export type { GoalEditDialogState, GoalEditSubmit } from './dialog.ts'
 export type { GoalKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-api-session-controller/client' {
@@ -57,11 +62,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin. */
 const NS = 'goal'
 
-/** Required services for the Goal dock, command-input projection, Remote mutations, and copy. */
+/** Required services for the Goal dock, command-input projection, Remote mutations, copy, and the edit dialog. */
 export const inject = ['slots', 'sessions', 'remote', 'remote.goals', 'locale', 'uiConversation']
 
 /**
- * Client plugin body: the GoalBar dock entry with its mutation verbs.
+ * Client plugin body: the GoalBar dock entry with its mutation verbs and the
+ * Session's goal-edit dialog entry.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
@@ -88,6 +94,27 @@ export function apply(ctx: ClientContext): void {
     ok: false,
     error: { code: 'no-current-goal', message: 'no current goal to mutate' },
   }
+
+  // One dialog controller per Session, shared by the strip that opens it and
+  // the overlay entry that renders it. Both live in this apply closure, so the
+  // draft never crosses a package boundary.
+  const dialogs = new Map<SessionId, GoalEditDialogController>()
+  const dialogFor = (sessionId: SessionId): GoalEditDialogController => {
+    let dialog = dialogs.get(sessionId)
+    if (dialog === undefined) {
+      dialog = new GoalEditDialogController(async (objective) => {
+        const ref = refOf(sessionId)
+        if (ref === undefined) return noCurrentGoal
+        return await ctx.remote.goals.edit(sessionId, ref, { objective })
+      })
+      dialogs.set(sessionId, dialog)
+    }
+    return dialog
+  }
+  ctx.effect(() => () => {
+    for (const dialog of dialogs.values()) dialog.dispose()
+    dialogs.clear()
+  }, 'ui-goal: per-session edit dialogs')
 
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock',
@@ -119,11 +146,7 @@ export function apply(ctx: ClientContext): void {
       })
       return {
         hooks: { goalActivation },
-        onEdit: async (objective) => {
-          const ref = refOf(sessionId)
-          if (ref === undefined) return noCurrentGoal
-          return await ctx.remote.goals.edit(sessionId, ref, { objective })
-        },
+        onEdit: (objective) => { dialogFor(sessionId).open(objective) },
         onPause: async () => {
           const ref = refOf(sessionId)
           if (ref === undefined) return noCurrentGoal
@@ -142,4 +165,20 @@ export function apply(ctx: ClientContext): void {
       }
     },
   }, GoalDock))
+
+  ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({
+    name: 'conversation.input.overlay',
+    id: 'goal-edit-dialog',
+    order: 3,
+    locale: NS,
+    inject: (sessionId): GoalEditDialogInjected => {
+      const dialog = dialogFor(sessionId)
+      return {
+        hooks: { goalEditDialog: dialog.state },
+        edit: (draft) => { dialog.edit(draft) },
+        submit: () => dialog.submitDraft(),
+        dismiss: () => { dialog.dismiss() },
+      }
+    },
+  }, GoalEditDialog))
 }

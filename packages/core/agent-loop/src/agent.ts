@@ -250,16 +250,20 @@ export class ReactLoopAgent implements Agent {
   }
 
   private async kick(): Promise<void> {
+    let failed = false
     try {
       while (await this.turn()) {}
-    } catch (_error) {
+    } catch (_error: unknown) {
       // Reported failures and cancellation are contained at the driver boundary.
+      failed = this.phase.kind === 'running' && !this.phase.abort.signal.aborted
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
-        if (wakeRequested && this.inbox.hasPending) this.wakeDriver()
+        // A non-cancelled failure can leave a waking message behind its terminal
+        // boundary. Replay it once idle instead of requiring another send.
+        if ((wakeRequested || failed) && this.inbox.hasPending) this.wakeDriver()
       }
     }
   }

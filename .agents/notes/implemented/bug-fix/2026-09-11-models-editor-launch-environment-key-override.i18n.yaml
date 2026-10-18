@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-09-11-models-editor-launch-environment-key-override.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-11-models-editor-launch-environment-key-override.md
+/agent-note-models-editor-replacement-for-launch-environment-keys:
+  en: 67ac074c025373aa
+  zh: c60c7d523a303539
+/agent-note-models-editor-replacement-for-launch-environment-keys/problem:
+  en: 02be8ad93c929eae
+  zh: e3ca4ab1b01d931f
+/agent-note-models-editor-replacement-for-launch-environment-keys/decision:
+  en: ea14300eb454e89c
+  zh: fe680f00bf4adbd0
+/agent-note-models-editor-replacement-for-launch-environment-keys/alternatives-considered:
+  en: c4bc9cc356832b7f
+  zh: b4df35374e5868d8
+/agent-note-models-editor-replacement-for-launch-environment-keys/consequences:
+  en: 326a0e75cbb1b668
+  zh: 922c25a4b432f191
+/agent-note-models-editor-replacement-for-launch-environment-keys/testing:
+  en: fcb344408923f081
+  zh: 958871c27ea0d03e

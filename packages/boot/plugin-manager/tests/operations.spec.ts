@@ -420,6 +420,36 @@ it('does not fail an unrelated installation on an untouched incompatible depende
   expect(messages.join('')).toContain('startup denies it')
 })
 
+it('resolves a compatible replacement without checking stale installed content during lockfile-only add', async () => {
+  const { context, dir, pnpm } = fixture()
+  installGuarded(dir, 'plugin')
+  pnpm.view = () => ({ exitCode: 0, stdout: JSON.stringify({ name: 'plugin', version: '2.0.0', peerDependencies: { '@deepseek-ai/dsh': '*' } }) })
+  pnpm.mutate = target => {
+    const manifest = readProfileManifest('test', target)
+    writeFileSync(join(target, 'package.json'), JSON.stringify({ ...manifest, dependencies: { plugin: '2.0.0' } }))
+  }
+  expect(await runProfilePnpm(context, ['add', '--lockfile-only', 'plugin@2.0.0'], { execution: 'service', outputBytes: 8192 }))
+    .toMatchObject({ exitCode: 0 })
+  expect(readProfileManifest('test', dir).dependencies?.plugin).toBe('2.0.0')
+  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual([])
+  pnpm.mutate = target => {
+    const path = join(target, 'node_modules', 'plugin', 'package.json')
+    const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    writeFileSync(path, JSON.stringify({ ...manifest, version: '2.0.0' }))
+  }
+  expect(await runProfilePnpm(context, ['install'], { execution: 'service', outputBytes: 8192 }))
+    .toMatchObject({ exitCode: 1 })
+})
+
+it('rejects a named incompatible replacement before a lockfile-only run', async () => {
+  const { context, dir, pnpm } = fixture()
+  const before = readFileSync(join(dir, 'package.json'), 'utf8')
+  pnpm.view = () => ({ exitCode: 0, stdout: JSON.stringify({ name: 'plugin', version: '2.0.0', peerDependencies: { '@deepseek-ai/dsh': '999.0.0' } }) })
+  expect(await runProfilePnpm(context, ['add', '--lockfile-only', 'plugin@2.0.0'], { execution: 'service', outputBytes: 8192 }))
+    .toMatchObject({ exitCode: 1 })
+  expect(readFileSync(join(dir, 'package.json'), 'utf8')).toBe(before)
+})
+
 it('installs a dependency whose installed manifest declares compatible peers', async () => {
   const { dir, context, pnpm } = fixture()
   pnpm.mutate = (target) => {

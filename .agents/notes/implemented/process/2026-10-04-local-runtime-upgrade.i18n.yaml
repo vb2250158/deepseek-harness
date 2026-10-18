@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-04-local-runtime-upgrade.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-10-04-local-runtime-upgrade.md
+/agent-note-preserve-local-behavior-during-the-0-2-runtime-upgrade:
+  en: af1c738f688cfdaa
+  zh: d58798400d8c5d47
+/agent-note-preserve-local-behavior-during-the-0-2-runtime-upgrade/problem:
+  en: 110e03f3c0ed74c6
+  zh: 1a765b47c876632f
+/agent-note-preserve-local-behavior-during-the-0-2-runtime-upgrade/decision:
+  en: 95c130e8cf81d4a4
+  zh: b32b5fe931821dba
+/agent-note-preserve-local-behavior-during-the-0-2-runtime-upgrade/recovery:
+  en: 967532d5e3c8ae7d
+  zh: 11932cf2e305f9f0
+/agent-note-preserve-local-behavior-during-the-0-2-runtime-upgrade/alternatives-considered:
+  en: 69e4eb565816b839
+  zh: cf70dd658f67dac0
+/agent-note-preserve-local-behavior-during-the-0-2-runtime-upgrade/consequences:
+  en: da8f332ea893541c
+  zh: 24fadd3b08629bef
