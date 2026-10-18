@@ -16,9 +16,9 @@
  * token is the first non-empty delta chunk and survives an in-step
  * `llm/retry`, decode spans first token → assembled message on steps that
  * also report output tokens, and tool time pairs `tool/call` → `tool/result`
- * by callId. A cancelled step assembles no message, so its partial stream
- * time stays uncounted in every time figure — matching the window, which
- * renders it as an untimed interrupted node.
+ * by callId. Closed-turn time includes preparation, stopping and incomplete
+ * steps. Other time is the complement of recorded activity intervals inside
+ * closed turns; overlapping intervals contribute once to this coverage.
  *
  * @module @deepseek-ai/dsh-session-stats/projection
  */
@@ -31,6 +31,10 @@ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 
 /** Accumulated whole-log figures (the view is exactly these totals). */
 interface SessionStatsTotals {
+  /** Summed matched turn/start → turn/end wall time, ms. */
+  turnMs: number
+  /** Closed-turn time outside assembled model, matched tool and compaction intervals, ms. */
+  otherMs: number
   /** Distinct turns with at least one closed step so far. */
   turns: number
   /** Closed steps so far. */
@@ -58,6 +62,12 @@ interface SessionStatsTotals {
  * plain JSON per the unit contract (persisted-cache precondition).
  */
 interface SessionStatsState extends SessionStatsTotals {
+  /** Current turn and the union of its recorded activity intervals. */
+  openTurn: {
+    turn: number
+    startTime: number
+    spans: { startTime: number; endTime: number }[]
+  } | null
   /** Turn of the last counted `step/end`; null before the first. */
   lastTurn: number | null
   /** The open step's boundary facts; null outside a step or after its message assembled. */
@@ -81,6 +91,8 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
 }
 
 const sessionStatsSchema = z.object({
+  turnMs: z.number().nonnegative(),
+  otherMs: z.number().nonnegative(),
   turns: z.number().int().nonnegative(),
   steps: z.number().int().nonnegative(),
   llmMs: z.number().nonnegative(),
@@ -99,6 +111,13 @@ const sessionStatsSchema = z.object({
  * `sessionStatsSchema` (the wire output boundary) with the boundary fields.
  */
 const sessionStatsStateSchema = sessionStatsSchema.extend({
+  turnMs: z.number().nonnegative(),
+  otherMs: z.number().nonnegative(),
+  openTurn: z.object({
+    turn: z.number().int().nonnegative(),
+    startTime: z.number().nonnegative(),
+    spans: z.array(z.object({ startTime: z.number().nonnegative(), endTime: z.number().nonnegative() })),
+  }).nullable(),
   compactionMs: z.number().nonnegative(),
   lastTurn: z.number().int().nonnegative().nullable(),
   openStep: z.object({
@@ -111,6 +130,22 @@ const sessionStatsStateSchema = sessionStatsSchema.extend({
   pendingCalls: z.record(z.string(), z.number().nonnegative()),
   pendingCompactions: z.record(z.string(), z.number().nonnegative()),
 })
+
+/** Add a recorded interval to the current turn without counting overlaps twice. */
+function accountTurn(state: SessionStatsState, start: number, end: number): SessionStatsState['openTurn'] {
+  const open = state.openTurn
+  if (open === null || end <= Math.max(start, open.startTime)) return open
+  const ordered = [...open.spans, { startTime: Math.max(start, open.startTime), endTime: end }]
+    .sort((a, b) => a.startTime - b.startTime)
+  const spans: NonNullable<SessionStatsState['openTurn']>['spans'] = []
+  for (const span of ordered) {
+    const previous = spans.at(-1)
+    if (previous !== undefined && span.startTime <= previous.endTime) {
+      spans[spans.length - 1] = { startTime: previous.startTime, endTime: Math.max(previous.endTime, span.endTime) }
+    } else spans.push(span)
+  }
+  return { ...open, spans }
+}
 
 /** Model interval excluding disjoint, session-serialized compaction attempts. */
 function modelElapsed(start: number, end: number, spans: readonly { startTime: number; endTime: number }[]): number {
@@ -133,9 +168,12 @@ function usageOutputTokens(usage: unknown): number | null {
 /** The `sessionStats` unit registered on `ctx.sessionProjections` (exported for the unit spec). */
 export const sessionStatsProjectionDefinition = {
   key: 'sessionStats',
-  stateVersion: 2,
+  stateVersion: 3,
   stateSchema: sessionStatsStateSchema,
   init: () => ({
+    turnMs: 0,
+    otherMs: 0,
+    openTurn: null,
     turns: 0,
     steps: 0,
     llmMs: 0,
@@ -153,6 +191,8 @@ export const sessionStatsProjectionDefinition = {
   apply: (state, event) => {
     // Every uninteresting event returns the same reference (Object.is gates the change feed).
     switch (event.type) {
+      case 'turn/start':
+        return { ...state, openTurn: { turn: event.data.turn, startTime: event.time, spans: [] } }
       case 'step/start':
         return {
           ...state,
@@ -167,6 +207,7 @@ export const sessionStatsProjectionDefinition = {
         return {
           ...state,
           compactionMs: state.compactionMs + Math.max(0, event.time - start),
+          openTurn: accountTurn(state, start, event.time),
           pendingCompactions: Object.fromEntries(Object.entries(state.pendingCompactions).filter(([key]) => key !== id)),
           openStep: state.openStep === null ? null : { ...state.openStep,
             compactionSpans: [...state.openStep.compactionSpans, { startTime: start, endTime: event.time }] },
@@ -188,6 +229,7 @@ export const sessionStatsProjectionDefinition = {
         const next: SessionStatsState = {
           ...state,
           llmMs: state.llmMs + modelElapsed(open.startTime, event.time, open.compactionSpans),
+          openTurn: accountTurn(state, open.startTime, event.time),
           openStep: null,
         }
         if (firstToken !== null) {
@@ -214,7 +256,8 @@ export const sessionStatsProjectionDefinition = {
         const pendingCalls = Object.fromEntries(
           Object.entries(state.pendingCalls).filter(([id]) => id !== callId),
         )
-        return { ...state, toolMs: state.toolMs + Math.max(0, event.time - dispatched), pendingCalls }
+        return { ...state, toolMs: state.toolMs + Math.max(0, event.time - dispatched),
+          openTurn: accountTurn(state, dispatched, event.time), pendingCalls }
       }
       case 'step/end':
         return {
@@ -224,11 +267,20 @@ export const sessionStatsProjectionDefinition = {
           lastTurn: event.data.turn,
           openStep: null,
         }
-      case 'turn/end':
+      case 'turn/end': {
         // A call whose result never landed belongs to a cancelled or failed
         // turn; results always land within their turn, so drop the leftovers
         // instead of growing persisted state forever.
-        return Object.keys(state.pendingCalls).length === 0 ? state : { ...state, pendingCalls: {} }
+        const open = state.openTurn
+        if (open === null || open.turn !== event.data.turn) {
+          return Object.keys(state.pendingCalls).length === 0 ? state : { ...state, pendingCalls: {} }
+        }
+        const elapsed = Math.max(0, event.time - open.startTime)
+        const covered = open.spans.reduce((sum, span) => sum
+          + Math.max(0, Math.min(event.time, span.endTime) - span.startTime), 0)
+        return { ...state, turnMs: state.turnMs + elapsed,
+          otherMs: state.otherMs + Math.max(0, elapsed - covered), openTurn: null, pendingCalls: {} }
+      }
       default:
         return state
     }
@@ -236,6 +288,8 @@ export const sessionStatsProjectionDefinition = {
   wire: {
     viewSchema: sessionStatsSchema,
     view: state => ({
+      turnMs: state.turnMs,
+      otherMs: state.otherMs,
       turns: state.turns,
       steps: state.steps,
       llmMs: state.llmMs,

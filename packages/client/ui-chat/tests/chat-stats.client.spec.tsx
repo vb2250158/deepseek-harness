@@ -482,6 +482,28 @@ describe('composer stats pills', () => {
     const old = render(<StatsPills {...props(source,{ sessionStats:sessionStats({ turns:1,steps:1,llmMs:3_800 }) })} />)
     fireEvent.click(old.getByRole('button'))
     expect(old.getByRole('dialog').textContent).not.toContain('Context compaction time')
+    expect(old.getByRole('dialog').textContent).not.toContain('Total closed-turn time')
+    expect(old.getByRole('dialog').textContent).not.toContain('Other time')
+  })
+
+  it('shows closed-turn coverage over an empty paged window with whole-session scope', () => {
+    const { source } = makeSource()
+    const view = render(<StatsPills {...props(source, { sessionStats: sessionStats({
+      turns: 2, steps: 7, turnMs: 1_186_608, otherMs: 1_068_361, llmMs: 60_351, toolMs: 57_896,
+    }) })} t={t} />)
+    fireEvent.click(view.getByRole('button'))
+    const dialog = view.getByRole('dialog')
+    expect(dialog.querySelector('[data-session-stats-details]')?.textContent).toMatchInlineSnapshot(
+      '"整轮累计用时19分47秒模型用时1分0秒工具调用用时57.9秒其他用时17分48秒"',
+    )
+    expect(dialog.textContent).toContain('全会话累计；其他包含等待、流程处理和未完成步骤。并行调用可能重叠。')
+  })
+
+  it('opens a timing dialog for a closed turn that produced no steps', () => {
+    const { source } = makeSource()
+    const view = render(<StatsPills {...props(source, { sessionStats: sessionStats({ turnMs: 2_000, otherMs: 2_000 }) })} />)
+    fireEvent.click(view.getByRole('button'))
+    expect(view.getByRole('dialog').textContent).toContain('Total closed-turn time2sOther time2s')
   })
 
   it('omits the cache-hit segment when nothing was billed on the input side', () => {

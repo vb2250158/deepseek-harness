@@ -9,10 +9,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
+import { createMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as SessionStatsPlugin from '@deepseek-ai/dsh-session-stats'
@@ -76,6 +77,34 @@ describe('real Loader composition', () => {
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     expect(loaded.sessionProjections.snapshot(session).values.sessionStats)
       .toMatchObject({ turns: 1, steps: 1 })
+  })
+
+  it('publishes closed-turn coverage through the composed providers and durable lifecycle', async () => {
+    const loaded = await loadYaml([
+      "- name: '@deepseek-ai/dsh-session'",
+      "- name: '@deepseek-ai/dsh-session-projection'",
+      "- name: '@deepseek-ai/dsh-session-stats'",
+    ])
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      const session = loaded.sessions.create(SessionId('composed-coverage'))
+      session.append('turn/start', { turn: 1 })
+      clock.mockReturnValue(4_000)
+      session.append('step/start', { turn: 1, step: 1 })
+      clock.mockReturnValue(5_000)
+      session.append('assistant/message', {
+        turn: 1, step: 1, stream: [],
+        message: createMessage({ role: 'assistant', content: [], source: { kind: 'model', provider: 'mock', model: 'mock' } }),
+      }, { surfaceOp: 'append' })
+      session.append('step/end', { turn: 1, step: 1 })
+      clock.mockReturnValue(9_000)
+      session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      expect(loaded.sessionProjections.snapshot(session).values.sessionStats).toMatchObject({
+        turns: 1, steps: 1, turnMs: 8_000, otherMs: 7_000, llmMs: 1_000,
+      })
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('keeps the function-plugin namespace free of a default export', () => {

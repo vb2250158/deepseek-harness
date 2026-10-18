@@ -20,6 +20,10 @@ export {}
  * back to it wholesale.
  */
 export interface SessionStatsProjection {
+  /** Summed wall time of matched closed turns, including waits and incomplete steps; absent on older providers. */
+  turnMs?: number
+  /** Closed-turn time outside recorded model, tool and compaction intervals, with overlaps counted once; absent on older providers. */
+  otherMs?: number
   /** Distinct turns carrying at least one closed step (`step/end`); rejected or empty turns are uncounted. */
   turns: number
   /** Closed steps (`step/end` events) — completed, failed, and cancelled steps alike. */

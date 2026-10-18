@@ -39,6 +39,8 @@ Mount the plugin beside the session store and the projection registry when clien
 
 | Field | Meaning |
 |---|---|
+| `turnMs` | Matched closed-turn wall time, including preparation, stopping and incomplete steps |
+| `otherMs` | Closed-turn time outside recorded model, tool and compaction activity; overlapping activity intervals count once |
 | `turns` | Distinct turns with at least one closed step; rejected or empty turns are uncounted |
 | `steps` | Closed steps — completed, failed, cancelled, and max-tokens steps all count |
 | `llmMs` | Summed model wall time over message-assembling steps, excluding overlapping compaction |
@@ -77,7 +79,7 @@ The unit is a pure fold over committed session events: `step/end` is the counted
 
 ### Data model
 
-State version 2 rebuilds prior cached totals from the original log. The fold state holds nine totals plus in-flight boundaries: `lastTurn` (turn of the last counted `step/end`), `openStep` (the open step's boundary facts, closed by its `assistant/message`), and `pendingCalls` (tool dispatch times by callId). The wire view is a strict subset — the nine totals — so the persisted-cache state schema extends the view schema with the boundary fields.
+State version 3 rebuilds older projection caches from the original log. In addition to accumulated totals and open step, tool and compaction pairs, the state tracks the current turn and the union of its recorded activity intervals. Only matched `turn/end` events commit `turnMs` and `otherMs`; gaps between turns are excluded. These two fields are optional on the public projection type for older providers and unavailable in the paged-window fallback.
 
 ### Fold rules
 
