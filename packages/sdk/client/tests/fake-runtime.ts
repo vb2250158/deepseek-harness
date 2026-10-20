@@ -10,6 +10,7 @@
  * - `FAKE_TEXT`: assistant text for each turn (default `hello from fake runtime`).
  * - `FAKE_SESSION_EVENT`: one JSON event forwarded after the assistant with owned seq/time.
  * - `FAKE_SESSION_EVENTS`: JSON event array forwarded in order after the assistant with owned seq/time.
+ * - `FAKE_NOTIFICATION_TRACE`: recorded notifications after prompt receipt, preserving separate idle intervals.
  * - `FAKE_STATUS`: the `session.finished` status (default `ok`).
  * - `FAKE_REASON_KIND`: the `session.finished` reason kind (default `completed`; `none` omits the reason).
  * - `FAKE_ABORT_REASON_KIND`: nested cause for an `aborted` turn (default `user`).
@@ -318,6 +319,13 @@ reader.on('line', (line) => {
           source: { kind: 'user' },
         }],
       })
+      if (env.FAKE_NOTIFICATION_TRACE !== undefined) {
+        const trace = JSON.parse(env.FAKE_NOTIFICATION_TRACE) as { method: string; params: Record<string, unknown> }[]
+        for (const notification of trace) notify(notification.method, { ...notification.params, sessionId })
+        settledSessions.add(sessionId)
+        respond({ messageId })
+        return
+      }
       notify('session.status', { sessionId, status: 'running' })
       if (env.FAKE_STREAM_THEN_MALFORMED !== undefined) {
         event(sessionId, 'assistant/attempt', {

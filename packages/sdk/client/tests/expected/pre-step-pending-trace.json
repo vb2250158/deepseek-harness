@@ -1,0 +1,172 @@
+[
+  {
+    "method": "session.status",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "status": "running"
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "turn/start",
+        "seq": 1,
+        "time": 0,
+        "data": {
+          "turn": 1
+        }
+      }
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "turn/end",
+        "seq": 4,
+        "time": 0,
+        "data": {
+          "turn": 1,
+          "reason": {
+            "kind": "error",
+            "error": {
+              "message": "prompt hook broke",
+              "code": "UNKNOWN"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "session.status",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "status": "idle"
+    }
+  },
+  {
+    "method": "session.status",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "status": "running"
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "turn/start",
+        "seq": 5,
+        "time": 0,
+        "data": {
+          "turn": 2
+        }
+      }
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "step/start",
+        "seq": 7,
+        "time": 0,
+        "data": {
+          "turn": 2,
+          "step": 1
+        }
+      }
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "user/message",
+        "seq": 9,
+        "time": 0,
+        "data": {
+          "content": [
+            {
+              "type": "text",
+              "text": "second"
+            }
+          ],
+          "source": {
+            "kind": "user"
+          },
+          "role": "user",
+          "id": "pending-second"
+        },
+        "surfaceOp": "append"
+      }
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "assistant/message",
+        "seq": 12,
+        "time": 0,
+        "data": {
+          "turn": 2,
+          "step": 1,
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "after"
+              }
+            ],
+            "source": {
+              "kind": "model",
+              "provider": "mock",
+              "model": "mock"
+            },
+            "id": "assistant-after"
+          },
+          "usage": {
+            "inputTokens": 10,
+            "outputTokens": 5
+          },
+          "stream": []
+        },
+        "surfaceOp": "append"
+      }
+    }
+  },
+  {
+    "method": "session.event",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "event": {
+        "type": "turn/end",
+        "seq": 14,
+        "time": 0,
+        "data": {
+          "turn": 2,
+          "reason": {
+            "kind": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "session.status",
+    "params": {
+      "sessionId": "sdk-pre-step-pending",
+      "status": "idle"
+    }
+  }
+]
