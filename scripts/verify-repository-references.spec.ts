@@ -72,6 +72,14 @@ describe('unique object-name prefix search', () => {
 })
 
 describe('maintained repository reference policy', () => {
+  it('accepts uv artifact byte counts while retaining commit checks in their URLs', () => {
+    const commits = new Set(['1234567'])
+    expect(findRepositoryReferences('python/sdk/uv.lock', '{ size = 1234567 }', commits)).toEqual([])
+    expect(findRepositoryReferences('python/sdk/uv.lock', '{ url = "https://example.invalid/1234567", size = 1234567 }', commits)).toHaveLength(1)
+    expect(findRepositoryReferences('README.md', 'size = 1234567', commits)).toHaveLength(1)
+    expect(findRepositoryReferences('python/sdk/uv.lock', '{ size = 1234567abc }', new Set(['1234567abc']))).toHaveLength(1)
+  })
+
   it('permits only the independent kit repository and its source URLs', () => {
     for (const suffix of ['', '.git', '/tree/main/packages/entry']) {
       expect(findRepositoryReferences('package.json', `${organizationUrl}/libreoffice-kit${suffix}`, new Set())).toEqual([])
@@ -116,12 +124,11 @@ describe('maintained repository reference policy', () => {
     remote.write('partial-clone/new.md', missing)
 
     expect(scanRepositoryReferences(clone)).toEqual([])
-    expect(execFileSync('git', ['cat-file', '--batch-check'], {
+    expect(execFileSync('git', ['cat-file', '--batch-all-objects', '--batch-check=%(objectname)'], {
       cwd: clone,
       encoding: 'utf8',
       env: { ...process.env, GIT_NO_LAZY_FETCH: '1' },
-      input: `${missing}\n`,
-    }).trim()).toBe(`${missing} missing`)
+    }).trim().split('\n')).not.toContain(missing)
   })
 
   it('accepts blobs, trees, unknown hex, long digests, and identifiers embedded in alphanumeric words', (test) => {
