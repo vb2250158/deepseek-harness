@@ -107,7 +107,9 @@ describe('PiAiAdapter provider routing', () => {
     const prepared = await ctx.llm.prepareCall({ provider: 'deepseek', model: 'deepseek-flash' })
     providers = { deepseek: { apiKeyEnv: 'PI_TEST_KEY', baseURL: second.url } }
     const chunks: unknown[] = []
-    for await (const chunk of prepared.stream({ ...prepared.config, messages: [] })) chunks.push(chunk)
+    for await (const chunk of prepared.stream({ ...prepared.config, messages: [createUserMessage({
+      content: [{ type: 'text', text: 'hi' }], source: { kind: 'model', provider: 'deepseek', model: 'deepseek-flash' },
+    })] })) chunks.push(chunk)
 
     expect(chunks.length).toBeGreaterThan(0)
     expect(first.requests).toHaveLength(1)
@@ -119,9 +121,18 @@ describe('PiAiAdapter provider routing', () => {
     const ctx = await harness(server.url, {
       headers: { 'x-company': 'private', 'User-Agent': 'wrong' },
     })
-    await assemble(ctx, { model: 'deepseek-flash', messages: [] })
+    await assemble(ctx, { model: 'deepseek-flash', messages: [createUserMessage({
+      content: [{ type: 'text', text: 'hi' }], source: { kind: 'model', provider: 'deepseek', model: 'deepseek-flash' },
+    })] })
     expect(server.headers[0]?.['x-company']).toBe('private')
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
+  })
+
+  it('replaces the OpenCode session header with the stable Harness session id', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(server.url, { headers: { 'x-opencode-session': 'configured-value' } })
+    await assemble(ctx, { model: 'deepseek-flash', messages: [], sessionId: 'open-code-session' as never })
+    expect(server.headers[0]?.['x-opencode-session']).toBe('open-code-session')
   })
 
   it('forwards common stream options and profile reasoning', async () => {

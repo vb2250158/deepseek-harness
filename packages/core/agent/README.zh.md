@@ -71,6 +71,8 @@ await handle.agent.whenIdle()
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+`agent/request-context` 在完整输入及本次路由元数据入日志后、模型历史冻结前执行。监听者通过日志记录替换并调用 `next()`。`agent/request-context-ready` 在压缩结束后恢复必需上下文。取消保留已接纳事实，失败阻止发送。
+
 <details>
 <summary>实现细节——点击展开</summary>
 
@@ -134,6 +136,10 @@ await handle.agent.whenIdle()
 -----
 
 <a id="model-experience"></a>
+## 原会话恢复
+
+`Agent.continueInterrupted?(startSeq)` 和 `continueQuotaFailure?(startSeq)` 是可选驱动能力：不添加恢复消息，在原会话中开启新轮次，保留待处理队列。调用前须确认驱动支持；忙碌、主动停止、过期轮次及不匹配的失败均拒绝。
+
 ## 模型体验
 
 ### 用户、steering 与注入消息

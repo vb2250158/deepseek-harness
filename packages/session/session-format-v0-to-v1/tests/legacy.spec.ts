@@ -294,3 +294,41 @@ describe('released v0 legacy normalization', () => {
     }])).toThrow(/empty exactly/)
   })
 })
+
+
+describe('historical permission and descriptor configuration', () => {
+  it('removes only the known default-origin field and preserves the effective preset', () => {
+    const event = { type: 'permission/preset', seq: 0, time: 1,
+      data: { preset: 'read-only', origin: 'default' } }
+    const original = structuredClone(event)
+    expect(migrate([event]).events[0]).toEqual({ ...event, data: { preset: 'read-only' } })
+    expect(event).toEqual(original)
+    for (const data of [
+      { preset: 'read-only', origin: 'unknown' },
+      { preset: 'read-only', origin: 'default', extra: true },
+      { preset: '', origin: 'default' },
+    ]) expect(() => migrate([{ ...event, data }])).toThrow()
+  })
+
+  it.each(['one-shot', 'continuable'])('promotes descriptor v2 %s without adding composition', (mode) => {
+    const data = mode === 'one-shot'
+      ? { version: 2, mode, provider: 'in-process', label: 'child' }
+      : { version: 2, mode, provider: 'in-process', label: 'child',
+        agentProvider: 'mock', agentModel: 'model', persona: 'persona', toolFilter: { deny: ['write'] } }
+    const event = { type: 'subagent/descriptor', seq: 0, time: 1, data }
+    const original = structuredClone(event)
+    expect(migrate([event]).events[0]).toEqual({ ...event, data: { ...data, version: 3 } })
+    expect(event).toEqual(original)
+    expect(migrate([event]).events[0]?.data).not.toHaveProperty('agentReasoningEffort')
+  })
+
+  it('rejects unknown versions and malformed v2 composition rather than granting defaults', () => {
+    const base = { version: 2, mode: 'continuable', provider: 'in-process', label: 'child' }
+    for (const data of [
+      { ...base, version: 1 }, { ...base, version: 4 },
+      { ...base, agentProvider: 'unpaired' }, { ...base, toolFilter: {} },
+      { ...base, agentReasoningEffort: 'high' }, { ...base, extra: true },
+      { ...base, mode: 'one-shot', persona: 'unexpected' },
+    ]) expect(() => migrate([{ type: 'subagent/descriptor', seq: 0, time: 1, data }])).toThrow()
+  })
+})

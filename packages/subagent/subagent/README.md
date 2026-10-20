@@ -158,6 +158,10 @@ Read these pages when the package-level contract is not enough. They move from t
 -----
 
 <a id="model-experience"></a>
+## Original-session recovery
+
+`ctx.subagents.continueInterrupted(parent, childId, startSeq, signal)` continues the last interrupted turn under the original parent's authority and the child Session lock, without delivering a message. Cold activation reuses the descriptor, model and identity. One-shot children, wrong parents, stale turns and cancellation are refused. Failure or expired eligibility releases any newly mounted Activation and its concurrency slot.
+
 ## Model Experience
 
 ### Settlement notice

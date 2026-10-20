@@ -79,6 +79,8 @@ const handle = await ctx.agents.create({
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+`requestContextVersion` 标识驱动支持的完整请求检查版本。用户输入、系统提示、工具和本次路由容量入日志后，`agent/request-context` 在请求冻结前执行；压缩结束后运行 `agent/request-context-ready`，由 `requestContextFinalizeVersion` 标识支持版本。替换触发新的请求序列。运行时快照按原始贡献比较版本，缩短呈现不会导致相同状态反复注入。
+
 <details>
 <summary>实现细节——点击展开</summary>
 
@@ -147,6 +149,11 @@ const handle = await ctx.agents.create({
 -----
 
 <a id="model-experience"></a>
+<a id="original-session-recovery"></a>
+## 原会话恢复
+
+`continueInterrupted(startSeq)` 仅接受当前存活且空闲的 Agent 的最后中断轮次；`continueQuotaFailure(startSeq)` 仅接受最后的 QUOTA 或历史 PI_AI_ERROR/HTTP 402 失败。恢复复用原日志和待处理输入，不重放历史工具、不插入恢复消息；原有 pre-step 拒绝与取消仍生效。同一轮次重复请求只启动一次，维护任务期间拒绝启动。
+
 ## 模型体验
 
 ### 完整对话请求

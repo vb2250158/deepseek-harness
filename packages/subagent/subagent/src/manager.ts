@@ -1226,6 +1226,45 @@ export class SubagentManager {
     }
   }
 
+  /**
+   * Continue an interrupted direct child without adding user input.
+   * @param parent - exact live parent authorizing recovery.
+   * @param childId - durable child identity.
+   * @param startSeq - interrupted turn/start sequence number.
+   * @param signal - cancellation before driver admission.
+   * @returns whether the original child started a continuation turn.
+   */
+  async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean> {
+    this.assertLiveParent(parent, childId)
+    this.assertAdmitting(parent)
+    const releaseHold = this.holdOwnership(parent, childId)
+    try {
+      return await this.locks.run(childId, async () => {
+        signal.throwIfAborted()
+        const existing = this.resident.get(childId)
+        const activation = existing === undefined
+          ? await this.materializeChild(parent, childId, signal) : requireLocalActivation(existing)
+        try {
+          this.assertAdmitting(parent)
+          this.authorizeLineage(parent, childId, activation.parent.id)
+          signal.throwIfAborted()
+          if (activation.closing !== undefined) throw new SubagentError('Child is closing', 'ACTIVATION_CLOSING')
+          const agent = activation.handle.agent
+          if (agent.continueInterrupted === undefined) throw new SubagentError('Driver does not support prompt-free continuation', 'NOT_RESUMABLE')
+          const started = agent.continueInterrupted(startSeq)
+          if (started) this.announce(activation)
+          else if (existing === undefined) await this.dispose(activation)
+          return started
+        } catch (error: unknown) {
+          if (existing === undefined) await this.dispose(activation)
+          throw error
+        }
+      })
+    } finally {
+      releaseHold()
+    }
+  }
+
   /** Route one parent-originated delivery through residency and cold resume. */
   private async deliverToChild(
     parent: Agent,
@@ -1332,14 +1371,20 @@ export class SubagentManager {
     content: ContentBlock[],
     options: ChildDeliveryOptions,
   ): Promise<MessageId> {
+    const activation = await this.materializeChild(parent, childId, options.signal)
+    return await this.submitMaterialized(activation, content, options, parent)
+  }
+
+  /** Restore a direct child's local activation from its current durable descriptor. */
+  private async materializeChild(parent: Agent, childId: SessionId, signal: AbortSignal): Promise<LocalActivation> {
     const query = this.requireSessionQuery()
     let observation: SessionObservation
     try {
       observation = await query.observeSession(childId, {
-        signal: options.signal,
+        signal: signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
     using source = observation
@@ -1373,14 +1418,14 @@ export class SubagentManager {
             : {},
         },
         composition: { agentPreset: agentPreset ?? undefined, persona: descriptor.persona, toolFilter: descriptor.toolFilter },
-        signal: options.signal,
+        signal: signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       if (error instanceof SubagentError) throw error
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
-    return await this.submitMaterialized(activation, content, options, parent)
+    return requireLocalActivation(activation)
   }
 
   /** Admit a materialized child, commit its creation fact, and release it on failure. */

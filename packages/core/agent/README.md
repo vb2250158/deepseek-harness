@@ -71,6 +71,8 @@ The `agent/*` events let plugins act on live work without depending on the loop 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+`agent/request-context` reconciles the complete durable input and registration-bound request context before the loop freezes model history. Listeners commit logged replacements and delegate with `next()`. `agent/request-context-ready` restores required context after compaction settles. Cancellation retains admitted facts; failures prevent dispatch.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 
@@ -134,6 +136,10 @@ The package-level contract is enough for most consumers; read these when you nee
 -----
 
 <a id="model-experience"></a>
+## Original-session recovery
+
+`Agent.continueInterrupted?(startSeq)` and `continueQuotaFailure?(startSeq)` are optional driver capabilities. They begin a new turn in the original Session without adding a recovery message and preserve queued input. Callers check driver support; busy Agents, explicit stops, stale turn identities and ineligible failures are refused.
+
 ## Model Experience
 
 ### User, steering, and injected messages

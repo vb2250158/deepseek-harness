@@ -94,6 +94,8 @@ Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+Automatic pressure runs after complete request admission through `agent/request-context`, after downstream context reconciliation. An optional `compaction/pressure-policy` listener replaces the configured trigger, target, and retained-tail budgets. Bound request capacity is reused without a second model lookup. Condensation must reach the policy target; ordinary summary failures remain warnings and canonical overflow recovery stays available.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

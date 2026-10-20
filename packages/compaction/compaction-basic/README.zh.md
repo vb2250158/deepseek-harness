@@ -94,6 +94,8 @@ kind: "package-reference"
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+自动压力检查通过 `agent/request-context` 在完整输入接纳及下游上下文整理之后执行。可选 `compaction/pressure-policy` 监听者提供触发、压缩目标及尾部保留预算。容量复用本次请求准备结果，避免再次查询模型。摘要需达到目标；普通摘要失败仍记录警告，真实上下文溢出的恢复保持可用。
+
 <details>
 <summary>实现细节——点击展开</summary>
 

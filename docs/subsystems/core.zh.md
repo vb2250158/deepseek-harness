@@ -125,6 +125,22 @@ interface Agent {
   followup(message: UserMessage): void
 
   /**
+   * 在原会话中续跑指定的最后中断轮次，不添加恢复消息。活动中的
+   * Agent、过期轮次和主动停止均拒绝；保留待处理输入。替代驱动可不支持。
+   * @param startSeq - 原中断轮次的 turn/start 序号。
+   * @returns 是否已同步启动原 Agent 的新轮次。
+   */
+  continueInterrupted?(startSeq: number): boolean
+
+  /**
+   * 在原会话中续跑最后因 QUOTA 或历史 HTTP 402 失败的轮次。
+   * 活动中的 Agent、过期轮次和其他失败拒绝；不添加恢复消息。
+   * @param startSeq - 原失败轮次的 turn/start 序号。
+   * @returns 是否已同步启动原 Agent 的新轮次。
+   */
+  continueQuotaFailure?(startSeq: number): boolean
+
+  /**
    * Submit steering for the nearest step. An idle driver starts a turn;
    * a running driver consumes it at its next step boundary.
    * A rejected step leaves steering parked in the inbox until the next
@@ -989,6 +1005,54 @@ Replace the frozen call configuration. `await next()` yields the config the mach
 ```
 
 Types: [LlmCallConfig](llm-streaming.zh.md) · [Scoped](scope.zh.md)
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
+<a id="agentrequest-context--waterfall"></a>
+
+#### `agent/request-context` — waterfall
+
+Reconcile logged input before freezing the complete model request. Listeners may commit surface replacements; accepted input and the registration-bound route are already durable. Cancellation preserves those committed facts. Every listener delegates with `next()`; failures prevent model dispatch.
+
+```ts cordis-catalog
+/**
+ * Reconcile logged input before freezing the complete model request. Listeners
+ * may commit surface replacements; accepted input and the registration-bound
+ * route are already durable. Cancellation preserves those committed facts.
+ * Every listener delegates with `next()`; failures prevent model dispatch.
+ * @param payload.agent - agent owning the admitted request.
+ * @param payload.turn - open turn number.
+ * @param payload.step - open step number.
+ * @param payload.signal - turn cancellation signal.
+ * @mode waterfall
+ */
+'agent/request-context'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<void>): Promise<void>
+```
+
+Types: [Scoped](scope.zh.md)
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
+<a id="agentrequest-context-ready--waterfall"></a>
+
+#### `agent/request-context-ready` — waterfall
+
+Restore required logged context after all request compaction listeners settle. Listeners must delegate; failure prevents dispatch. The loop freezes input after this chain.
+
+```ts cordis-catalog
+/**
+ * Restore required logged context after all request compaction listeners settle.
+ * Listeners must delegate; failure prevents dispatch. The loop freezes input after this chain.
+ * @param payload.agent - agent owning the admitted request.
+ * @param payload.turn - open turn number.
+ * @param payload.step - open step number.
+ * @param payload.signal - turn cancellation signal.
+ * @mode waterfall
+ */
+'agent/request-context-ready'(this: Scoped<Agent>, payload: { agent: Agent; turn: number; step: number; signal: AbortSignal }, next: () => Promise<void>): Promise<void>
+```
+
+Types: [Scoped](scope.zh.md)
 
 Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
 
