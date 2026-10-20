@@ -148,11 +148,13 @@ const handle = await ctx.agents.create({
 
 -----
 
-<a id="model-experience"></a>
 <a id="original-session-recovery"></a>
+
 ## 原会话恢复
 
 `continueInterrupted(startSeq)` 仅接受当前存活且空闲的 Agent 的最后中断轮次；`continueQuotaFailure(startSeq)` 仅接受最后的 QUOTA 或历史 PI_AI_ERROR/HTTP 402 失败。恢复复用原日志和待处理输入，不重放历史工具、不插入恢复消息；原有 pre-step 拒绝与取消仍生效。同一轮次重复请求只启动一次，维护任务期间拒绝启动。
+
+<a id="model-experience"></a>
 
 ## 模型体验
 

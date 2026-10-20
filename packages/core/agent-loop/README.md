@@ -148,11 +148,13 @@ The package-level contract is enough for most consumers; read these when you nee
 
 -----
 
-<a id="model-experience"></a>
 <a id="original-session-recovery"></a>
+
 ## Original-session recovery
 
 `continueInterrupted(startSeq)` accepts only the live, idle Agent's last interrupted turn; `continueQuotaFailure(startSeq)` accepts only a final QUOTA failure or a historical PI_AI_ERROR/HTTP 402 failure. Recovery retains the original log and queued input, adds no recovery message and replays no tool. Existing pre-step rejection and cancellation still apply. Repeated requests start the same turn only once, and maintenance work prevents admission.
+
+<a id="model-experience"></a>
 
 ## Model Experience
 
