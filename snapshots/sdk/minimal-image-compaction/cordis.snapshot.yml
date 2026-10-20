@@ -16,7 +16,8 @@
 
 - id: compaction-basic
   config:
-    thresholdRatio: 0.001
+    # The complete initial request stays below 3420 tokens; the image result crosses it.
+    thresholdRatio: 0.00342
     headroomTokens: 256
     retainTokens: 64
     maxTokens: 256
