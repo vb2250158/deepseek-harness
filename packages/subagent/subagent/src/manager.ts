@@ -1249,6 +1249,7 @@ export class SubagentManager {
           this.authorizeLineage(parent, childId, activation.parent.id)
           signal.throwIfAborted()
           if (activation.closing !== undefined) throw new SubagentError('Child is closing', 'ACTIVATION_CLOSING')
+          if (activation.structured?.acceptsInput() === false) throw new SubagentError('Child input is closed', 'INPUT_CLOSED')
           const agent = activation.handle.agent
           if (agent.continueInterrupted === undefined) throw new SubagentError('Driver does not support prompt-free continuation', 'NOT_RESUMABLE')
           const started = agent.continueInterrupted(startSeq)
