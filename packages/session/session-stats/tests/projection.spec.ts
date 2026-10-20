@@ -10,7 +10,13 @@
  * exported definition directly, where event times are controlled.
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import Include from '@deepseek-ai/cordis-plugin-include'
 import { Context } from '@deepseek-ai/cordis'
 import { createMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -52,12 +58,15 @@ function appendEmptyAssistantMessage(session: Session, turn: number, step: numbe
 /** The all-zero projection value plus overrides, for exact fold expectations. */
 function totals(overrides: Partial<SessionStatsProjection> = {}): SessionStatsProjection {
   return {
-    turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
+    turnMs: 0, otherMs: 0,
+    turns: 0, steps: 0, llmMs: 0, toolMs: 0, compactionMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
     ...overrides,
   }
 }
 
 describe('sessionStats projection unit (registry drive)', () => {
+  beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(1_000) })
+  afterEach(() => { vi.restoreAllMocks() })
   it('serves zero figures on the empty log', async () => {
     const { ctx, session } = await harness(true)
     expect(ctx.sessionProjections.snapshot(session).values.sessionStats).toEqual(totals())
@@ -86,11 +95,12 @@ describe('sessionStats projection unit (registry drive)', () => {
     expect(counted.map(change => ({ seq: change.seq, value: change.value }))).toContainEqual(
       { seq: firstSeq, value: totals({ turns: 1, steps: 1 }) },
     )
-    expect(changes.at(-1)).toEqual({ key: 'sessionStats', value: totals({ turns: 2, steps: 3 }), seq: thirdSeq })
+    expect(changes.at(-1)).toEqual({ key: 'sessionStats', value: totals({ turns: 2, steps: 3 }), seq: session.seq - 1 })
     const snapshot = ctx.sessionProjections.snapshot(session)
     expect(snapshot.values.sessionStats).toEqual(totals({ turns: 2, steps: 3 }))
     expect(snapshot.asOfSeq).toBe(session.seq - 1)
     expect(changes.map(change => change.seq)).toContain(secondSeq)
+    expect(changes.map(change => change.seq)).toContain(thirdSeq)
   })
 
   it('does not count a rejected or empty turn that closes with no step', async () => {
@@ -176,6 +186,40 @@ function fold(events: readonly SessionEvent[]): SessionStatsProjection {
   return sessionStatsProjectionDefinition.wire.view(state)
 }
 
+describe('sessionStats Loader composition', () => {
+  it('publishes whole-turn coverage from the composed providers and durable lifecycle', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-stats-coverage-'))
+    const config = join(dir, 'cordis.yml')
+    writeFileSync(config, '- name: cordis:session-store\n- name: cordis:projection-registry\n- name: cordis:session-stats\n')
+    const ctx = new Context()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      await ctx.plugin(Loader)
+      ctx.loader.builtins.include = Include
+      ctx.loader.builtins['session-store'] = SessionStore
+      ctx.loader.builtins['projection-registry'] = SessionProjectionRegistry
+      ctx.loader.builtins['session-stats'] = SessionStatsPlugin
+      await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(config).href } })
+      await ctx.loader.await()
+      const session = ctx.sessions.create(SessionId('composed-coverage'))
+      session.append('turn/start', { turn: 1 })
+      clock.mockReturnValue(4_000)
+      session.append('step/start', { turn: 1, step: 1 })
+      clock.mockReturnValue(5_000)
+      appendEmptyAssistantMessage(session, 1, 1)
+      session.append('step/end', { turn: 1, step: 1 })
+      clock.mockReturnValue(9_000)
+      session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      expect(ctx.sessionProjections.snapshot(session).values.sessionStats)
+        .toEqual(totals({ turns: 1, steps: 1, turnMs: 8_000, otherMs: 7_000, llmMs: 1_000 }))
+    } finally {
+      clock.mockRestore()
+      await ctx.fiber.dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('sessionStats wall-time fold (controlled timestamps)', () => {
   const message = createMessage({
     role: 'assistant',
@@ -196,6 +240,143 @@ describe('sessionStats wall-time fold (controlled timestamps)', () => {
       ...usage === undefined ? {} : { usage },
     })
   }
+
+
+  it('replays recorded preparation and stopping gaps without including the gap between two turns', () => {
+    // Relative timestamps from a recorded two-turn lifecycle; content and ids are fixture-owned.
+    const intervals = [
+      [501_666, 510_133, 510_135, 524_175, 524_181],
+      [703_304, 714_875, 714_878, 724_898, 724_899],
+      [884_632, 891_963, 891_966, 908_256, 908_263],
+      [1_135_008, 1_144_915, 1_144_917, 1_149_715, 1_149_717],
+      [1_218_549, 1_226_010, 1_226_013, 1_238_761, 1_238_763],
+    ] as const
+    const events = [
+      at(0, 'turn/start', { turn: 1 }),
+      at(119_083, 'step/start', { turn: 1, step: 1 }),
+      attemptAt(121_563, []),
+      at(121_603, 'step/end', { turn: 1, step: 1 }),
+      at(121_608, 'turn/end', { turn: 1, reason: { kind: 'error' } }),
+      at(376_270, 'turn/start', { turn: 2 }),
+      ...intervals.flatMap(([start, response, call, result, end], index) => [
+        at(start, 'step/start', { turn: 2, step: index + 1 }),
+        at(response, 'assistant/message', { turn: 2, step: index + 1, message, stream: [] }),
+        at(call, 'tool/call', { callId: String(index) }),
+        at(result, 'tool/result', { message: { source: { callId: String(index) } } }),
+        at(end, 'step/end', { turn: 2, step: index + 1 }),
+      ]),
+      at(1_374_229, 'step/start', { turn: 2, step: 6 }),
+      at(1_389_843, 'assistant/message', { turn: 2, step: 6, message, stream: [] }),
+      at(1_389_845, 'step/end', { turn: 2, step: 6 }),
+      at(1_441_270, 'turn/end', { turn: 2, reason: { kind: 'completed' } }),
+    ]
+    expect(fold(events)).toEqual(totals({
+      turns: 2, steps: 7, llmMs: 60_351, toolMs: 57_896, turnMs: 1_186_608, otherMs: 1_068_361,
+    }))
+  })
+
+  it('separates pressure compaction from model and first-token time in the same step', () => {
+    expect(fold([
+      at(1_000, 'step/start', { turn: 1, step: 1 }),
+      at(1_200, 'compaction/start', { compactionId: 'pressure' }),
+      at(3_200, 'compaction/end', { compactionId: 'pressure' }),
+      messageAt(4_800, [{ time:3_800,chunk:{ type:'text-delta',index:0,text:'answer' } }], { inputTokens:10,outputTokens:60 }),
+      at(4_900, 'step/end', { turn:1,step:1 }),
+    ])).toEqual(totals({ turns:1,steps:1,llmMs:1_800,compactionMs:2_000,ttftMs:800,ttftSteps:1,decodeMs:1_000,decodeTokens:60 }))
+  })
+
+  it('excludes retry compaction after the first token from decoding, including failed attempts', () => {
+    expect(fold([
+      at(1_000,'step/start',{ turn:1,step:1 }),
+      attemptAt(1_600,[{ time:1_500,chunk:{ type:'text-delta',index:0,text:'partial' } }]),
+      at(1_800,'compaction/start',{ compactionId:'retry' }),
+      at(2_800,'compaction/end',{ compactionId:'retry',error:[] }),
+      messageAt(4_800,[],{ inputTokens:10,outputTokens:60 }),
+      at(4_900,'step/end',{ turn:1,step:1 }),
+    ])).toEqual(totals({ turns:1,steps:1,llmMs:2_800,compactionMs:1_000,ttftMs:500,ttftSteps:1,decodeMs:2_300,decodeTokens:60 }))
+  })
+
+  it('counts idle compaction once without reducing a later model interval', () => {
+    expect(fold([
+      at(100,'compaction/start',{ compactionId:'manual' }),
+      at(1_100,'compaction/end',{ compactionId:'manual' }),
+      at(1_150,'compaction/end',{ compactionId:'manual' }),
+      at(1_200,'step/start',{ turn:1,step:1 }),messageAt(2_200),
+    ])).toEqual(totals({ compactionMs:1_000,llmMs:1_000 }))
+  })
+
+  it('leaves unmatched ends and unfinished attempts uncounted and clamps clock rollback', () => {
+    expect(fold([
+      at(100,'compaction/end',{ compactionId:'missing' }),
+      at(200,'compaction/start',{ compactionId:'unfinished' }),
+      at(400,'compaction/start',{ compactionId:'clock' }),
+      at(300,'compaction/end',{ compactionId:'clock' }),
+    ])).toEqual(totals())
+  })
+
+  it('rejects the prior cached state so registry replay rebuilds closed-turn timing', () => {
+    expect(sessionStatsProjectionDefinition.stateVersion).toBe(3)
+    const { openTurn: _open,turnMs: _turn,otherMs: _other,...old } = sessionStatsProjectionDefinition.init()
+    expect(sessionStatsProjectionDefinition.stateSchema.safeParse(old).success).toBe(false)
+    expect(sessionStatsProjectionDefinition.stateSchema.safeParse(sessionStatsProjectionDefinition.init()).success).toBe(true)
+  })
+
+  it('covers preparation, time between steps and stopping without counting time between turns', () => {
+    expect(fold([
+      at(1_000, 'turn/start', { turn: 1 }),
+      at(4_000, 'step/start', { turn: 1, step: 1 }),
+      messageAt(5_000),
+      at(5_000, 'tool/call', { callId: 'a' }),
+      at(7_000, 'tool/result', { message: { source: { callId: 'a' } } }),
+      at(7_000, 'step/end', { turn: 1, step: 1 }),
+      at(9_000, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      at(100_000, 'turn/start', { turn: 2 }),
+      at(102_000, 'turn/end', { turn: 2, reason: { kind: 'blocked' } }),
+    ])).toEqual(totals({ turns: 1, steps: 1, turnMs: 10_000, otherMs: 7_000, llmMs: 1_000, toolMs: 2_000 }))
+  })
+
+  it('unions parallel tools and overlapping compaction when finding other time', () => {
+    expect(fold([
+      at(1_000, 'turn/start', { turn: 1 }),
+      at(2_000, 'step/start', { turn: 1, step: 1 }),
+      at(3_000, 'compaction/start', { compactionId: 'pressure' }),
+      at(4_000, 'compaction/end', { compactionId: 'pressure' }),
+      messageAt(5_000),
+      at(5_000, 'tool/call', { callId: 'a' }),
+      at(5_500, 'tool/call', { callId: 'b' }),
+      at(6_000, 'tool/result', { message: { source: { callId: 'a' } } }),
+      at(6_000, 'compaction/start', { compactionId: 'parallel' }),
+      at(7_000, 'compaction/end', { compactionId: 'parallel' }),
+      at(8_000, 'tool/result', { message: { source: { callId: 'b' } } }),
+      at(9_000, 'step/end', { turn: 1, step: 1 }),
+      at(10_000, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ])).toEqual(totals({ turns: 1, steps: 1, turnMs: 9_000, otherMs: 3_000,
+      llmMs: 2_000, toolMs: 3_500, compactionMs: 2_000 }))
+  })
+
+  it('includes interrupted steps and unresolved tools in other time only when the turn closes', () => {
+    const events = [
+      at(1_000, 'turn/start', { turn: 1 }),
+      at(2_000, 'step/start', { turn: 1, step: 1 }),
+      attemptAt(3_000, []),
+      at(3_100, 'tool/call', { callId: 'unfinished' }),
+      at(3_200, 'compaction/start', { compactionId: 'unfinished' }),
+      at(4_000, 'step/end', { turn: 1, step: 1 }),
+    ]
+    expect(fold(events)).toEqual(totals({ turns: 1, steps: 1 }))
+    expect(fold([...events,
+      at(5_000, 'turn/end', { turn: 1, reason: { kind: 'error' } }),
+      at(5_100, 'turn/end', { turn: 1, reason: { kind: 'error' } }),
+    ])).toEqual(totals({ turns: 1, steps: 1, turnMs: 4_000, otherMs: 4_000 }))
+  })
+
+  it('ignores unmatched turn ends and clamps turn clock rollback', () => {
+    expect(fold([
+      at(1_000, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      at(3_000, 'turn/start', { turn: 2 }),
+      at(2_000, 'turn/end', { turn: 2, reason: { kind: 'completed' } }),
+    ])).toEqual(totals())
+  })
 
   it('accrues model, first-token, and decode time from one fully recorded step', () => {
     expect(fold([

@@ -96,10 +96,24 @@ export interface Config {
   readonly nativeOpen?: boolean
   /** Positive integral milliseconds of list work before yielding between complete rows. */
   readonly listWorkSliceMs?: number
+  /** Maximum historical rows returned by each continuation page. */
+  readonly listPageSize?: number
+  /** Recent idle rows selected per workspace for the first page. */
+  readonly listInitialPerWorkspace?: number
+  /** Maximum concurrent retained catalog snapshots. */
+  readonly listSnapshotLimit?: number
+  /** Catalog continuation lifetime in milliseconds. */
+  readonly listSnapshotTtlMs?: number
 }
 
 /** Deployment policy after schema defaults have been applied. */
-type ResolvedConfig = Config & { readonly listWorkSliceMs: number }
+type ResolvedConfig = Config & {
+  readonly listWorkSliceMs: number
+  readonly listPageSize: number
+  readonly listInitialPerWorkspace: number
+  readonly listSnapshotLimit: number
+  readonly listSnapshotTtlMs: number
+}
 
 /** Host integrations replaceable by direct unit tests. */
 export interface SessionControllerInternals {
@@ -135,6 +149,10 @@ export class SessionController extends TypertRemoteService {
   static Config: z<Config, ResolvedConfig> = z.object({
     nativeOpen: z.boolean(),
     listWorkSliceMs: z.natural().min(1).default(16),
+    listPageSize: z.natural().min(1).default(50),
+    listInitialPerWorkspace: z.natural().min(1).default(5),
+    listSnapshotLimit: z.natural().min(1).default(8),
+    listSnapshotTtlMs: z.natural().min(1).default(60_000),
   })
 
   private readonly agents: ApiSessionAgentController
@@ -142,6 +160,7 @@ export class SessionController extends TypertRemoteService {
   private readonly controlState: SessionControlController
   private readonly history: SessionHistoryController
   private readonly listState: ApiSessionList
+  private readonly listPolicy: ResolvedConfig
   private readonly openPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly fileApplications: typeof nativeFileApplications
   private readonly openFileApplication: typeof openNativeFileApplication
@@ -158,6 +177,7 @@ export class SessionController extends TypertRemoteService {
     super(ctx, 'sessionController', { namespace: 'session' })
     ctx.typert.resources.register('session', { field: 'sessionId' })
     const resolved = SessionController.Config(config)
+    this.listPolicy = resolved
     installModelSelectionProjection(ctx)
     this.agents = new ApiSessionAgentController(ctx)
     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
@@ -267,13 +287,17 @@ export class SessionController extends TypertRemoteService {
   }
 
   /**
-   * Read all visible Session rows without resuming an Agent.
-   * @param _request - reserved empty list request.
+   * Read visible Session rows without resuming an Agent.
+   * @param _request - full-list selection or continuation of a bounded snapshot.
    * @param signal - cancellation for persistence reads and summary generation.
    * @returns visible Session summaries ordered by activity.
    */
   @Remote('list')
   async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue> {
+    const request = _request
+    if (request.paged || request.cursor !== undefined) {
+      return this.listState.page(request, this.listPolicy, signal)
+    }
     const items = await this.listState.list(signal)
     return { items: items.filter(item => this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId })) }
   }

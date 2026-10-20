@@ -89,6 +89,12 @@
   overflow-wrap: anywhere;
 }
 
+.timingNote {
+  max-width: 300px;
+  margin: 10px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .reasoning {
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;

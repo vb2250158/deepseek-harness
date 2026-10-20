@@ -303,15 +303,17 @@ class JsonlSessionPersistence extends SessionPersistence {
   private rootEncodingCheck: Promise<void> | undefined
   private readonly generationFormat: Omit<JsonlGenerationFormatAdapter, 'createRestore'>
   /**
-   * Bounded LRU of parsed, validated stored logs keyed by session id and
+   * Bounded weak LRU of parsed, validated stored logs keyed by session id and
    * guarded by the stat-derived revision, so an immediate cold-read handoff
-   * (observation then resume) parses the artifact once. Every local mutation
+   * (observation then resume) can reuse an uncollected artifact without retaining decoded histories. Every local mutation
    * for an id invalidates its entry; a foreign write misses through the
    * revision guard.
    */
-  private readonly coldLogMemo = new Map<SessionId, StoredLog>()
+  private readonly coldLogMemo = new Map<SessionId, WeakRef<StoredLog>>()
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
+  /** Validated headers by physical revision; directory enumeration evicts retired paths. */
+  private readonly generationHeaders = new Map<string, { revision: PersistenceRevision; metadata: GenerationHeader }>()
 
   constructor(ctx: Context, public config: Config, private readonly tracker: JsonlBackendTracker) {
     super(ctx)
@@ -504,6 +506,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal)}`)
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
+        modifiedAt: Number(identity.mtimeMs),
       }
     } catch (error: unknown) {
       options?.signal?.throwIfAborted()
@@ -552,6 +555,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           ? SessionPersistenceRevision(`${fileRevision(identity)}:${corpusRevision}`)
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
+        modifiedAt: Number(identity.mtimeMs),
       })
     }
     for (const [id, entry] of pending) {
@@ -613,10 +617,10 @@ class JsonlSessionPersistence extends SessionPersistence {
       )
     }
     const probe = fileRevision(await stat(selected.sourcePath, { bigint: true }))
-    const memoized = this.coldLogMemo.get(id)
+    const memoized = this.coldLogMemo.get(id)?.deref()
     if (memoized?.status === 'current' && memoized.revision === probe) {
       this.coldLogMemo.delete(id)
-      this.coldLogMemo.set(id, memoized)
+      this.coldLogMemo.set(id, new WeakRef(memoized))
       return memoized
     }
     const current = await readStableJsonlFile(selected.sourcePath, signal)
@@ -637,7 +641,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     signal: AbortSignal,
   ): Promise<PreparedStoredLog> {
     signal.throwIfAborted()
-    const memoized = this.coldLogMemo.get(id)
+    const memoized = this.coldLogMemo.get(id)?.deref()
     if (memoized?.status === 'prepared' && memoized.revision === sourceRevision) {
       try {
         await memoized.validateRelatedSources()
@@ -646,7 +650,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         throw this.generationFailure(id, selected, error)
       }
       this.coldLogMemo.delete(id)
-      this.coldLogMemo.set(id, memoized)
+      this.coldLogMemo.set(id, new WeakRef(memoized))
       return memoized
     }
     return this.prepareStoredMigration(id, selected, signal)
@@ -749,7 +753,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       identity = await migration.value.publish()
     } catch (error: unknown) {
       /* v8 ignore else -- a newer preparation may have replaced this stale cache entry. */
-      if (this.coldLogMemo.get(id) === stored) this.coldLogMemo.delete(id)
+      if (this.coldLogMemo.get(id)?.deref() === stored) this.coldLogMemo.delete(id)
       throw this.generationFailure(id, migration.source, error)
     }
     const published: CurrentStoredLog = {
@@ -799,10 +803,10 @@ class JsonlSessionPersistence extends SessionPersistence {
   async readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<CurrentStoredLog> {
     signal?.throwIfAborted()
     const probe = fileRevision(await stat(path, { bigint: true }))
-    const memoized = this.coldLogMemo.get(expectedId)
+    const memoized = this.coldLogMemo.get(expectedId)?.deref()
     if (memoized?.status === 'current' && memoized.revision === probe) {
       this.coldLogMemo.delete(expectedId)
-      this.coldLogMemo.set(expectedId, memoized)
+      this.coldLogMemo.set(expectedId, new WeakRef(memoized))
       return memoized
     }
     const { bytes, identity } = await readStableJsonlFile(path, signal)
@@ -872,7 +876,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   /** Insert one parsed log into the bounded handoff cache. */
   private memoizeStoredLog(id: SessionId, stored: StoredLog): void {
     this.coldLogMemo.delete(id)
-    this.coldLogMemo.set(id, stored)
+    this.coldLogMemo.set(id, new WeakRef(stored))
     for (const oldest of this.coldLogMemo.keys()) {
       if (this.coldLogMemo.size <= COLD_LOG_MEMO_MAX_ENTRIES) break
       this.coldLogMemo.delete(oldest)
@@ -1140,6 +1144,10 @@ class JsonlSessionPersistence extends SessionPersistence {
     await this.ensureRootEncoding()
     signal?.throwIfAborted()
     const generations = await this.listGenerations(signal)
+    const paths = new Set(generations.map(selected => selected.sourcePath))
+    for (const path of this.generationHeaders.keys()) {
+      if (!paths.has(path)) this.generationHeaders.delete(path)
+    }
     const headers = await settleLimited(this.listLimit, generations, async (selected) => {
       signal?.throwIfAborted()
       try {
@@ -1173,6 +1181,22 @@ class JsonlSessionPersistence extends SessionPersistence {
     expectedId?: SessionId,
     signal?: AbortSignal,
   ): Promise<GenerationHeader | undefined> {
+    let revision: PersistenceRevision
+    try {
+      revision = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (!isENOENT(error)) throw error
+      this.generationHeaders.delete(selected.sourcePath)
+      return undefined
+    }
+    signal?.throwIfAborted()
+    const cached = this.generationHeaders.get(selected.sourcePath)
+    if (cached?.revision === revision) {
+      await this.assertStoredIdentity(selected.sourcePath, selected.sourceVersion, cached.metadata.header, expectedId, signal)
+      return { ...cached.metadata, header: { ...cached.metadata.header } }
+    }
+    this.generationHeaders.delete(selected.sourcePath)
     let first: string | undefined
     try {
       first = this.compression === 'zstd'
@@ -1220,10 +1244,20 @@ class JsonlSessionPersistence extends SessionPersistence {
       expectedId,
       signal,
     )
-    return {
-      header,
-      formatStatus: result.status,
+    let after: PersistenceRevision
+    try {
+      after = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (!isENOENT(error)) throw error
+      return undefined
     }
+    signal?.throwIfAborted()
+    const metadata: GenerationHeader = { header, formatStatus: result.status }
+    if (after === revision) {
+      this.generationHeaders.set(selected.sourcePath, { revision, metadata: { ...metadata, header: { ...header } } })
+    }
+    return metadata
   }
 
   /** Convert format-catalog string identities to current branded Session metadata. */

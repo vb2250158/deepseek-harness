@@ -20,14 +20,20 @@ export {}
  * back to it wholesale.
  */
 export interface SessionStatsProjection {
+  /** Summed wall time of matched closed turns, including waits and incomplete steps; absent on older providers. */
+  turnMs?: number
+  /** Closed-turn time outside recorded model, tool and compaction intervals, with overlaps counted once; absent on older providers. */
+  otherMs?: number
   /** Distinct turns carrying at least one closed step (`step/end`); rejected or empty turns are uncounted. */
   turns: number
   /** Closed steps (`step/end` events) — completed, failed, and cancelled steps alike. */
   steps: number
-  /** Summed model wall time (`step/start` → `assistant/message`) over steps that assembled a message. */
+  /** Model wall time (`step/start` → `assistant/message`) excluding overlapping compaction attempts. */
   llmMs: number
   /** Summed tool wall time over `tool/call` → `tool/result` pairs matched by callId. */
   toolMs: number
+  /** Completed `compaction/start` → matching `compaction/end` wall time, including failures; absent on older providers. */
+  compactionMs?: number
   /** Summed first-token latency (`step/start` → first non-empty delta chunk) over `ttftSteps`. */
   ttftMs: number
   /** Steps carrying a recorded first token. */

@@ -58,6 +58,8 @@ export interface SessionPersistenceSnapshot {
   readonly eventCount?: number
   /** Physical artifact byte size, when the backend can provide it cheaply (JSONL); otherwise absent. */
   readonly sizeBytes?: number
+  /** Physical modification time in Unix milliseconds, if materialized; neither event time nor a freshness token. */
+  readonly modifiedAt?: number
 }
 
 /** Options for {@link SessionPersistence.create}. */

@@ -22,12 +22,18 @@ import css from './StatsPills.module.css'
 import dialogCss from './stat-dialog.module.css'
 
 interface WindowStats {
+  /** Whole-log closed-turn time; unavailable in the paged-node fallback. */
+  turnMs?: number
+  /** Whole-log time outside recorded activity intervals; unavailable in the fallback. */
+  otherMs?: number
   turns: number
   steps: number
   /** Summed request wall time (step/start → assistant/message); 0 when no node carries timing. */
   llmMs: number
   /** Summed tool wall time (tool/call → tool/result); 0 when no pair is in-window. */
   toolMs: number
+  /** Whole-log compaction time; unavailable in the paged-node fallback. */
+  compactionMs?: number
   /** Summed first-token latency over `ttftSteps`; 0 when no step records it. */
   ttftMs: number
   /** Steps carrying a recorded TTFT. */
@@ -240,15 +246,23 @@ export const ActivityPill = memo(function ActivityPill({ useChat, useProjection,
   const speed = stats.decodeMs > 0 ? decodeSpeed(stats, t) : null
   const icon = <IconGaugeOutlineRegular />
   if (mode === 'compact') return speed === null ? null : <PlainPill stat="activity" icon={icon} label={speed} />
-  if (stats.steps === 0) return null
+  if (stats.steps === 0 && !(stats.compactionMs !== undefined && stats.compactionMs > 0)
+    && !(stats.turnMs !== undefined && stats.turnMs > 0)) return null
   const counts = t('stats.counts', { turns: stats.turns, steps: stats.steps })
   const content: PillContent = { stat: 'activity', icon, label: joined(counts, speed) }
   // A window without one timed figure has no dialog rows to show, so the pill
   // stays a plain reading instead of a button opening an empty dialog.
-  if (stats.llmMs <= 0 && stats.toolMs <= 0 && stats.ttftSteps <= 0 && speed === null) return <PlainPill {...content} />
+  if (stats.llmMs <= 0 && stats.toolMs <= 0 && !(stats.compactionMs !== undefined && stats.compactionMs > 0)
+    && !(stats.turnMs !== undefined && stats.turnMs > 0) && stats.ttftSteps <= 0 && speed === null) return <PlainPill {...content} />
   return (
     <DialogPill {...content} ariaLabel={speed === null ? counts : `${counts} · ${speed}`} title={t('stats.dialog.title')}>
       <dl className={dialogCss.details} data-session-stats-details>
+        {stats.turnMs !== undefined && stats.turnMs > 0 && (
+          <>
+            <dt>{t('stats.dialog.turnTime')}</dt>
+            <dd>{formatDuration(stats.turnMs, t)}</dd>
+          </>
+        )}
         {stats.llmMs > 0 && (
           <>
             <dt>{t('stats.dialog.llmTime')}</dt>
@@ -259,6 +273,18 @@ export const ActivityPill = memo(function ActivityPill({ useChat, useProjection,
           <>
             <dt>{t('stats.dialog.toolTime')}</dt>
             <dd>{formatDuration(stats.toolMs, t)}</dd>
+          </>
+        )}
+        {stats.compactionMs !== undefined && stats.compactionMs > 0 && (
+          <>
+            <dt>{t('stats.dialog.compactionTime')}</dt>
+            <dd>{formatDuration(stats.compactionMs, t)}</dd>
+          </>
+        )}
+        {stats.otherMs !== undefined && stats.turnMs !== undefined && stats.turnMs > 0 && (
+          <>
+            <dt>{t('stats.dialog.otherTime')}</dt>
+            <dd>{formatDuration(stats.otherMs, t)}</dd>
           </>
         )}
         {stats.ttftSteps > 0 && (
@@ -274,6 +300,9 @@ export const ActivityPill = memo(function ActivityPill({ useChat, useProjection,
           </>
         )}
       </dl>
+      {stats.turnMs !== undefined && stats.turnMs > 0 && (
+        <p className={dialogCss.timingNote}>{t('stats.dialog.timeScope')}</p>
+      )}
     </DialogPill>
   )
 })

@@ -45,6 +45,8 @@ Client list rows and resident Sessions use the current `sessionListMetadata` pro
 
 Client list refreshes retain unchanged row objects and reuse the items array when order and values match. Each row's `retainedBy` contains positive local reference-source counts; Host metadata refreshes cannot overwrite them. Cache membership checks use a per-refresh ID set, so reconciliation grows linearly with the current list and retained cache sizes. Host summary updates replace running and Agent availability; local create/fork responses only fill missing metadata on existing rows. Removed ordinary Sessions retain projection stores only when their catalogs contain children.
 
+The Web client opts into `session.list({ paged: true })`: the first page contains recent rows from each workspace and running or blank Sessions; older rows follow in bounded pages of the same catalog snapshot. Each successful page becomes visible immediately. Partial refreshes retain established rows, replay concurrent host updates, and defer removal reconciliation until the final page. `SessionListState.complete` distinguishes partial arrival from a complete empty catalog. Requests without `paged` retain complete-list behavior; continuation cursors expire after `listSnapshotTtlMs` or snapshot eviction. The first request still discovers every header, while continuation pages reuse that discovery and project only their selected rows.
+
 Background-job rows and observation streams belong to [`dsh-api-job-controller`](../job-controller/README.md); the control stream carries projections only.
 
 Projection reads retain loading and failure state independently of their values. Reconnect cancels reads from the previous connection and reloads previously requested projections; live membership updates arrive through the control stream. Parent availability comes from Host summaries and remains unknown until a summary or a successful list baseline establishes it. Address lookup resolves projected children without selecting them or creating scopes.
@@ -99,6 +101,10 @@ A successful `selectModel` response acknowledges the Session-local selection wit
 |---|---:|---|
 | `nativeOpen` | platform-detected | Whether Session workspace paths can be handed to a native desktop opener |
 | `listWorkSliceMs` | `16` | Positive integral list-work time slice in milliseconds; checks occur between complete rows |
+| `listPageSize` | `50` | Historical rows per continuation page |
+| `listInitialPerWorkspace` | `5` | Recent idle root rows per workspace on the first page |
+| `listSnapshotLimit` | `8` | Maximum retained catalog snapshots |
+| `listSnapshotTtlMs` | `60000` | Continuation lifetime in milliseconds |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-session-controller) is the exhaustive source for accepted fields and their JSDoc.
 
