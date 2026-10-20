@@ -48,9 +48,11 @@ The Python SDK follows the same application architecture. Its runtime wheel pack
 
 ## Desktop application
 
-The [Electron desktop application](../apps/desktop/README.md) ships its exact dsh production runtime in signed resources and owns the reserved `$DSH_HOME/profiles/desktop`. Shared helpers initialize profile files, reconcile bundles, and resolve installation and bundle dependencies without replacing pnpm-owned packages. Desktop and npm CLI share product data but keep packages, activation, and lockfiles separate. Desktop’s bundled CLI manages its initialized plugins.
+Desktop can explicitly attach to an existing local Web backend. Web owns the frontend, plugins, settings, sessions and tasks; native shutdown leaves it running. The [Desktop reference](../apps/desktop/README.md#shared-web-backend) owns selection and authentication. The following ownership applies to default standalone mode.
 
-Electron starts the private Desktop Host in Electron Node mode. The Host invokes the shared CLI profile runner and complete Web application. The window immediately loads packaged Web assets and waits for boot injections before activating client plugins in the same document. Web owns RPC and streams; the desktop carrier connects the local page to the authenticated Host. Node IPC carries boot injections, readiness, fatal errors, and shutdown. Desktop listens on an OS-assigned port by default; profile configuration can override it. Shell-owned UI runs plugin transactions through bundled pnpm with normal user and profile configuration.
+The [Electron desktop application](../apps/desktop/README.md) ships its exact dsh runtime in signed resources and owns `$DSH_HOME/profiles/desktop`. Shared helpers initialize profiles, bundles and dependency resolution while preserving pnpm-owned packages. Desktop and npm CLI share product data, not packages, activation or lockfiles. Desktop's bundled CLI manages its plugins.
+
+Electron starts the private Host in Node mode through the shared CLI profile runner. Packaged Web assets wait for boot injections before activating plugins. Web owns authenticated RPC and streams; Node IPC carries boot, readiness, failures and shutdown. The default port is OS-assigned and configurable. Plugin transactions use bundled pnpm and normal user configuration.
 
 ## Core packages
 
@@ -92,6 +94,8 @@ turn/start
      reconcile system/message using the prepared call capability
      append entered messages as user/message; reconcile retained runtime context
      log request/header and request/context as needed
+     agent/request-context
+     agent/request-context-ready
      derive and freeze model history from the log
      stream the bound prepared call -> llm/stream -> agent/assistant-stream start
        agent/assistant-stream chunk*
@@ -163,3 +167,5 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Scope a registration to one agent | use that agent's `agent.ctx` |
 
 The [extension cookbook](cookbook/extension-cookbook.md) maps features to capabilities and indexes the step-by-step guides for [packages](cookbook/adding-a-package.md), [tools](cookbook/adding-a-tool.md), [LLM adapters](cookbook/adding-an-llm-adapter.md), and [settings pages](cookbook/adding-a-settings-card.md). The [Conversation subsystem](subsystems/conversation.md) owns Chat-node assembly.
+
+Hosts may resume original sessions without new model input; [agent-loop](../packages/core/agent-loop/README.md#original-session-recovery) owns eligibility and subagent ownership checks.

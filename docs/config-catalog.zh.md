@@ -231,6 +231,14 @@ export interface Config {
   readonly nativeOpen?: boolean
   /** Positive integral milliseconds of list work before yielding between complete rows. */
   readonly listWorkSliceMs?: number
+  /** Maximum historical rows returned by each continuation page. */
+  readonly listPageSize?: number
+  /** Recent idle rows selected per workspace for the first page. */
+  readonly listInitialPerWorkspace?: number
+  /** Maximum concurrent retained catalog snapshots. */
+  readonly listSnapshotLimit?: number
+  /** Catalog continuation lifetime in milliseconds. */
+  readonly listSnapshotTtlMs?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-api-session-controller -->
@@ -437,7 +445,7 @@ export type Config = LocalConfig
 ## `@deepseek-ai/dsh-client-connection`
 
 - `inject`: `credentials`
-- `source`: [`packages/client/connection/src/index.ts:96`](../packages/client/connection/src/index.ts)
+- `source`: [`packages/client/connection/src/index.ts:97`](../packages/client/connection/src/index.ts)
 
 ```ts config-catalog
 /** Browser authentication, request limits, and connection recovery configuration. */

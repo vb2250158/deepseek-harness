@@ -275,6 +275,7 @@ function bundleComponentManifests(manifest: ProfileManifest, dir: string, anchor
  * Newly installed or updated direct dependencies are checked even when activation is disabled;
  * an untouched dependency never blocks an unrelated operation and stays denied at startup.
  * Compatibility denial restores the profile manifest and lockfile, but leaves downloaded modules on disk.
+ * Lockfile-only runs check named specs before resolution; installed-content checks and bundle activation wait for installation.
  * @param context Launcher-owned profile and resolution locations.
  * @param args Pnpm arguments, before relative path anchoring.
  * @param options Output, activation and cancellation policy.
@@ -463,7 +464,7 @@ export async function runProfilePnpm(
       output = Buffer.from(diagnostic).subarray(0, options.outputBytes)
     }
     // A terminated run's exit status says nothing about what it wrote, so it never reconciles the selection.
-    if (exitCode === 0 && !control.stalled) {
+    if (exitCode === 0 && !control.stalled && !args.includes('--lockfile-only')) {
       const after = readProfileManifest('dsh', dir)
       const warnings: string[] = []
       for (const [name, spec] of Object.entries(directDependencies(after))) {

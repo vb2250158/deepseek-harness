@@ -48,9 +48,11 @@ Python SDK 遵循相同的应用架构。其运行时 wheel 把普通 `dsh` CLI 
 
 ## 桌面应用
 
-[Electron 桌面应用](../apps/desktop/README.zh.md)在签名资源中携带精确匹配的 dsh 生产运行时，并拥有保留的 `$DSH_HOME/profiles/desktop`。共享 helper 初始化 profile 文件、协调 bundle，并解析安装与 bundle 的依赖而不替换 pnpm 拥有的包。Desktop 与 npm CLI 共享产品数据，但包、启用选择与锁文件保持独立。Desktop 内置 CLI 管理其已初始化的插件。
+Desktop 可以明确选择连接已有本机 Web 后端。Web 拥有前端、插件、设置、会话和任务；关闭原生载体不会停止它。[Desktop 参考](../apps/desktop/README.zh.md#shared-web-backend)定义选择和鉴权。下述所有权适用于默认独立模式。
 
-Electron 使用 Electron Node 模式启动私有 Desktop Host。Host 调用共享 CLI profile runner 与完整 Web 应用。窗口立即加载打包 Web 资源，等待启动注入后在同一文档中激活客户端插件。Web 负责 RPC 与流；桌面载体将本地页面连接到已认证的 Host。Node IPC 承载启动注入、就绪、致命错误与关闭。Desktop 默认监听系统分配的端口，profile 配置可覆盖。壳拥有的 UI 通过内置 pnpm 执行插件事务，并遵循正常用户与 profile 配置。
+[Electron 桌面应用](../apps/desktop/README.zh.md)在签名资源中携带精确匹配的 dsh 运行时，并拥有 `$DSH_HOME/profiles/desktop`。共享 helper 初始化 profile、bundle 和依赖解析，同时保留 pnpm 拥有的包。Desktop 与 npm CLI 共享产品数据，不共享包、启用选择或锁文件。Desktop 内置 CLI 管理其插件。
+
+Electron 通过共享 CLI profile runner，以 Node 模式启动私有 Host。打包 Web 资源等待启动注入后激活插件。Web 负责已认证的 RPC 与流；Node IPC 承载启动、就绪、错误和关闭。默认端口由系统分配，也可配置。插件事务使用内置 pnpm 和正常用户配置。
 
 ## 核心包
 
@@ -96,6 +98,8 @@ turn/start
      reconcile system/message using the prepared call capability
      append entered messages as user/message; reconcile retained runtime context
      log request/header and request/context as needed
+     agent/request-context
+     agent/request-context-ready
      derive and freeze model history from the log
      stream the bound prepared call -> llm/stream -> agent/assistant-stream start
        agent/assistant-stream chunk*
@@ -167,3 +171,5 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 | 将注册项限定到单个 agent | 使用该 agent 的 `agent.ctx` |
 
 [扩展实操手册](cookbook/extension-cookbook.zh.md)将功能映射到能力，并索引[包](cookbook/adding-a-package.zh.md)、[工具](cookbook/adding-a-tool.zh.md)、[LLM（大语言模型）适配器](cookbook/adding-an-llm-adapter.zh.md)和[设置页](cookbook/adding-a-settings-card.zh.md)的分步指南。[Conversation 子系统](subsystems/conversation.zh.md)负责 Chat node 组装。
+
+宿主可恢复原会话而不添加模型输入；[agent-loop](../packages/core/agent-loop/README.zh.md#original-session-recovery) 负责资格与子任务归属校验。
