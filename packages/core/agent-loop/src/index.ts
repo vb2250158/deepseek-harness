@@ -340,9 +340,11 @@ function validateConfiguredAgents(agents: Config['agents']): void {
 /** Concrete agent factory and driver service. */
 export class AgentLoop extends Service implements AgentFactory {
   /** Version of the complete-request context reconciliation event supported by this driver. */
-  readonly requestContextVersion = 1 as const
+  // oxlint-disable-next-line typescript/prefer-as-const -- Typert requires explicit public property types.
+  readonly requestContextVersion: 1 = 1
   /** Post-compaction input-finalization extension version. */
-  readonly requestContextFinalizeVersion = 1 as const
+  // oxlint-disable-next-line typescript/prefer-as-const -- Typert requires explicit public property types.
+  readonly requestContextFinalizeVersion: 1 = 1
 
   static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt', 'sessionProjections']
 
