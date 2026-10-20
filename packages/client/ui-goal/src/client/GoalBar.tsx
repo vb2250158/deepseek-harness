@@ -2,17 +2,18 @@
  * GoalBar: the goal indicator docked above the message composer (input dock
  * strip). A present goal shows a goal glyph, a phase label, the truncated
  * objective, and icon actions — resume when active-disarmed or paused, edit
- * (inline form in the same strip), and clear. Goal creation lives on the
- * `/goal` command, not here: loading (undefined), no goal (null), and complete
- * goals render nothing. Durable state arrives as the projected whole snapshot;
- * process-local activation arrives through the injected activation hook.
+ * (which opens the Session's goal-edit dialog), and clear. Goal creation lives
+ * on the `/goal` command, not here: loading (undefined), no goal (null), and
+ * complete goals render nothing. Durable state arrives as the projected whole
+ * snapshot; process-local activation arrives through the injected activation
+ * hook.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GoalActivation, GoalSnapshot } from '@deepseek-ai/dsh-goal/client'
 import {
-  IconCheckOutlineRegular, IconCloseOutlineRegular, IconEditOutlineRegular, IconGoalOutlineRegular,
-  IconPauseOutlineRegular, IconPlayOutlineRegular, IconTrashOutlineRegular, InlineEditor, Tooltip,
+  IconEditOutlineRegular, IconGoalOutlineRegular,
+  IconPauseOutlineRegular, IconPlayOutlineRegular, IconTrashOutlineRegular, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GoalActionResult, GoalBarActions, GoalBarInjected } from './slots.ts'
@@ -40,18 +41,16 @@ function activeLabel(activation: GoalActivation | undefined, t: TranslateNS<'goa
 }
 
 export function GoalBar({ goal, activation, onEdit, onPause, onResume, onClear, t }: GoalBarProps & PropsLocale<'goal'>) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [clearedGoalId, setClearedGoalId] = useState<GoalSnapshot['id'] | null>(null)
   const pendingRef = useRef(false)
 
-  // A new goal identity (cleared/completed/replaced externally) invalidates the local edit
-  // state: without the reset a surviving draft's Enter would write over the NEW goal.
+  // A new goal identity (cleared/completed/replaced externally) invalidates the
+  // local clear state: without the reset a surviving suppression would hide the
+  // NEW goal after a clear raced its replacement.
   const goalId = goal?.id
   useEffect(() => {
-    setEditing(false)
     setActionError(null)
     setClearedGoalId(null)
   }, [goalId])
@@ -70,13 +69,6 @@ export function GoalBar({ goal, activation, onEdit, onPause, onResume, onClear, 
     return result
   }, [])
 
-  const handleEdit = useCallback(async () => {
-    const trimmed = draft.trim()
-    if (trimmed === '') return
-    const result = await runAction(() => onEdit(trimmed))
-    if (result?.ok) setEditing(false)
-  }, [draft, onEdit, runAction])
-
   const handleClear = useCallback(async (clearedId: GoalSnapshot['id']) => {
     const result = await runAction(onClear)
     if (result?.ok) setClearedGoalId(clearedId)
@@ -84,47 +76,6 @@ export function GoalBar({ goal, activation, onEdit, onPause, onResume, onClear, 
 
   // Loading, absent, and complete goals have no strip at all.
   if (goal === undefined || goal === null || goal.phase === 'complete' || goal.id === clearedGoalId) return null
-
-  if (editing) {
-    return (
-      <div className={css.dock} data-goal-bar>
-        <div className={`${css.bar} ${css.editBar}`}>
-          <InlineEditor
-            value={draft}
-            label={t('objective.aria')}
-            onChange={setDraft}
-            onSave={() => { void handleEdit() }}
-            onCancel={() => { setEditing(false) }}
-          />
-          {actionError !== null && <span className={css.error} role="alert">{actionError}</span>}
-          <div className={css.actions}>
-            <Tooltip portal label={t('action.save')} side="bottom" delayMs={500}>
-              <button
-                type="button"
-                className={css.iconBtn}
-                onClick={() => { void handleEdit() }}
-                disabled={pending || draft.trim() === ''}
-                aria-label={t('action.save')}
-              >
-                <IconCheckOutlineRegular size={14} />
-              </button>
-            </Tooltip>
-            <Tooltip portal label={t('action.cancel')} side="bottom" delayMs={500}>
-              <button
-                type="button"
-                className={css.iconBtn}
-                onClick={() => { setEditing(false) }}
-                disabled={pending}
-                aria-label={t('action.cancel')}
-              >
-                <IconCloseOutlineRegular size={14} />
-              </button>
-            </Tooltip>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   const title = goal.phase === 'blocked' ? goal.blockedReason?.message : undefined
   const label = goal.phase === 'active' ? activeLabel(activation, t) : t(PHASE_LABELS[goal.phase])
@@ -139,31 +90,31 @@ export function GoalBar({ goal, activation, onEdit, onPause, onResume, onClear, 
         {actionError !== null && <span className={css.error} role="alert">{actionError}</span>}
         <div className={css.actions}>
           {goal.phase === 'active' && activation === 'armed' && (
-            <Tooltip portal label={t('action.pause')} side="bottom" delayMs={500}>
+            <Tooltip label={t('action.pause')} side="bottom" delayMs={500}>
               <button type="button" className={css.iconBtn} disabled={pending} onClick={() => { void runAction(onPause) }} aria-label={t('action.pause')}>
                 <IconPauseOutlineRegular size={14} />
               </button>
             </Tooltip>
           )}
           {showResume && (
-            <Tooltip portal label={t('action.resume')} side="bottom" delayMs={500}>
+            <Tooltip label={t('action.resume')} side="bottom" delayMs={500}>
               <button type="button" className={css.iconBtn} disabled={pending} onClick={() => { void runAction(onResume) }} aria-label={t('action.resume')}>
                 <IconPlayOutlineRegular size={14} />
               </button>
             </Tooltip>
           )}
-          <Tooltip portal label={t('action.edit')} side="bottom" delayMs={500}>
+          <Tooltip label={t('action.edit')} side="bottom" delayMs={500}>
             <button
               type="button"
               className={css.iconBtn}
               disabled={pending}
-              onClick={() => { setDraft(goal.objective); setEditing(true) }}
+              onClick={() => { onEdit(goal.objective) }}
               aria-label={t('action.edit')}
             >
               <IconEditOutlineRegular size={14} />
             </button>
           </Tooltip>
-          <Tooltip portal label={t('action.clear')} side="bottom" delayMs={500}>
+          <Tooltip label={t('action.clear')} side="bottom" delayMs={500}>
             <button type="button" className={css.iconBtn} disabled={pending} onClick={() => { void handleClear(goal.id) }} aria-label={t('action.clear')}>
               <IconTrashOutlineRegular size={14} />
             </button>

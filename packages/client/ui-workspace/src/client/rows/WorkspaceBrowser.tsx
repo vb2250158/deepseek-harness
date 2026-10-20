@@ -259,6 +259,8 @@ type SessionTreeProps = Pick<
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
+  | 'sidebar.session.row.badges'
+  | 'sidebar.session.row.title'
 > & {
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]
   /** Always-mounted Session list snapshot. */
@@ -520,7 +522,7 @@ function SessionTree({
     // (WorkspaceBrowser.module.css).
       <div
         key={group.key}
-        style={{ '--dsh-workspace-indent': `${depth * 12}px` } as CSSProperties}
+        style={{ '--dsh-workspace-indent': `${depth * 12}px`, '--dsh-workspace-depth': depth } as CSSProperties}
         className={clsx(
           css.groupSection,
           workspaceMarker === 'before' && css.workspaceDropBefore,
@@ -554,36 +556,38 @@ function SessionTree({
             }
           }}
       >
-        <ProjectRowItem
-          newShortcut={shortcuts.find(row => row.id === 'session.new')}
-          group={group}
-          containsCurrentDescendant={currentAncestors.has(group.key)}
-          home={home}
-          t={t}
-          onToggle={() => {
-            if (group.expanded) dropWatermarks(key => withinGroup(key, group.key))
-            setGroupExpanded(group.key, !group.expanded)
-          }}
-          onCreate={() => {
-            if (group.workspaceId !== undefined) {
-              setGroupExpanded(group.key, true)
-              startSession(group.workspaceId)
-            }
-          }}
-          drag={workspaceDragProps}
-          actions={group.workspaceId === undefined
-            ? undefined
-            : {
-              rename: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
-              },
-              delete: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
-              },
+        <div className={css.groupHeader} data-dsh-workspace-header={group.key}>
+          <ProjectRowItem
+            newShortcut={shortcuts.find(row => row.id === 'session.new')}
+            group={group}
+            containsCurrentDescendant={currentAncestors.has(group.key)}
+            home={home}
+            t={t}
+            onToggle={() => {
+              if (group.expanded) dropWatermarks(key => withinGroup(key, group.key))
+              setGroupExpanded(group.key, !group.expanded)
             }}
-        />
+            onCreate={() => {
+              if (group.workspaceId !== undefined) {
+                setGroupExpanded(group.key, true)
+                startSession(group.workspaceId)
+              }
+            }}
+            drag={workspaceDragProps}
+            actions={group.workspaceId === undefined
+              ? undefined
+              : {
+                rename: () => {
+                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                  if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
+                },
+                delete: () => {
+                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                  if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
+                },
+              }}
+          />
+        </div>
         {childRows.length > 0 && (
           <div role="group">
             {childRows}
@@ -807,9 +811,10 @@ function SearchResults({
   query,
   remote,
   resultLimit,
+  renderSlot,
   usePanelInfo,
   t,
-}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
+}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'renderSlot'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
   /** Search matches follow the archived filter selected for the list. */
@@ -855,6 +860,7 @@ function SearchResults({
               currentId={currentId}
               onOpen={open}
               onUnarchive={onUnarchive}
+              renderSlot={renderSlot}
               t={t}
             />
           ))}
@@ -1414,6 +1420,7 @@ export function WorkspaceBrowser({
               query={normalizedQuery}
               remote={remoteSearch}
               resultLimit={searchResultLimit}
+              renderSlot={renderSlot}
               t={t}
             />
           )

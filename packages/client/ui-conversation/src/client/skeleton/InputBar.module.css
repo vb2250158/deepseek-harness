@@ -10,6 +10,14 @@
   padding: 0 var(--dsh-composer-side-clearance) 4px;
 }
 
+/* Generated text wraps with the last paragraph but is absent from the editor document. */
+.input[data-completion-text] > p:last-child::after {
+  content: attr(data-completion-text);
+  color: var(--dsw-alias-label-tertiary);
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
 .dock {
   display: flex;
   align-items: center;

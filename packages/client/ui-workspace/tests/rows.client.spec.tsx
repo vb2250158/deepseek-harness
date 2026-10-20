@@ -1,18 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { HoverCardGroup, MenuItemButton, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MenuOpenState, SessionRowOwnerProps } from '../src/client/contract/slots.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { RowDragProps } from '../src/client/rows/Rows.tsx'
 import {
-  ProjectRowItem, SearchResultItem, SessionNodeItem as SessionNodeItemComponent,
+  ProjectRowItem, SearchResultItem as SearchResultItemComponent, SessionNodeItem as SessionNodeItemComponent,
 } from '../src/client/rows/Rows.tsx'
 import type { GroupNode, SearchResultNode, SessionNode } from '../src/client/tree.ts'
 import { en, zh } from '../src/client/locales.ts'
@@ -31,10 +30,16 @@ type RowSlotName =
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
-type RowRenderSlot = PropsRenderSlots<RowSlotName>['renderSlot']
+  | 'sidebar.session.row.badges'
+  | 'sidebar.session.row.title'
+type RowRenderSlot = (name: RowSlotName, owner: object, opts?: { fallback?: ReactNode }) => ReactNode
 type SessionNodeItemProps = ComponentProps<typeof SessionNodeItemComponent>
 
-const renderNoRowEntries: RowRenderSlot = () => null
+const renderNoRowEntries: RowRenderSlot = (_name, _owner, opts) => opts?.fallback ?? null
+
+function SearchResultItem(props: Omit<ComponentProps<typeof SearchResultItemComponent>, 'renderSlot'>) {
+  return <SearchResultItemComponent {...props} renderSlot={renderNoRowEntries} />
+}
 
 // Direct row specs use the real required Slot share, empty unless the case supplies entries.
 function SessionNodeItem({ renderSlot = renderNoRowEntries, onRenameRequest = () => {}, ...props }: Omit<
@@ -815,9 +820,9 @@ describe('workspace browser rows', () => {
         id: sid('action-hover'), title: 'Action hover', blank: false, running: false,
         runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
       }
-      const renderSlot: RowRenderSlot = (name: RowSlotName) => name === 'sidebar.workspaces.session.row.action'
+      const renderSlot: RowRenderSlot = (name, _owner, opts) => name === 'sidebar.workspaces.session.row.action'
         ? <Tooltip label="Archive" delayMs={500}><button type="button" aria-label="Archive" /></Tooltip>
-        : null
+        : opts?.fallback ?? null
       const { rerender } = render(<SessionNodeItem node={node} currentId={undefined} now={0}
         onOpen={vi.fn()} renderSlot={renderSlot} t={t} />)
       const row = screen.getByRole('treeitem')
@@ -1117,7 +1122,9 @@ describe('session row schedule seats', () => {
    * it; a key without one renders nothing.
    */
   function seatSpy(): RowRenderSlot {
-    return vi.fn((key: RowSlotName, owner: object) => {
+    return vi.fn((key: RowSlotName, owner: object, opts?: { fallback?: import('react').ReactNode }) => {
+      if (key === 'sidebar.session.row.title') return opts?.fallback ?? null
+      if (key === 'sidebar.session.row.badges') return null
       if (!('sessionId' in owner) || typeof owner.sessionId !== 'string') return null
       return <span key={key} data-seat={key} data-owner={owner.sessionId} />
     })
@@ -1221,7 +1228,7 @@ it.each([['未命名', t], ['Untitled', tEn]])('labels unnamed history as %s', (
     runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false }
   const onRenameRequest = vi.fn()
   render(<SessionNodeItem node={node} currentId={node.id} now={0} onOpen={vi.fn()}
-    renderSlot={() => null} onRenameRequest={onRenameRequest} t={translate} />)
+    renderSlot={renderNoRowEntries} onRenameRequest={onRenameRequest} t={translate} />)
   expect(screen.getByText(label)).toBeTruthy()
   fireEvent.doubleClick(screen.getByText(label))
   expect(onRenameRequest).toHaveBeenCalledWith(node.id, '')
@@ -1235,4 +1242,47 @@ it.each([['未命名', t], ['Untitled', tEn]])('labels unnamed search results as
     onUnarchive={vi.fn()} t={translate} />)
   fireEvent.click(screen.getByText(label))
   expect(onOpen).toHaveBeenCalledWith(result.id)
+})
+
+describe('persistent row labels and display titles', () => {
+  const renderStatus: RowRenderSlot = (name, _owner, opts) => {
+    if (name === 'sidebar.session.row.badges') return <span data-testid="plan-label">已绑定</span>
+    if (name === 'sidebar.session.row.title') return '实际任务'
+    return opts?.fallback ?? null
+  }
+  it.each([false, true])('keeps a label before the title while running=%s', (running) => {
+    const node: SessionNode = {
+      id: sid('bound'), title: '[Project][Category]实际任务', blank: false, running,
+      runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
+    }
+    const onRenameRequest = vi.fn()
+    render(<SessionNodeItem node={node} currentId={sid('other')} now={0} onOpen={vi.fn()}
+      onRenameRequest={onRenameRequest} renderSlot={renderStatus} t={t} />)
+    const title = screen.getByText('实际任务')
+    expect(title.previousElementSibling).toBe(screen.getByTestId('plan-label'))
+    expect(title.getAttribute('title')).toBe(node.title)
+    expect([screen.getByTestId('plan-label').textContent, title.textContent, title.getAttribute('title')]).toMatchInlineSnapshot(`
+      [
+        "已绑定",
+        "实际任务",
+        "[Project][Category]实际任务",
+      ]
+    `)
+    fireEvent.doubleClick(title)
+    expect(onRenameRequest).toHaveBeenCalledWith(node.id, node.title)
+    if (running) expect(screen.getByRole('treeitem').querySelector('[data-state="ongoing"]')).toBeTruthy()
+  })
+  it('keeps archived search labels before the title with the actual row id', () => {
+    const result: SearchResultNode = {
+      id: sid('search-bound'), title: '[Project]实际任务', workspace: 'Project',
+      running: false, runningSubagentCount: 0, completed: false, archived: true,
+    }
+    const renderSlot: RowRenderSlot = (name, owner, opts) => {
+      if (name === 'sidebar.session.row.badges' || name === 'sidebar.session.row.title') expect(owner).toMatchObject({ sessionId: result.id })
+      return renderStatus(name, owner, opts)
+    }
+    render(<SearchResultItemComponent result={result} currentId={sid('other')} onOpen={vi.fn()}
+      onUnarchive={vi.fn()} renderSlot={renderSlot} t={t} />)
+    expect(screen.getByText('实际任务').previousElementSibling).toBe(screen.getByTestId('plan-label'))
+  })
 })

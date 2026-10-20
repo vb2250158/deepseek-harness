@@ -17,6 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ComposerBlock } from './composer-blocks.ts'
+import type { DraftCompletionOwnerProps } from './completion.ts'
 import type { DraftAttachmentId, InputActions, InputNotice, InputState } from './input.ts'
 import type { ComposerKeyboard, DraftSnapshot, EditSelection } from './draft-editor.ts'
 import type { createConversationStore } from '../stores.ts'
@@ -276,6 +277,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.input.left': { kind: 'list'; scope: 'session' }
     /** Compact controls before the composer submit action. */
     'conversation.input.right': { kind: 'list'; scope: 'session' }
+    /** One cancellable provider; the editor owns keys, composition, and insertion. */
+    'conversation.input.completion': { kind: 'single'; scope: 'session'; owner: DraftCompletionOwnerProps }
     /** Compact action after the model selector; it can expand across the toolbar while retaining the editor and submit action. */
     'conversation.input.activity': { kind: 'single'; scope: 'session'; owner: InputActivityOwnerProps }
     /** Resident composer body, including the no-Session inert state. */
@@ -502,6 +505,7 @@ export type ComposerBarProps =
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'
+    | 'conversation.input.completion'
     | 'conversation.composer.dock'
   >
   & InjectFace<ComposerBarInjected>

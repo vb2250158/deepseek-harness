@@ -42,6 +42,8 @@ type RowRenderSlots = PropsRenderSlots<
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
+  | 'sidebar.session.row.badges'
+  | 'sidebar.session.row.title'
 >['renderSlot']
 
 /** Row display title: blank rows show the localized New Session label. */
@@ -466,16 +468,17 @@ function SessionHoverContent({ node, now, renderSlot, t }: {
  * @param props.currentId - selected session id.
  * @param props.onOpen - open the selected session.
  * @param props.onUnarchive - unarchive an archived result row.
+ * @param props.renderSlot - persistent badges and display-only title for the actual result.
  * @param props.t - Workspace-browser translation seat.
  * @returns the result row.
  */
-export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: {
+export function SearchResultItem({ result, currentId, onOpen, onUnarchive, renderSlot, t }: {
   result: SearchResultNode
   currentId: string | undefined
   onOpen: (id: SearchResultNode['id']) => void
   onUnarchive: (id: SearchResultNode['id']) => void
   t: RowTranslate
-}) {
+} & PropsRenderSlots<'sidebar.session.row.badges' | 'sidebar.session.row.title'>) {
   const selected = result.id === currentId
   const statuses = sessionStatuses(result, t)
   const primaryStatus = statuses[0]
@@ -496,7 +499,10 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
             <SessionStatusDots statuses={statuses} />
           )}
         </span>
-        <span className={css.searchResultTitle}>{result.title || t('session.untitled')}</span>
+        {renderSlot('sidebar.session.row.badges', { sessionId: result.id })}
+        <span className={css.searchResultTitle} title={result.title}>
+          {renderSlot('sidebar.session.row.title', { sessionId: result.id, title: result.title || t('session.untitled') }, { fallback: result.title || t('session.untitled') })}
+        </span>
         {result.archived && (
           <span className={css.rowActions}>
             <Tooltip label={t('actions.unarchive')} side="bottom" align="end" delayMs={500} portal>
@@ -561,6 +567,8 @@ export function SessionNodeItem({
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
+  | 'sidebar.session.row.badges'
+  | 'sidebar.session.row.title'
 >) {
   const row = node
   const title = displayTitle(node, t)
@@ -634,14 +642,16 @@ export function SessionNodeItem({
           ? <SessionStatusDots statuses={statuses} />
           : renderSlot('sidebar.session.row.leading', { sessionId: node.id }))}
       </span>
+      {!row.blank && renderSlot('sidebar.session.row.badges', { sessionId: node.id })}
       <span
+        title={row.title}
         ref={titleRef}
         className={css.title}
         onDoubleClick={row.blank
           ? undefined
           : (e) => { e.stopPropagation(); onRenameRequest(node.id, row.title) }}
       >
-        {title}
+        {row.blank ? title : renderSlot('sidebar.session.row.title', { sessionId: node.id, title }, { fallback: title })}
       </span>
       {/* A blank New Session row is a provisional placeholder: nothing has
           happened in it yet, so a "now" timestamp and the row verbs

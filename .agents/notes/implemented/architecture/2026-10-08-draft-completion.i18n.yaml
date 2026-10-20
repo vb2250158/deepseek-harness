@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-08-draft-completion.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-draft-completion.md
+/agent-note-input-completion-extension:
+  en: f9c0b710682d8342
+  zh: ee2a4580a3915f1c
+/agent-note-input-completion-extension/problem:
+  en: dc3935a11b2a86ae
+  zh: 6c5857f5cba23191
+/agent-note-input-completion-extension/decision:
+  en: 98737170fcf5eb0a
+  zh: 8eee3e6c89e84baa
+/agent-note-input-completion-extension/consequences:
+  en: 66e37c60af302808
+  zh: 1c5bab5893c2a022
+/agent-note-input-completion-extension/alternatives-considered:
+  en: 53351808d53239fb
+  zh: 0435146b9bfcab58

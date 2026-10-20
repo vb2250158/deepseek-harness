@@ -24,6 +24,7 @@ export type {
 } from './contract/user-text.ts'
 export type { UserTextRegistry } from './conversation/user-text-registry.ts'
 export { apply, Config, inject } from './apply.ts'
+export type { DraftCompletionRequest, DraftCompletionProvider, DraftCompletionOwnerProps } from './contract/completion.ts'
 export type { Config as ConversationConfig } from './apply.ts'
 export { UiConversation } from './conversation/assembly.ts'
 export type { ConversationBinding } from './conversation/assembly.ts'

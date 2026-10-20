@@ -8,8 +8,9 @@
  */
 
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
-import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { HostObservable, InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { GoalActivation, GoalId } from '@deepseek-ai/dsh-goal/client'
+import type { GoalEditDialogState } from './dialog.ts'
 
 /**
  * The one failure the strip reports without a wire call: the session projects
@@ -44,13 +45,41 @@ export interface GoalActivationInjected {
   }
 }
 
+/**
+ * Injected business face of the Session's goal-edit dialog entry. The dialog
+ * owns the draft; the strip only asks it to open, so the two entries never
+ * share mutable state.
+ */
+export interface GoalEditDialogInjected {
+  hooks: {
+    /** The Session's goal-edit dialog state. */
+    goalEditDialog: HostObservable<GoalEditDialogState>
+  }
+  /**
+   * Replace the draft objective while the dialog is editable.
+   * @param draft - the objective text as typed.
+   */
+  edit: (draft: string) => void
+  /** Save the draft; a failure keeps the dialog open with the draft intact. */
+  submit: () => Promise<void>
+  /** Close the dialog and discard the draft. */
+  dismiss: () => void
+}
+
+/** Full props of the goal-edit dialog overlay entry. */
+export type GoalEditDialogProps =
+  InjectFace<GoalEditDialogInjected>
+  & PropsLocale<'goal'>
+
 /** Injected business face of the GoalBar dock entry: the mutation verbs (function properties: the strip destructures them freely). */
 export interface GoalBarActions {
   /**
-   * Replace the current goal's objective (CAS on the projected ref).
-   * @param objective - replacement objective text.
+   * Open the Session's goal-edit dialog seeded with the goal's current
+   * objective. The dialog owns the draft and the save; the strip submits
+   * nothing itself.
+   * @param objective - the objective as currently projected, used as the seed.
    */
-  onEdit: (objective: string) => Promise<GoalActionResult>
+  onEdit: (objective: string) => void
   /** Pause an active goal. */
   onPause: () => Promise<GoalActionResult>
   /** Resume a paused goal. */
