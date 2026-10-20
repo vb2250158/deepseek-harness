@@ -49,6 +49,7 @@ const listingProbe = vi.hoisted(() => ({
   delayMs: 0,
   inFlight: 0,
   maxInFlight: 0,
+  pause: undefined as ((path: string) => Promise<void>) | undefined,
   failures: new Map<string, Error>(),
 }))
 
@@ -79,7 +80,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     listingProbe.inFlight += 1
     listingProbe.maxInFlight = Math.max(listingProbe.maxInFlight, listingProbe.inFlight)
     try {
-      await new Promise(resolvePromise => setTimeout(resolvePromise, listingProbe.delayMs))
+      if (listingProbe.delayMs > 0) {
+        await new Promise(resolvePromise => setTimeout(resolvePromise, listingProbe.delayMs))
+      }
+      await listingProbe.pause?.(path)
       const failure = listingProbe.failures.get(path)
       if (failure !== undefined) throw failure
       return await read()
@@ -815,6 +819,81 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     const futurePath = generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION + 1, 'none')
     await writeFile(futurePath, `${JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION + 1, id: header.id })}\n`)
     expect(await ctx.sessionPersistence.list()).toEqual([])
+  })
+
+  it('reuses unchanged directory selections and observes deletion of the selected generation', async () => {
+    const header = meta('cached-directory-selection', '/work')
+    const current = rawLogPath(root, header.cwd, header.id)
+    const predecessor = historicalLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(current), { recursive: true })
+    await writeFile(predecessor, `${JSON.stringify(releasedV0Header(header))}\n`)
+    await writeFile(current, `${JSON.stringify(toHeaderLine(header))}\n`)
+    expect((await ctx.sessionPersistence.list())[0]?.formatStatus).toBe('current')
+    const enumerated = vi.spyOn(fileSystem, 'readdir')
+    await ctx.sessionPersistence.list()
+    expect(enumerated.mock.calls.filter(([dir]) => dir === dirname(current))).toHaveLength(0)
+    await rm(current)
+    expect((await ctx.sessionPersistence.list())[0]?.formatStatus).toBe('migration-required')
+    expect(enumerated.mock.calls.some(([dir]) => dir === dirname(current))).toBe(true)
+  })
+
+  it('refuses an opposite-encoding generation added after warming directory selections', async () => {
+    const header = meta('cached-directory-encoding', '/work')
+    const current = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(current), { recursive: true })
+    await writeFile(current, `${JSON.stringify(toHeaderLine(header))}\n`)
+    await ctx.sessionPersistence.list()
+    await writeFile(generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION, 'zstd'), 'foreign encoding')
+    await expect(ctx.sessionPersistence.list()).rejects.toThrow(/compression|encoding|zstd/)
+  })
+
+  it('serves a metadata list before queued historical discovery without increasing I/O concurrency', async () => {
+    await Promise.all(Array.from({ length: 64 }, async (_, index) => {
+      const header = meta(`priority-${index}`, '/work')
+      const path = rawLogPath(root, header.cwd, header.id)
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    }))
+    const limited = new Context()
+    await limited.plugin(JsonlSessionPersistence, { root, compression: 'none', listConcurrency: 1 })
+    let release!: () => void
+    try {
+      await limited.sessionPersistence.list()
+      listingProbe.active = true
+      listingProbe.delayMs = 0
+      listingProbe.inFlight = 0
+      listingProbe.maxInFlight = 0
+      let started!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      const entered = new Promise<void>((resolve) => { started = resolve })
+      let paused = false
+      listingProbe.pause = async (path) => {
+        if (paused || !path.includes('priority-') || path.endsWith('.jsonl')) return
+        paused = true
+        started()
+        await gate
+      }
+      const backend = limited.sessionPersistence as SessionPersistence & {
+        listArtifacts(): Promise<readonly { header: SessionHeader }[]>
+      }
+      const completed: string[] = []
+      const discovery = backend.listArtifacts().then(() => { completed.push('discovery') })
+      await entered
+      const listing = limited.sessionPersistence.list().then((rows) => {
+        expect(rows).toHaveLength(64)
+        completed.push('list')
+      })
+      await scheduler.yield()
+      release()
+      await Promise.all([discovery, listing])
+      expect(completed).toEqual(['list', 'discovery'])
+      expect(listingProbe.maxInFlight).toBe(1)
+    } finally {
+      release?.()
+      listingProbe.active = false
+      listingProbe.pause = undefined
+      await limited.fiber.dispose()
+    }
   })
 
   it('projects a released v0 header through stat and list without reading or mutating its body', async () => {
