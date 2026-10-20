@@ -29,7 +29,7 @@ import type { LlmNativeAuth, SettingsNamespaceView } from '@deepseek-ai/dsh-api-
 // Type-only: pulls this package's SlotMap merge (the two Models child slots).
 import type {} from './slot-contract.ts'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
-import { deriveKeyRef, protocolChoices, providerUsable, reasoningLevelChoices } from './store.ts'
+import { deriveKeyRef, deriveLocalKeyRef, protocolChoices, providerUsable, reasoningLevelChoices } from './store.ts'
 import type { ModelsSettingsStore, ProviderRow } from './store.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
@@ -199,10 +199,11 @@ function keyConfiguredOf(row: ProviderRow): boolean {
 
 function targetOf(row: ProviderRow): EditorTarget {
   const managedRef = deriveKeyRef(row.entry.provider)
-  const credentialRef = row.apiKeyEnv === managedRef
+  const localRef = deriveLocalKeyRef(row.entry.provider)
+  const credentialRef = (row.apiKeyEnv === managedRef || row.apiKeyEnv === localRef)
     && row.credential?.configured === true
     && row.credential.writable
-    ? managedRef
+    ? row.apiKeyEnv
     : undefined
   return {
     provider: row.entry.provider,
