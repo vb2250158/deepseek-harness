@@ -38,6 +38,10 @@ if (process.env.DSH_SNAPSHOT === 'record') {
     // Surface any other failure rather than silently recording with wrong env.
     if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error
   }
+} else {
+  // Provider preparation still runs before the replay waterfall intercepts dispatch.
+  process.env.DEEPSEEK_API_KEY = 'recorded-session-placeholder'
+  process.env.DEEPSEEK_BASE_URL = 'http://127.0.0.1:1'
 }
 
 export default defineConfig({
