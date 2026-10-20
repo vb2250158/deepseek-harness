@@ -299,7 +299,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       }
       const range = selectCompactableRange(agent.session, measurement, 0)
       if (range === null) return null
-      return this.compactRegion(range.start, range.end, agent, signal)
+      return this.compactOverflowSafe(range, agent, signal)
     }
 
     const admitted = agent.session.requestContext()
@@ -347,7 +347,7 @@ export class BasicCompactionEngine extends CompactionEngine {
         /* v8 ignore next -- paired with the defensive post-success branch above. */
         break
       }
-      result = await this.compactRegion(range.start, range.end, agent, signal)
+      result = await this.compactOverflowSafe(range, agent, signal)
       measurement = meter.measure(agent.session)
       if (measurement.totalTokens < pressure.targetTokens) return result
     }
@@ -356,6 +356,36 @@ export class BasicCompactionEngine extends CompactionEngine {
       `compaction still above threshold after ${policy.compactionRetries + 1} compaction attempts `
       + `(${measurement.totalTokens} estimated tokens >= target ${pressure.targetTokens})`,
     )
+  }
+
+  /** Shrink an oversized summary prefix without dropping history or splitting tool pairs. */
+  private async compactOverflowSafe(
+    initial: { start: SessionSeq; end: SessionSeq },
+    agent: Agent,
+    signal: AbortSignal,
+  ): Promise<CompactionResult> {
+    let range = initial
+    for (;;) {
+      signal.throwIfAborted()
+      try {
+        return await this.compactRegion(range.start, range.end, agent, signal)
+      } catch (error: unknown) {
+        signal.throwIfAborted()
+        if (!(error instanceof Error) || !('code' in error)
+          || error.code !== CONTEXT_WINDOW_EXCEEDED_CODE) throw error
+        const measurement = this.ctx.tokenMeter.measure(agent.session)
+        const nodes = measurement.nodes
+        const startIdx = nodes.findIndex(node => node.seq === range.start)
+        const endIdx = nodes.findIndex(node => node.seq === range.end)
+        if (startIdx < 0 || endIdx <= startIdx) throw error
+        const tokens = nodes.slice(startIdx, endIdx + 1).reduce((sum, node) => sum + node.tokens, 0)
+        const smaller = selectCompactableRange(agent.session, measurement, 0, Math.floor(tokens / 2))
+        if (smaller === null || smaller.start !== range.start
+          || nodes.findIndex(node => node.seq === smaller.end) >= endIdx) throw error
+        range = smaller
+        this.ctx.logger.info('summary context overflow: retrying a smaller balanced history prefix')
+      }
+    }
   }
 
   /**

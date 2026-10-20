@@ -576,6 +576,46 @@ describe('compact configuration and defaults', () => {
 })
 
 describe('pressure measurement and retention', () => {
+  it('recovers oversized summary requests through smaller complete prefixes and preserves raw history', async () => {
+    const ctx = createContext(10_000)
+    const compact = service({ auto: false, retainTokens: 180 }, ctx)
+    const session = conversation(6, 'large-history '.repeat(250), 'SYSTEM HEAD')
+    const originals = session.snapshotEvents().filter(event => /^(user|assistant)\/message$/.test(event.type))
+    const summarize = compact.summarize.bind(compact)
+    vi.spyOn(compact, 'summarize').mockImplementation(async (input, owner, signal) => {
+      if (input.messages.reduce((sum, message) => sum + ctx.tokenMeter.estimateMessage(message), 0) > 6_000) {
+        throw Object.assign(new Error('summary request too large'), { code: CONTEXT_WINDOW_EXCEEDED_CODE })
+      }
+      return summarize(input, owner, signal)
+    })
+    await expect(compactIfNeeded(compact, session)).resolves.not.toBeNull()
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeLessThan(8_000)
+    const events = session.snapshotEvents()
+    expect(events.some(event => event.type === 'compaction/end' && event.data.error?.includes('summary request too large'))).toBe(true)
+    for (const original of originals) expect(session.eventAt(original.seq)).toEqual(original)
+  })
+
+  it('stops overflow recovery when the first indivisible history message cannot fit', async () => {
+    const compact = service({ auto: false })
+    const session = conversation(1)
+    const original = session.surface.nodes.slice()
+    compact.error = Object.assign(new Error('single message too large'), { code: CONTEXT_WINDOW_EXCEEDED_CODE })
+    await expect(compactIfNeeded(compact, session, 'context-overflow')).rejects.toThrow('single message too large')
+    expect(compact.calls).toHaveLength(1)
+    expect(session.surface.nodes).toEqual(original)
+  })
+
+  it('bounds summary prefixes without splitting a tool call from its result', () => {
+    const ctx = createContext()
+    const session = toolConversation()
+    const measurement = ctx.tokenMeter.measure(session)
+    const first = measurement.nodes[0]!
+    const call = measurement.nodes[1]!
+    const range = selectCompactableRange(session, measurement, 0, first.tokens + call.tokens)
+    expect(range).toEqual({ start: first.seq, end: first.seq })
+    expect(toolPairingBalancedAfter(session, range!.end)).toBe(true)
+  })
+
   const compactConfig: BasicCompactionConfig = {
     auto: false,
     thresholdRatio: 0.5,
