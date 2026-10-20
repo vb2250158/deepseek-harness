@@ -164,7 +164,7 @@ describe('SessionMediaReferences /api/file', () => {
     expect((await route.call(join(root, 'frames.png'))).status).toBe(403)
   })
 
-  it('reads files and symlink targets outside the default cwd without a workspace registry', async () => {
+  it('reads files and symlink targets outside the default cwd without a workspace registry', async ({ skip }) => {
     const route = await mount()
     const outside = await mkdtemp(join(tmpdir(), 'dsh-media-outside-'))
     try {
@@ -172,7 +172,12 @@ describe('SessionMediaReferences /api/file', () => {
       await writeFile(path, PNG_BYTES)
       expect(await responseBytes(await route.call(path))).toEqual(PNG_BYTES)
       const link = join(root, 'linked.png')
-      await symlink(path, link)
+      try { await symlink(path, link) } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+          skip('Windows denied file symlink creation')
+        }
+        throw error
+      }
       expect(await responseBytes(await route.call(link))).toEqual(PNG_BYTES)
     } finally {
       await rm(outside, { recursive: true, force: true })
