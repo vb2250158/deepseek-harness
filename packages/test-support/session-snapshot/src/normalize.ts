@@ -167,6 +167,17 @@ function replaceCwd(value: string, ctx: NormalizeContext, replacement: string): 
   return out
 }
 
+/** JSON-quoted cwd spellings belong only to generated runtime-context messages. */
+function runtimeContextCwd(value: object, ctx: NormalizeContext): NormalizeContext {
+  if (!('source' in value)) return ctx
+  const source = value.source
+  if (source === null || typeof source !== 'object' || !('kind' in source) || source.kind !== 'runtime-context') return ctx
+  return {
+    ...ctx,
+    cwdAliases: [...ctx.cwdAliases ?? [], ...cwdSpellings(ctx).map(spelling => JSON.stringify(spelling).slice(1, -1))],
+  }
+}
+
 /** Replace cwd, session ids, and any stray UUID with stable tokens in a string. */
 function scrubString(
   value: string,
@@ -223,8 +234,9 @@ function scrubValue(
   }
   if (Array.isArray(value)) return value.map(v => scrubValue(v, ctx, cwdPathMode, identityMode))
   if (value !== null && typeof value === 'object') {
+    const context = runtimeContextCwd(value, ctx)
     const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value)) out[k] = scrubValue(v, ctx, cwdPathMode, identityMode, k)
+    for (const [k, v] of Object.entries(value)) out[k] = scrubValue(v, context, cwdPathMode, identityMode, k)
     if (
       (value as { sessionUpdate?: unknown }).sessionUpdate === 'usage_update'
       && typeof (value as { used?: unknown }).used === 'number'
@@ -247,7 +259,8 @@ function tokenizeFixtureString(value: string, ctx: NormalizeContext, basename: s
     + String.raw`(?=$|[\\/\s<>'"()\[\]{},;:!?=])`,
     'g',
   )
-  return exact.replace(absoluteCwd, CWD).split(`/private${CWD}`).join(CWD)
+  return exact.replace(absoluteCwd, (match: string, offset: number) =>
+    isCwdMatch(exact, offset, match.length) ? CWD : match).split(`/private${CWD}`).join(CWD)
 }
 
 /** Recursively replace generated-cwd spellings while preserving every other JSON value. */
@@ -259,9 +272,10 @@ function tokenizeFixtureValue(
   if (typeof value === 'string') return tokenizeFixtureString(value, ctx, basename)
   if (Array.isArray(value)) return value.map(item => tokenizeFixtureValue(item, ctx, basename))
   if (value !== null && typeof value === 'object') {
+    const context = runtimeContextCwd(value, ctx)
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
       key,
-      tokenizeFixtureValue(item, ctx, basename),
+      tokenizeFixtureValue(item, context, basename),
     ]))
   }
   return value

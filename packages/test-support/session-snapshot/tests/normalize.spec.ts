@@ -1003,6 +1003,38 @@ describe('normalizeSessionSnapshot', () => {
 })
 
 describe('tokenizeSessionFixtureCwd', () => {
+  it.each(['normalize', 'tokenize'] as const)(
+    '%s keeps quoted runtime Windows cwd portable without changing quoted user text',
+    (operation) => {
+      const cwd = String.raw`C:\Users\runner\AppData\Local\Temp\acp-snap-cwd-quoted`
+      const forwardCwd = cwd.replaceAll('\\', '/')
+      const quoted = `Current working directory: ${JSON.stringify(cwd)}.`
+      const userText = `Example JSON path: ${JSON.stringify(cwd)}.`
+      const raw = [
+        JSON.stringify({ type: 'session', id: 's', createdAt: 1, cwd }),
+        JSON.stringify({
+          type: 'user/message',
+          data: {
+            source: { kind: 'runtime-context', sections: [{ name: 'working-directory:current', text: quoted }] },
+            content: [{ type: 'text', text: `${quoted}\nForward cwd: ${JSON.stringify(forwardCwd)}.\nRaw cwd: ${cwd}.` }],
+          },
+        }),
+        JSON.stringify({ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: userText }] } }),
+      ].join('\n') + '\n'
+      const out = operation === 'normalize'
+        ? normalizeSessionLog(raw, { sessionIds: [], cwd, cwdAliases: [forwardCwd] })
+        : tokenizeSessionFixtureCwd(raw)
+      const [, runtime, user] = out.trim().split('\n').map(line => JSON.parse(line) as {
+        data: { content: { text: string }[]; source: { sections: { text: string }[] } }
+      })
+      expect(runtime?.data.content[0]?.text).toBe(
+        'Current working directory: "{{cwd}}".\nForward cwd: "{{cwd}}".\nRaw cwd: {{cwd}}.',
+      )
+      expect(runtime?.data.source.sections[0]?.text).toBe('Current working directory: "{{cwd}}".')
+      expect(user?.data.content[0]?.text).toBe(userText)
+    },
+  )
+
   it.each([
     {
       name: 'macOS',
