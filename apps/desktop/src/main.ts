@@ -61,6 +61,8 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { DesktopSharedWebBackend, readSharedWebBackendConfig } from './shared-web-backend.ts'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
@@ -97,6 +99,9 @@ const recovery = new DesktopFatalRecovery({
   show: options => dialog.showMessageBox(options),
   stop: () => { shuttingDown = true; return stopForRecovery() },
   disablePlugins: async () => {
+    if (await readSharedWebBackendConfig(resolveDshHome()) !== undefined) {
+      throw new Error('Desktop does not own the shared Web backend; recover its plugins through Web')
+    }
     const manager = new DesktopProjectManager(resolveDesktopPaths(), runtimeResources())
     const backupPath = await manager.disableAllPlugins()
     console.info('Desktop profile recovery completed:', { profilePatchBackup: backupPath ?? null, homePatch: 'unchanged' })
@@ -327,6 +332,8 @@ async function main(): Promise<void> {
     : join(process.resourcesPath, 'runtime', 'primary-runtime')
   const activeProject = paths.profile
   const manager = new DesktopProjectManager(paths, resources)
+  const sharedBackendConfig = await readSharedWebBackendConfig(resolveDshHome())
+  let sharedBackend: DesktopSharedWebBackend | undefined
   // Dock and Finder launches inherit only launchd's environment; every Host shares one login-shell read.
   const loginShellRead = new AbortController()
   // The probe runs in its own process group, which outlives Desktop unless the read is aborted.
@@ -444,18 +451,23 @@ async function main(): Promise<void> {
     () => locale.id === 'zh-CN' ? 'zh_CN' : 'en_US', process.platform === 'win32' ? 'win32' : 'darwin')
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
-    const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
+    const host = sharedBackendConfig === undefined ? new DesktopHostProcess(resources.node, resources.dsh, activeProject,
       hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion() }, onFailure,
       primaryRuntime,
-      resources, (next) => { platformView.setSession(next) })
+      resources, (next) => { platformView.setSession(next) }) : new DesktopSharedWebBackend(resolveDshHome(), sharedBackendConfig)
+    sharedBackend = host instanceof DesktopSharedWebBackend ? host : undefined
     return {
       start: async () => {
         const ready = await host.start()
-        hostCookie = await authenticateWebHost(ready.url)
+        hostCookie = sharedBackend === undefined ? await authenticateWebHost(ready.url) : sharedBackend.cookie()
         hostUrl = ready.url
         if (ready.injections === undefined) throw new Error('Desktop Host did not provide boot injections')
         injections = ready.injections
-        welcomeBackend = await connectDesktopWelcome(ready.url, (input, init) => net.fetch(input, init), async () => (await session.defaultSession.cookies.get({ url: ready.url })).map(cookie => `${cookie.name}=${cookie.value}`).join('; '))
+        welcomeBackend = await connectDesktopWelcome(ready.url,
+          (input, init) => sharedBackend === undefined ? net.fetch(input, init) : sharedBackend.request(input, init),
+          async () => sharedBackend === undefined
+            ? (await session.defaultSession.cookies.get({ url: ready.url })).map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
+            : sharedBackend.cookie())
         analyticsEnabled = await welcomeBackend.analyticsEnabled().catch(() => false)
         if (!reportedLaunch) { reportedLaunch = true; void track('desktop_app_launch', {}) }
         stopAccount?.()
@@ -569,10 +581,11 @@ async function main(): Promise<void> {
 
   const reconcileBackend = (): Promise<void> => {
     startup ??= (async () => {
-      await navigateMain(applicationUrl)
+      if (sharedBackendConfig === undefined) await navigateMain(applicationUrl)
       await backend.start(async () => {
-        await Promise.all([manager.applyRelease(), prepareHostEnvironment()])
+        await Promise.all([sharedBackendConfig === undefined ? manager.applyRelease() : Promise.resolve(), prepareHostEnvironment()])
       })
+      if (sharedBackendConfig !== undefined) await navigateMain(applicationUrl)
       if (backend.host !== undefined) await openInitialWindow()
       if (backend.host !== undefined) updateJournal?.action('workspace-ready')
       // The existing Web document resumes through the boot IPC response.
@@ -669,6 +682,12 @@ async function main(): Promise<void> {
     // Shell-owned documents live in the application bundle and never pass through the Host.
     if (url.hostname === 'shell') return serveWebDocument(request, join(app.getAppPath(), 'renderer'))
     if (url.hostname === 'app') {
+      if (sharedBackendConfig !== undefined) {
+        if (backend.host === undefined || hostUrl === undefined || sharedBackend === undefined) {
+          return Promise.resolve(new Response(null, { status: 503 }))
+        }
+        return forwardWebRequest(request, hostUrl, sharedBackend.cookie(), true)
+      }
       if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/assets/')
         || ['/favicon.svg', '/manifest.webmanifest'].includes(url.pathname)) {
         return serveWebDocument(request, join(resources.dsh, 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist'))
@@ -712,7 +731,7 @@ async function main(): Promise<void> {
     return browserGuests.release(event.sender, lease)
   })
 
-  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*', 'wss://127.0.0.1/*'] }, (details, callback) => {
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*', 'wss://127.0.0.1/*', 'ws://[::1]/*', 'wss://[::1]/*'] }, (details, callback) => {
     if (hostUrl === undefined || hostCookie === undefined || details.webContentsId !== mainWindow?.webContents.id) {
       callback({})
       return
@@ -722,7 +741,7 @@ async function main(): Promise<void> {
     if (requested.host !== target.host || requested.protocol !== (target.protocol === 'https:' ? 'wss:' : 'ws:')) { callback({}); return }
     const headers = Object.fromEntries(Object.entries(details.requestHeaders).map(([name, value]) => [name.toLowerCase(), value]))
     if (headers.origin !== 'dsh-app://app') { callback({ cancel: true }); return }
-    callback({ requestHeaders: { ...headers, origin: target.origin, cookie: hostCookie, 'sec-fetch-site': 'same-origin' } })
+    callback({ requestHeaders: { ...headers, origin: target.origin, cookie: sharedBackend?.cookie() ?? hostCookie, 'sec-fetch-site': 'same-origin' } })
   })
 
   const assertMainApplication = (event: IpcMainInvokeEvent): BrowserWindow => {

@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-08-desktop-shared-web-backend.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-desktop-shared-web-backend.md
+/agent-note-explicit-desktop-attachment-to-a-local-web-backend:
+  en: 746350a61a697a1c
+  zh: ef488aeff2c1d66a
+/agent-note-explicit-desktop-attachment-to-a-local-web-backend/problem:
+  en: e3392d2292781a93
+  zh: f72ddbca7fd2571b
+/agent-note-explicit-desktop-attachment-to-a-local-web-backend/decision:
+  en: 644b11a43aac56fd
+  zh: d10b3d9837c9ca0e
+/agent-note-explicit-desktop-attachment-to-a-local-web-backend/consequences:
+  en: ea3eceeb4bfa5365
+  zh: d935530dba89e62b
+/agent-note-explicit-desktop-attachment-to-a-local-web-backend/alternatives-considered:
+  en: e0d8d017eca525a9
+  zh: 155610870ed74ebd
+/agent-note-explicit-desktop-attachment-to-a-local-web-backend/verification:
+  en: 8d812e85b9c7a0ec
+  zh: aa9333ef9f7d0ba9

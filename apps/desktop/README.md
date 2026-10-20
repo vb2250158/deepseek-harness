@@ -52,6 +52,23 @@ Desktop microphone access is restricted to audio requests from the primary `dsh-
 
 Press F12 (Fn+F12 on media-key keyboards), Command+Option+I on macOS, or Ctrl+Shift+I on Windows to toggle DevTools for the focused application page, including in packaged builds. These native shortcuts use hidden application-menu items. Update overlays and packaged embedded browser guests disable DevTools.
 
+<a id="shared-web-backend"></a>
+
+## Shared Web backend
+
+Without an explicit selection, Desktop owns the Host, profile and runtime described below. To attach to an already running local Web application instead, use the same `DSH_HOME` and save `$DSH_HOME/desktop-backend.json`:
+
+```json
+{"mode":"web","url":"http://127.0.0.1:3180/"}
+```
+
+`DSH_DESKTOP_WEB_BACKEND_URL` overrides the file for one process. Only a clean root HTTP origin on literal `127.0.0.1` or `[::1]` is accepted; credentials, query parameters and fragments are rejected. Optional `timeoutMs` is 1–60000, default 10000; `cookieLifetimeMs` is 1–300000, default 60000. Missing settings retain owned startup; invalid settings, unavailable Web or authentication failure stop startup without creating another Host.
+
+Shared mode forwards the entry document, assets, plugins, HTTP and WebSocket traffic to that Web backend. Plugins, settings, themes, sessions and running tasks therefore belong to one process and its Web profile. Desktop does not install its profile, change Web's package environment, or stop or lock Web tasks during quit or shell updates. Native plugin recovery cannot disable shared Web plugins; repair them through Web. The machine-local endpoint is not a portable environment setting.
+
+The forwarded entry declares its local transport before Web's injection scripts run. Settings forms therefore load the Host's durable values instead of selecting page-local defaults while native boot IPC is pending.
+
+The native process reads the existing browser-session grant through the standard credential parser and signs short-lived authority-bound cookies. Secrets and cookies stay in native memory, outside renderer storage, logs and configuration. Shared mode has no private Host IPC supplying embedded Platform account credentials; embedded Platform sign-in remains separate. Native account RPC uses the shared Web account. This attachment does not independently qualify arbitrary combinations of Desktop and Web versions.
 <a id="terminal-command"></a>
 
 ## Terminal command

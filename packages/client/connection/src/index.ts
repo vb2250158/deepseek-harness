@@ -54,6 +54,7 @@ export {
 export { HostConnectionService } from './rpc-host.ts'
 
 export { API_PATH } from './api-path.ts'
+export { createBrowserSessionCookie } from './browser-auth.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'client-connection'
