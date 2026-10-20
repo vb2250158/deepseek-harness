@@ -319,7 +319,7 @@ interface SessionPersistenceSnapshot {
   readonly eventCount?: number
   /** Physical artifact byte size, when the backend can provide it cheaply (JSONL); otherwise absent. */
   readonly sizeBytes?: number
-  /** Physical artifact modification time in Unix epoch milliseconds, when cheaply available; absent for unmaterialized sessions. This is not an event timestamp or a freshness token. */
+  /** Physical modification time in Unix milliseconds, if materialized; neither event time nor a freshness token. */
   readonly modifiedAt?: number
 }
 ```
