@@ -60,7 +60,8 @@ it('ends the failed run at its first idle while projecting pending work as a sep
     expect(adapter.requests).toHaveLength(1)
     expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('second')
     expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('first')
-    expect(agent.inbox.hasPending).toBe(false)
+    expect(agent.inbox.nextTurn).toHaveLength(0)
+    expect(agent.inbox.nextStep).toHaveLength(0)
   } finally {
     await ctx.fiber.dispose()
   }
@@ -69,7 +70,7 @@ it('ends the failed run at its first idle while projecting pending work as a sep
     ...notification,
     params: {
       ...notification.params,
-      event: stableEvent(notification.params.event),
+      event: stableEvent(validatedSessionEvent(notification.params.event)),
     },
   })
   await expect(JSON.stringify(stable, null, 2) + '\n').toMatchFileSnapshot(tracePath)
