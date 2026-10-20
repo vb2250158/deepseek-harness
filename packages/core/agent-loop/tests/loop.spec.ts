@@ -1078,7 +1078,7 @@ describe('agent loop', () => {
     expect(JSON.stringify(adapter.requests[1]?.messages)).toContain('second idle steer')
   })
 
-  it('stops after a throwing pre-step listener and retains later steering until a wakeup', async () => {
+  it('continues later steering after a throwing pre-step listener without resending the failed input', async () => {
     const adapter = new MockAdapter([textResponse('recovered')])
     const ctx = await harness(adapter)
     const agent = await ctx.agentLoop.create(SessionId('failed-steering'), { provider: 'mock', model: 'mock' })
@@ -1093,17 +1093,13 @@ describe('agent loop', () => {
     send(agent, 'prompt')
     await waitForIdle(ctx, agent)
 
-    expect(adapter.requests).toHaveLength(0)
-    expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/start')).toHaveLength(1)
-    expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/end')).toHaveLength(1)
-    expect(agent.inbox.nextStep).toHaveLength(1)
-
-    send(agent, 'resume')
-    await waitForIdle(ctx, agent)
+    await agent.whenIdle()
 
     expect(adapter.requests).toHaveLength(1)
     expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/start')).toHaveLength(2)
     expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('pending steering')
+    expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('"text":"prompt"')
+    expect(agent.inbox.nextStep).toHaveLength(0)
   })
 
   it('inject() while idle durably stages context without opening a turn', async () => {

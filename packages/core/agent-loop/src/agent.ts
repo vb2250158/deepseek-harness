@@ -175,6 +175,7 @@ export class ReactLoopAgent implements Agent {
   /** 恢复资格在启动驱动前同步核验，避免过期请求或重复请求开启新轮次。 */
   private continueTurn(startSeq: number, kind: 'interrupted' | 'quota'): boolean {
     if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing continuation history read; projection migration deferred.
     const events = this.session.snapshotEvents()
     const start = events.findLast(event => event.type === 'turn/start'
       && event.seq >= this.session.inheritedEventCount)
@@ -281,12 +282,13 @@ export class ReactLoopAgent implements Agent {
   }
 
   private async kick(): Promise<void> {
+    const initialTurn = this.phase.kind === 'running' ? this.phase.turn : this.phase.lastTurn
     let failed = false
     try {
       while (await this.turn()) {}
     } catch (_error: unknown) {
       // Reported failures and cancellation are contained at the driver boundary.
-      failed = this.phase.kind === 'running' && this.phase.step > 0 && !this.phase.abort.signal.aborted
+      failed = this.phase.kind === 'running' && !this.phase.abort.signal.aborted && this.phase.turn > initialTurn
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {

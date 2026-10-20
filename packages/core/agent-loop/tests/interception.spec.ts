@@ -531,7 +531,7 @@ describe('agent/pre-step', () => {
     expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('secret')
   })
 
-  it('a throwing pre-step listener reports the driver error and retains adjacent work', async () => {
+  it('a throwing pre-step listener reports the driver error and runs adjacent work once', async () => {
     const adapter = new MockAdapter([textResponse('after')])
     const ctx = await harness(adapter)
     const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
@@ -556,18 +556,21 @@ describe('agent/pre-step', () => {
     send(agent, 'first')
     send(agent, 'second')
     await idle
+    await agent.whenIdle()
     expect(errors).toEqual([expect.objectContaining({ message: 'prompt hook broke' })])
     const log = events(agent)
-    expect(log.filter(e => e.type === 'turn/start')).toHaveLength(1)
-    expect(log.filter(e => e.type === 'turn/end')).toHaveLength(1)
+    expect(log.filter(e => e.type === 'turn/start')).toHaveLength(2)
+    expect(log.filter(e => e.type === 'turn/end')).toHaveLength(2)
     expect(reasons).toEqual([{
       kind: 'error',
       error: { message: 'prompt hook broke', code: 'UNKNOWN' },
-    }])
-    expect(statuses).toEqual(['running', 'idle'])
-    expect(adapter.requests).toHaveLength(0)
+    }, { kind: 'completed' }])
+    expect(statuses).toEqual(['running', 'idle', 'running', 'idle'])
+    expect(adapter.requests).toHaveLength(1)
     expect(agent.inbox.nextTurn.map(message => message.content[0]))
-      .toEqual([{ type: 'text', text: 'second' }])
+      .toEqual([])
+    expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('second')
+    expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('first')
   })
 })
 
