@@ -103,6 +103,25 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
 }
 
 describe('Session-list pages', () => {
+  it.each<Phase>(['live', 'cold'])('keeps old %s blank rows within the workspace limit', async (phase) => {
+    const h = await harness(['a', 'b', 'c', 'd'].map(id => ({ id, phase })), 0)
+    const cache = phase === 'cold' ? h.ctx.sessionProjectionCache : h.ctx.sessionProjections
+    vi.spyOn(cache, 'cachedSnapshot').mockReturnValue({
+      asOfSeq: -1, values: { sessionListMetadata: { blank: true, lastPromptAt: null } },
+    })
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    expect(first.items.map(row => row.sessionId)).toEqual(['a'])
+    expect(first.nextCursor).toBeDefined()
+    if (phase === 'cold') expect(h.ctx.sessions.list()).toEqual([])
+  })
+
+  it('reads only explicit visible metadata targets without activating cold Sessions', async () => {
+    const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
+    vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')
+    const selected = await h.list.selected([SessionId('a'), SessionId('b'), SessionId('missing')])
+    expect(selected.map(row => row.sessionId)).toEqual(['b'])
+    expect(h.ctx.sessions.list()).toEqual([])
+  })
   it('filters restricted Sessions before paging and rechecks retained pages', async () => {
     const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
     const allows = vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')

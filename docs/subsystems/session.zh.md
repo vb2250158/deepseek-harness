@@ -846,7 +846,7 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionInspectio
 
 /**
  * Read visible Session rows without resuming an Agent.
- * @param _request - full-list selection or continuation of a bounded snapshot.
+ * @param _request - explicit identities, a full list, or continuation of a bounded snapshot.
  * @param signal - cancellation for persistence reads and summary generation.
  * @returns visible Session summaries ordered by activity.
  */

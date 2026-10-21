@@ -6,3 +6,4 @@
   - treeitem "Paged conversation 2 {{age}}"
   - treeitem "Paged conversation 3 {{age}}"
   - treeitem "Paged conversation 4 {{age}}"
+- button "Load more sessions"

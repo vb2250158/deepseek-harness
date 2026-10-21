@@ -311,7 +311,7 @@ export class TestSessions implements ISessions {
 
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
-    method: 'create' | 'refreshProjections' | 'refresh' | 'search' | 'fork'
+    method: 'create' | 'refreshProjections' | 'refresh' | 'loadMore' | 'ensureListed' | 'search' | 'fork'
     args: unknown[]
   }[] = []
 
@@ -648,6 +648,22 @@ export class TestSessions implements ISessions {
   refresh(): Promise<void> {
     this.calls.push({ method: 'refresh', args: [] })
     return Promise.resolve()
+  }
+
+  /** Record an explicit page request; fixture callers publish the resulting catalog. */
+  loadMore(): Promise<void> {
+    this.calls.push({ method: 'loadMore', args: [] })
+    return Promise.resolve()
+  }
+
+  /**
+   * Check one identity in the fixture's already supplied catalog.
+   * @param sessionId - navigation target.
+   * @returns whether the fixture contains the row.
+   */
+  ensureListed(sessionId: SessionId): Promise<boolean> {
+    this.calls.push({ method: 'ensureListed', args: [sessionId] })
+    return Promise.resolve(this.list.getSnapshot().byId[sessionId] !== undefined)
   }
 
   /**

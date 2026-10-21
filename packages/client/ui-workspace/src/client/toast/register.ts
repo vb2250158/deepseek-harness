@@ -40,6 +40,12 @@ export function registerToasts(
       }),
     }, ToastEntry<PropsRuntime<'workspace.toast', 'pinFailed'>>)
     yield ctx.slots.register({
+      name: 'workspace.toast', key: 'metadataFailed', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'metadataFailed'> => ({
+        display: (_notice, t) => ({ text: t('toast.metadataFailed'), tone: 'warning' }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'metadataFailed'>>)
+    yield ctx.slots.register({
       name: 'workspace.toast', key: 'unpinFailed', locale: 'workspace',
       inject: (): ToastDisplayInjected<'unpinFailed'> => ({
         display: (_notice, t) => ({ text: t('toast.unpinFailed'), tone: 'warning' }),

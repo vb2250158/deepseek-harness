@@ -82,6 +82,14 @@ type SessionListMutation =
   /** Local first-send flip: the sender clears blank without waiting for a host frame. */
   | { kind: 'engaged'; sessionId: SessionId }
 
+interface ListContinuation {
+  cursor: string
+  readonly established: SessionSummary[]
+  readonly received: Map<SessionId, SessionSummary>
+  readonly seenCursors: Set<string>
+  readonly mutations: SessionListMutation[]
+}
+
 /** Instance cluster + frame entry + the session list. */
 export class SessionManager {
   private readonly sessions = new Map<SessionId, Session>()
@@ -108,6 +116,11 @@ export class SessionManager {
   private listComplete = false
   private listError: RemoteFailure | null = null
   private listInflight: Promise<void> | null = null
+  private listContinuation: ListContinuation | null = null
+  private readonly catalogLookups = new Map<SessionId, {
+    readonly promise: Promise<boolean>
+    readonly controller: AbortController
+  }>()
   /** Active list request's mutation log; its identity also fences completion after reconnect. */
   private listMutations: SessionListMutation[] | null = null
   private readonly addresses = new Map<SessionId, SubagentAddress>()
@@ -207,8 +220,13 @@ export class SessionManager {
   async dispose(): Promise<void> {
     this.disposed = true
     this.listMutations = null
+    this.listContinuation = null
     this.listInflight = null
     this.engagedSessions.clear()
+    const lookups = [...this.catalogLookups.values()]
+    for (const { controller } of lookups) controller.abort()
+    this.catalogLookups.clear()
+    await Promise.allSettled(lookups.map(read => read.promise))
     const reads = [...this.projectionInflight.values()]
     for (const { controller } of reads) controller.abort()
     this.projectionInflight.clear()
@@ -412,80 +430,125 @@ export class SessionManager {
 
   // ---- List API ----
 
-  /** Refresh pages in one Host generation, publishing each successful page immediately. */
+  /** Refresh recent rows without requesting historical continuations. @returns completion of the shared first-page read. */
   refreshList(): Promise<void> {
+    if (this.listInflight !== null) return this.listInflight
+    this.listContinuation = null
+    return this.readListPage()
+  }
+
+  /** Read one additional page; concurrent requests share the same operation. @returns completion of that page read. */
+  loadMore(): Promise<void> {
+    if (this.listInflight !== null) return this.listInflight
+    if (this.listContinuation === null) return this.listError === null ? Promise.resolve() : this.refreshList()
+    if (this.listError?.code === 'gateway/bad-request') {
+      return this.refreshList().then(() => this.loadMore())
+    }
+    return this.readListPage(this.listContinuation)
+  }
+
+  /**
+   * Fetch one missing row without following historical continuation cursors.
+   * @param sessionId - explicit navigation target.
+   * @returns whether the authorized Host catalog contains the identity.
+   */
+  ensureListed(sessionId: SessionId): Promise<boolean> {
+    if (this.summaries.some(row => row.sessionId === sessionId)) return Promise.resolve(true)
+    if (this.disposed) return Promise.resolve(false)
+    const existing = this.catalogLookups.get(sessionId)
+    if (existing !== undefined) return existing.promise
+    const controller = new AbortController()
+    const promise = (async () => {
+      try {
+        const result = await this.remote.session.list({ sessionIds: [sessionId] }, controller.signal)
+        if (controller.signal.aborted || this.disposed) return false
+        if (!result.ok) throw result.error
+        const summary = result.value.items.find(row => row.sessionId === sessionId)
+        if (summary === undefined) return false
+        this.mergeSummary(summary)
+        if (summary.projections !== undefined) this.applyListBlock(sessionId, summary.projections)
+        return true
+      } finally {
+        if (this.catalogLookups.get(sessionId)?.controller === controller) this.catalogLookups.delete(sessionId)
+      }
+    })()
+    this.catalogLookups.set(sessionId, { promise, controller })
+    return promise
+  }
+
+  private readListPage(continuation?: ListContinuation): Promise<void> {
     if (this.listInflight !== null) return this.listInflight
     this.listState = 'loading'
     this.listError = null
     this.listComplete = false
-    const established = this.summaries
-    const mutations: SessionListMutation[] = []
+    const established = continuation?.established ?? this.summaries
+    const mutations: SessionListMutation[] = continuation?.mutations ?? []
     this.listMutations = mutations
     this.notifier.markDirty()
     this.listInflight = (async () => {
       try {
-        const received = new Map<SessionId, SessionSummary>()
-        const seenCursors = new Set<string>()
-        let cursor: string | undefined
-        do {
-          const result = await this.remote.session.list({ paged: true, ...(cursor === undefined ? {} : { cursor }) })
-          if (this.listMutations !== mutations) return
-          if (result.ok) {
-            for (const item of result.value.items) received.set(item.sessionId, item)
-            cursor = result.value.nextCursor
-            if (cursor !== undefined && seenCursors.has(cursor)) {
-              this.listState = 'error'
-              this.listError = new RemoteError('gateway/internal', 'session list cursor did not advance', {})
-              return
-            }
-            if (cursor !== undefined) seenCursors.add(cursor)
-            this.listComplete = cursor === undefined
-            const fetched = [...received.values()]
-            const pendingIds = new Set(received.keys())
-            const available = this.listComplete ? fetched
-              : [...fetched, ...established.filter(summary => !pendingIds.has(summary.sessionId))]
-            const baseline: SessionSummary[] = this.listPhase === 'pending'
-              ? available
-              : mergeOrderedBaseline(established, available, summary => summary.sessionId)
-            // A removal supersedes running observed in the pull, including after re-addition.
-            const removedSincePull = new Set<SessionId>()
-            for (const mutation of mutations) {
-              if (mutation.kind === 'remove') removedSincePull.add(mutation.sessionId)
-            }
-            for (const s of baseline) {
-              if (s.running && !removedSincePull.has(s.sessionId)) this.engagedSessions.add(s.sessionId)
-            }
-            const summaries = mutations.reduce(applyMutation, baseline)
-            this.summaries = summaries
-            // A full list can remove identities without a removal frame.
-            if (this.listComplete) {
-              const retained = this.retainedIds(summaries)
-              for (const sessionId of this.engagedSessions) this.pruneEngagement(sessionId, retained)
-            }
-            this.listState = this.listComplete ? 'idle' : 'loading'
-            this.listPhase = 'ready'
-            this.updateParentAvailability()
-            // Resident Sessions and list rows share one display blank, reconciled with the metadata projection.
-            for (const s of this.summaries) {
-              const session = this.sessions.get(s.sessionId)
-              if (session === undefined) continue
-              session.handleBlank(this.effectiveBlank(s))
-              session.handleRunning(s.running)
-            }
-            // Land each row's projection block in the per-session value store
-            // (cold titles surface without opening the session). A list block is
-            // partial — only the keys its source holds — so an absent key never
-            // clears; how the present keys merge depends on the block's kind.
-            for (const s of result.value.items) {
-              if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
-            }
-            this.notifier.markDirty()
-          } else {
+        const received = continuation?.received ?? new Map<SessionId, SessionSummary>()
+        const seenCursors = continuation?.seenCursors ?? new Set<string>()
+        let cursor = continuation?.cursor
+        const result = await this.remote.session.list({ paged: true, ...(cursor === undefined ? {} : { cursor }) })
+        if (this.listMutations !== mutations) return
+        if (result.ok) {
+          for (const item of result.value.items) received.set(item.sessionId, item)
+          cursor = result.value.nextCursor
+          if (cursor !== undefined && seenCursors.has(cursor)) {
             this.listState = 'error'
-            this.listError = result.error
+            this.listError = new RemoteError('gateway/internal', 'session list cursor did not advance', {})
             return
           }
-        } while (cursor !== undefined)
+          if (cursor !== undefined) seenCursors.add(cursor)
+          this.listComplete = cursor === undefined
+          this.listContinuation = cursor === undefined ? null
+            : { cursor, established, received, seenCursors, mutations }
+          const fetched = [...received.values()]
+          const pendingIds = new Set(received.keys())
+          const available = this.listComplete ? fetched
+            : [...fetched, ...established.filter(summary => !pendingIds.has(summary.sessionId))]
+          const baseline: SessionSummary[] = this.listPhase === 'pending'
+            ? available
+            : mergeOrderedBaseline(established, available, summary => summary.sessionId)
+          // A removal supersedes running observed in the pull, including after re-addition.
+          const removedSincePull = new Set<SessionId>()
+          for (const mutation of mutations) {
+            if (mutation.kind === 'remove') removedSincePull.add(mutation.sessionId)
+          }
+          for (const s of baseline) {
+            if (s.running && !removedSincePull.has(s.sessionId)) this.engagedSessions.add(s.sessionId)
+          }
+          const summaries = mutations.reduce(applyMutation, baseline)
+          this.summaries = summaries
+          // A full list can remove identities without a removal frame.
+          if (this.listComplete) {
+            const retained = this.retainedIds(summaries)
+            for (const sessionId of this.engagedSessions) this.pruneEngagement(sessionId, retained)
+          }
+          this.listState = 'idle'
+          this.listPhase = 'ready'
+          this.updateParentAvailability()
+          // Resident Sessions and list rows share one display blank, reconciled with the metadata projection.
+          for (const s of this.summaries) {
+            const session = this.sessions.get(s.sessionId)
+            if (session === undefined) continue
+            session.handleBlank(this.effectiveBlank(s))
+            session.handleRunning(s.running)
+          }
+          // Land each row's projection block in the per-session value store
+          // (cold titles surface without opening the session). A list block is
+          // partial — only the keys its source holds — so an absent key never
+          // clears; how the present keys merge depends on the block's kind.
+          for (const s of result.value.items) {
+            if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
+          }
+          this.notifier.markDirty()
+        } else {
+          this.listState = 'error'
+          this.listError = result.error
+          return
+        }
       } catch (error) {
         if (!isRemoteFailure(error)) throw error
         if (this.listMutations !== mutations) return
@@ -493,7 +556,7 @@ export class SessionManager {
         this.listError = error
       } finally {
         if (this.listMutations === mutations) {
-          this.listMutations = null
+          if (this.listContinuation === null) this.listMutations = null
           this.listInflight = null
           this.notifier.markDirty()
         }
@@ -627,8 +690,22 @@ export class SessionManager {
   /** Apply immediately and retain for replay when a list response is in flight. */
   private recordMutation(mutation: SessionListMutation): void {
     if (this.disposed) return
-    this.listMutations?.push(mutation)
     this.summaries = applyMutation(this.summaries, mutation)
+    if (this.listMutations !== null) {
+      if (this.listInflight === null && this.listContinuation !== null) {
+        const id = 'summary' in mutation ? mutation.summary.sessionId : mutation.sessionId
+        const summary = this.summaries.find(row => row.sessionId === id)
+        let retained = 0
+        for (const previous of this.listMutations) {
+          const sameId = ('summary' in previous ? previous.summary.sessionId : previous.sessionId) === id
+          const superseded = mutation.kind === 'remove'
+            || (summary !== undefined ? previous.kind !== 'remove' : previous.kind === mutation.kind)
+          if (!sameId || !superseded) this.listMutations[retained++] = previous
+        }
+        this.listMutations.length = retained
+        this.listMutations.push(summary === undefined ? mutation : { kind: 'upsert', summary })
+      } else this.listMutations.push(mutation)
+    }
     this.notifier.markDirty()
   }
 
@@ -785,8 +862,11 @@ export class SessionManager {
    * Opened Session follow streams resume independently through API Gateway.
    */
   handleConnected(): void {
+    for (const { controller } of this.catalogLookups.values()) controller.abort()
+    this.catalogLookups.clear()
     for (const store of this.projectionStores.values()) store.clear()
     this.listMutations = null
+    this.listContinuation = null
     this.listInflight = null
     void this.refreshList()
     const parents = new Set(this.projectionLoads.keys())

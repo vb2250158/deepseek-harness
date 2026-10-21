@@ -164,7 +164,7 @@ export class ApiSessionList {
         const metadata = block?.values.sessionListMetadata
         ranked.push({
           record, updatedAt: updatedAt(header, metadata),
-          priority: this.ctx.agents.get(header.id)?.status === 'running' || metadata?.blank === true,
+          priority: this.ctx.agents.get(header.id)?.status === 'running',
         })
         if (performance.now() >= deadline) {
           await scheduler.yield()
@@ -218,6 +218,27 @@ export class ApiSessionList {
     signal?.throwIfAborted()
     const next = offset + selected.length
     return { items, ...(next < catalog.records.length ? { nextCursor: `${token}:${String(next)}` } : {}) }
+  }
+
+  /**
+   * Read authorized metadata for explicit identities without opening history.
+   * @param sessionIds - identities requested by navigation or search.
+   * @param signal - cancellation for catalog reads.
+   * @returns matching visible summaries, omitting missing or inaccessible identities.
+   */
+  async selected(sessionIds: readonly SessionId[], signal?: AbortSignal): Promise<SessionSummary[]> {
+    const requested = new Set(sessionIds)
+    if (requested.size === 0) return []
+    const records = await this.ctx.sessionQuery.listSessions(signal)
+    const items: SessionSummary[] = []
+    for (const record of records) {
+      signal?.throwIfAborted()
+      if (!requested.has(record.header.id)
+        || !this.ctx.remoteAccess.allows({ kind: 'session', id: record.header.id })) continue
+      const live = this.ctx.sessions.get(record.header.id)
+      items.push(live === undefined ? this.summarizeCold(record) : this.summaryFor(live))
+    }
+    return items
   }
 
   /**

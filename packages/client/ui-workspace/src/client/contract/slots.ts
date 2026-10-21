@@ -259,6 +259,8 @@ export type WorkspaceBrowserInjected = {
   ) => Promise<{ items: readonly SessionSearchResultItem[]; hasMore: boolean }>
   /** Maximum number of merged rows rendered for one search. */
   searchResultLimit: number
+  /** Request one additional historical Session page. */
+  loadMoreSessions: () => Promise<void>
   /** Open the Session rename dialog (a row title double-click); the rename action entry raises the same request. */
   requestSessionRename: (sessionId: SessionId, currentTitle: string) => void
   /** Tell the user an archived row cannot be opened (a click on it). */
@@ -300,6 +302,7 @@ export type RowToast =
   | { kind: 'sessionIdCopied' }
   | { kind: 'sessionIdCopyFailed' }
   | { kind: 'pinFailed' }
+  | { kind: 'metadataFailed' }
   | { kind: 'unpinFailed' }
   | { kind: 'archivedNotOpenable' }
   | { kind: 'defaultWorkspaceFailed' }

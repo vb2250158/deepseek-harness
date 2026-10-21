@@ -919,6 +919,7 @@ export function WorkspaceBrowser({
   createWorkspace,
   searchSessions,
   searchResultLimit,
+  loadMoreSessions,
   useDirectoryFlow,
   useHostInfo,
   useShortcuts,
@@ -937,6 +938,8 @@ export function WorkspaceBrowser({
   const shortcutState = useWorkspaceShortcuts(state => state)
   // Ordering remains live while the rail or search replaces the list body.
   const list = useSessions(state => state)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false)
   const storedWorkspaces = useWorkspaces(state => state.items)
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
@@ -1405,7 +1408,7 @@ export function WorkspaceBrowser({
 
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
-      <div className={css.listArea}>
+      <div className={css.listArea} data-dsh-session-list>
         {wide && (normalizedQuery !== ''
           ? (
             <SearchResults
@@ -1483,6 +1486,22 @@ export function WorkspaceBrowser({
                 }}
               />
             ))}
+        {wide && normalizedQuery === '' && list.phase === 'ready' && list.complete === false && (
+          <button
+            type="button"
+            className={css.sessionOverflowButton}
+            disabled={loadingMore}
+            onClick={() => {
+              setLoadingMore(true)
+              setLoadMoreFailed(false)
+              void loadMoreSessions().catch((_error: unknown) => {
+                setLoadMoreFailed(true)
+              }).finally(() => { setLoadingMore(false) })
+            }}
+          >
+            {t(loadingMore ? 'sessions.loadingMore' : loadMoreFailed ? 'sessions.loadMoreFailed' : 'sessions.loadMore')}
+          </button>
+        )}
       </div>
 
       <Modal

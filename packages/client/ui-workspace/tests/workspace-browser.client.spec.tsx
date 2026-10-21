@@ -99,10 +99,12 @@ function dragData(): Pick<DataTransfer, 'effectAllowed' | 'dropEffect' | 'setDat
 // The default child stub: an open directory flow shows its marker; the two
 // Session row lists stay empty (their entries have their own spec). A stub
 // satisfies the generic render signature only with an erased owner type.
-const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) =>
+const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (
+  name: string, owner: object, options?: Parameters<WorkspaceBrowserProps['renderSlot']>[2],
+) =>
   name === 'sidebar.workspaces.directoryFlow' && (owner as DirectoryFlowOwnerProps).open
     ? <div data-testid="directory-flow" />
-    : null
+    : options?.fallback ?? null
 
 function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
   const controls = createWorkspaceShortcutControls()
@@ -129,6 +131,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     open: vi.fn(),
     searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
     searchResultLimit: 20,
+    loadMoreSessions: vi.fn(async () => {}),
     notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
@@ -152,6 +155,20 @@ function rerender(b: ReturnType<typeof mount>, overrides: Partial<WorkspaceBrows
 }
 
 describe('WorkspaceBrowser', () => {
+  it('requests older rows only after a click and keeps a failed request retryable', async () => {
+    const request = Promise.withResolvers<undefined>()
+    const loadMoreSessions = vi.fn().mockReturnValueOnce(request.promise).mockResolvedValueOnce(undefined)
+    const browser = mount({ useSessions: hook(sessionState([summary('recent', 1)], { complete: false })), loadMoreSessions })
+    act(() => { browser.store.actions.setGroupExpanded(UNGROUPED_KEY, true) })
+    expect(loadMoreSessions).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '加载更多会话' }))
+    expect(loadMoreSessions).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '正在加载更多会话…' }).hasAttribute('disabled')).toBe(true)
+    await act(async () => { request.reject(new Error('fixture offline')) })
+    fireEvent.click(screen.getByRole('button', { name: '加载失败，点击重试' }))
+    await waitFor(() => { expect(loadMoreSessions).toHaveBeenCalledTimes(2) })
+    expect(screen.getByText('recent')).not.toBeNull()
+  })
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps %s recency independent of arrival order and saved manual positions', (mode) => {
     localStorage.clear()
     const preferences = createWorkspaceViewStore().create()

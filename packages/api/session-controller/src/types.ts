@@ -265,6 +265,8 @@ export interface SkillListValue {
 
 /** Session list request. */
 export interface SessionListRequest {
+  /** Read these identities without fetching historical pages. */
+  readonly sessionIds?: readonly SessionId[]
   /** Opt into bounded pages; omitted requests retain the complete-list behavior. */
   readonly paged?: boolean
   /** Continuation of one process-local catalog snapshot. */

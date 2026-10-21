@@ -352,11 +352,27 @@ export class ClientSessions implements ISessions {
   }
 
   /**
-   * Refresh the real Session baseline, reusing an in-flight pull.
-   * @returns completion of the current or newly started baseline pull.
+   * Explicitly refresh the complete Session catalog, reusing in-flight reads.
+   * @returns completion of the catalog refresh or its reported failure.
    */
-  refresh(): Promise<void> {
-    return this.manager.refreshList()
+  async refresh(): Promise<void> {
+    await this.manager.refreshList()
+    while (!this.closed) {
+      const snapshot = this.manager.getListSnapshot()
+      if (snapshot.complete || snapshot.state === 'error') return
+      await this.manager.loadMore()
+    }
+  }
+
+  loadMore(): Promise<void> {
+    return this.manager.loadMore().then(() => {
+      const error = this.manager.getListSnapshot().error
+      if (error !== null) throw new Error(error.message, { cause: error })
+    })
+  }
+
+  ensureListed(sessionId: SessionId): Promise<boolean> {
+    return this.manager.ensureListed(sessionId)
   }
 
   /**

@@ -106,10 +106,18 @@ export interface ISessions {
   refreshProjections(sessionId: SessionId): Promise<void>
 
   /**
-   * Refresh the Host-authoritative Session list.
-   * @returns completion of the current or newly started Session-list refresh.
+   * Explicitly refresh the complete Host-authoritative Session list.
+   * @returns completion of the complete Session-list refresh.
    */
   refresh(): Promise<void>
+  /** Read one historical page after explicit user demand. @returns completion of the shared page request. */
+  loadMore(): Promise<void>
+  /**
+   * Fetch one authorized metadata row without opening history or fetching other pages.
+   * @param sessionId - explicit navigation target.
+   * @returns whether the Host catalog contains a visible matching row.
+   */
+  ensureListed(sessionId: SessionId): Promise<boolean>
   /**
    * Search the Host's visible message-content index. Results stay
    * request-local; the list snapshot remains the metadata authority.
