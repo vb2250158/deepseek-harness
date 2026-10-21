@@ -1,6 +1,6 @@
 /** Event-loop fairness and cancellation of synchronous Session-list summaries. */
 
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -84,7 +84,11 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
     return { header: session.header, live: row.phase === 'live', persisted: true }
   })
   const listSessions = vi.fn(async (_signal?: AbortSignal) => records)
-  ctx.provide('sessionQuery', { listSessions } as never)
+  class ListingSource extends Service {
+    readonly listSessions = listSessions
+    constructor(sourceCtx: Context) { super(sourceCtx, 'sessionQuery') }
+  }
+  let source = await ctx.plugin(ListingSource)
   ctx.provide('sessionProjectionCache', {
     cachedSnapshot: (header: SessionRecord['header']) => {
       recordSummary('cold', header.id)
@@ -99,11 +103,24 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
     return summary
   })
   vi.spyOn(performance, 'now').mockImplementation(() => clock.now)
-  return { ctx, list, listSessions, trace, observer, attach, agents, detach, clock }
+  const replaceSource = async (): Promise<void> => {
+    await source.dispose()
+    source = await ctx.plugin(ListingSource)
+  }
+  return { ctx, list, listSessions, trace, observer, attach, agents, detach, clock, replaceSource }
 }
 
 describe('Session-list pages', () => {
-  it('reuses header discovery until expiry, explicit refresh, or a Session catalog change', async () => {
+  it('discards discovery and continuations when the query service is replaced', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    const first = await h.list.page({ paged: true }, policy)
+    await h.replaceSource()
+    await expect(h.list.page({ cursor: first.nextCursor! }, policy)).rejects.toThrow('cursor expired or invalid')
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+  it('reuses header discovery through Cordis service accessors until expiry, refresh, or a catalog change', async () => {
     const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listSnapshotLimit: 8 }
     await h.list.page({ paged: true }, policy)

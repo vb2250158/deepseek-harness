@@ -95,7 +95,6 @@ export function truncateUnicodeCodePoints(value: string, maximum: number): strin
 export class ApiSessionList {
   private readonly catalogs = new Map<string, ListCatalog>()
   private discovery: {
-    readonly source: Context['sessionQuery']
     readonly records: readonly SessionRecord[]
     readonly expiresAt: number
   } | undefined
@@ -109,6 +108,11 @@ export class ApiSessionList {
     const invalidate = (): void => { this.discovery = undefined; this.discoveryGeneration++ }
     ctx.on('api-session/added', invalidate)
     ctx.on('api-session/removed', invalidate)
+    ctx.inject(['sessionQuery'], (sourceCtx) => {
+      const reset = (): void => { this.catalogs.clear(); invalidate() }
+      reset()
+      sourceCtx.effect(() => reset, 'api-session.listDiscoverySource')
+    })
     ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
       stateSchema: sessionListMetadataSchema,
@@ -246,14 +250,14 @@ export class ApiSessionList {
     signal?.throwIfAborted()
     const source = this.ctx.sessionQuery
     const cached = this.discovery
-    if (!fresh && cacheMs > 0 && cached?.source === source && cached.expiresAt > performance.now()) return cached.records
+    if (!fresh && cacheMs > 0 && cached !== undefined && cached.expiresAt > performance.now()) return cached.records
     if (fresh) { this.discovery = undefined; this.discoveryGeneration++ }
     const generation = this.discoveryGeneration
     const records = await source.listSessions(signal)
     signal?.throwIfAborted()
     if (generation === this.discoveryGeneration) {
       this.discovery = cacheMs === 0 ? undefined
-        : { source, records, expiresAt: performance.now() + cacheMs }
+        : { records, expiresAt: performance.now() + cacheMs }
     }
     return records
   }
@@ -268,7 +272,7 @@ export class ApiSessionList {
     const requested = new Set(sessionIds)
     if (requested.size === 0) return []
     const cached = this.discovery
-    const records = cached?.source === this.ctx.sessionQuery && cached.expiresAt > performance.now()
+    const records = cached !== undefined && cached.expiresAt > performance.now()
       && sessionIds.every(id => cached.records.some(record => record.header.id === id))
       ? cached.records : await this.ctx.sessionQuery.listSessions(signal)
     const items: SessionSummary[] = []
