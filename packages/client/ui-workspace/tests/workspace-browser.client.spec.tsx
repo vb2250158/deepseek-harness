@@ -159,6 +159,7 @@ describe('WorkspaceBrowser', () => {
     const request = Promise.withResolvers<undefined>()
     const loadMoreSessions = vi.fn().mockReturnValueOnce(request.promise).mockResolvedValueOnce(undefined)
     const browser = mount({ useSessions: hook(sessionState([summary('recent', 1)], { complete: false })), loadMoreSessions })
+    act(() => { browser.store.actions.setGroupBy('flat') })
     act(() => { browser.store.actions.setGroupExpanded(UNGROUPED_KEY, true) })
     expect(loadMoreSessions).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '加载更多会话' }))
@@ -168,6 +169,29 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: '加载失败，点击重试' }))
     await waitFor(() => { expect(loadMoreSessions).toHaveBeenCalledTimes(2) })
     expect(screen.getByText('recent')).not.toBeNull()
+  })
+  it('places independent history controls directly under their expanded projects', async () => {
+    const loadMoreSessions = vi.fn(async () => {})
+    const browser = mount({
+      useSessions: hook(sessionState([], { complete: false, workspacePages: {
+        '/projects/alpha': { complete: false, state: 'idle' },
+        '/projects/beta': { complete: false, state: 'idle' },
+      } })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', []), workspace('beta', [])])),
+      loadMoreSessions,
+    })
+    act(() => {
+      browser.store.actions.setGroupExpanded('alpha', true)
+      browser.store.actions.setGroupExpanded('beta', true)
+    })
+    expect(screen.queryByRole('button', { name: '加载更多会话' })).toBeNull()
+    const controls = screen.getAllByRole('button', { name: '展开显示' })
+    expect(controls).toHaveLength(2)
+    fireEvent.click(controls[0]!)
+    await waitFor(() => { expect(loadMoreSessions).toHaveBeenCalledWith('/projects/alpha') })
+    expect(loadMoreSessions).toHaveBeenCalledTimes(1)
+    act(() => { browser.store.actions.setGroupExpanded('beta', false) })
+    expect(screen.getAllByRole('button', { name: '展开显示' })).toHaveLength(1)
   })
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps %s recency independent of arrival order and saved manual positions', (mode) => {
     localStorage.clear()

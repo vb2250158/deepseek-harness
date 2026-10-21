@@ -110,8 +110,12 @@ export interface ISessions {
    * @returns completion of the complete Session-list refresh.
    */
   refresh(): Promise<void>
-  /** Read one historical page after explicit user demand. @returns completion of the shared page request. */
-  loadMore(): Promise<void>
+  /**
+   * Read one historical page after explicit user demand.
+   * @param cwd - exact workspace directory; omitted for the complete catalog.
+   * @returns completion of the shared page request.
+   */
+  loadMore(cwd?: string): Promise<void>
   /**
    * Fetch one authorized metadata row without opening history or fetching other pages.
    * @param sessionId - explicit navigation target.

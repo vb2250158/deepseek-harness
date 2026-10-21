@@ -103,6 +103,23 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
 }
 
 describe('Session-list pages', () => {
+  it('pages one workspace independently and rejects another workspace cursor', async () => {
+    const h = await harness(Array.from({ length: 6 }, (_, i) => ({ id: `row-${i}`, phase: 'cold' as const })), 0)
+    const records = await h.listSessions()
+    records.forEach((record, i) => {
+      record.header = { ...record.header, createdAt: i, cwd: i % 2 === 0 ? '/a' : '/b' }
+    })
+    const first = await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 4 })
+    expect(first.workspaceHasMore).toEqual(['/b', '/a'])
+    const a = await h.list.page({ paged: true, cwd: '/a' }, { ...pagePolicy, listSnapshotLimit: 4 })
+    expect(a.items.map(row => row.sessionId)).toEqual(['row-4', 'row-2'])
+    await expect(h.list.page({ cwd: '/b', cursor: a.nextCursor! }, pagePolicy)).rejects.toThrow('another workspace')
+    const last = await h.list.page({ cwd: '/a', cursor: a.nextCursor! }, pagePolicy)
+    expect(last.items.map(row => row.sessionId)).toEqual(['row-0'])
+    expect(last.nextCursor).toBeUndefined()
+    expect(h.ctx.sessions.list()).toEqual([])
+  })
+
   it.each<Phase>(['live', 'cold'])('keeps old %s blank rows within the workspace limit', async (phase) => {
     const h = await harness(['a', 'b', 'c', 'd'].map(id => ({ id, phase })), 0)
     const cache = phase === 'cold' ? h.ctx.sessionProjectionCache : h.ctx.sessionProjections

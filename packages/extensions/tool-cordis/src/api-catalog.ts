@@ -7275,11 +7275,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionListRequest',
-    declaration: 'export interface SessionListRequest {\n    readonly sessionIds?: readonly SessionId[];\n    readonly paged?: boolean;\n    readonly cursor?: string;\n}',
+    declaration: 'export interface SessionListRequest {\n    readonly sessionIds?: readonly SessionId[];\n    readonly paged?: boolean;\n    readonly cwd?: string;\n    readonly cursor?: string;\n}',
   },
   {
     name: 'SessionListValue',
-    declaration: 'export interface SessionListValue {\n    readonly items: readonly SessionSummary[];\n    readonly nextCursor?: string;\n}',
+    declaration: 'export interface SessionListValue {\n    readonly items: readonly SessionSummary[];\n    readonly nextCursor?: string;\n    readonly workspaceHasMore?: readonly string[];\n}',
   },
   {
     name: 'SessionLogOffset',

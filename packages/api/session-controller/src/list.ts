@@ -33,6 +33,7 @@ interface ListPagePolicy {
 interface ListCatalog {
   readonly records: readonly SessionRecord[]
   readonly expiresAt: number
+  readonly cwd?: string
 }
 
 const SEARCH_PROVIDER_CALL_LIMIT = 100
@@ -148,6 +149,9 @@ export class ApiSessionList {
         throw new RemoteError('gateway/bad-request', 'session list cursor expired or invalid', {})
       }
       catalog = existing
+      if (catalog.cwd !== request.cwd) {
+        throw new RemoteError('gateway/bad-request', 'session list cursor belongs to another workspace', {})
+      }
     } else {
       const records = await this.ctx.sessionQuery.listSessions(signal)
       const ranked: Array<{ record: SessionRecord; updatedAt: number; priority: boolean }> = []
@@ -155,6 +159,7 @@ export class ApiSessionList {
       for (const record of records) {
         const { header } = record
         signal?.throwIfAborted()
+        if (request.cwd !== undefined && header.cwd !== request.cwd) continue
         if (!this.ctx.remoteAccess.allows({ kind: 'session', id: header.id })) continue
         const live = this.ctx.sessions.get(header.id)
         if (live === undefined && header.cwd === undefined) continue
@@ -185,7 +190,10 @@ export class ApiSessionList {
       }
       signal?.throwIfAborted()
       token = randomUUID()
-      catalog = { records: [...initial, ...older], expiresAt: performance.now() + policy.listSnapshotTtlMs }
+      catalog = {
+        records: [...initial, ...older], expiresAt: performance.now() + policy.listSnapshotTtlMs,
+        ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+      }
       offset = 0
       while (this.catalogs.size >= policy.listSnapshotLimit) {
         const first = this.catalogs.keys().next().value
@@ -193,7 +201,11 @@ export class ApiSessionList {
         this.catalogs.delete(first)
       }
       if (older.length > 0) this.catalogs.set(token, catalog)
-      return this.projectPage(catalog, token, offset, initial.length, signal)
+      const page = await this.projectPage(catalog, token, offset,
+        request.cwd === undefined ? initial.length : policy.listPageSize, signal)
+      return request.cwd === undefined
+        ? { ...page, workspaceHasMore: [...new Set(older.flatMap(row => row.header.cwd === undefined ? [] : [row.header.cwd]))] }
+        : page
     }
     return this.projectPage(catalog, token, offset, policy.listPageSize, signal)
   }

@@ -55,9 +55,17 @@ export interface SessionListSnapshot {
   phase: SessionListPhase
   /** False while older catalog pages have not arrived. */
   complete: boolean
+  /** Independent historical page availability and activity, keyed by workspace directory. */
+  workspacePages: Readonly<Record<string, WorkspaceSessionPage>>
   error: RemoteFailure | null
   projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>
 
+}
+
+/** Historical paging state for one workspace directory. */
+export interface WorkspaceSessionPage {
+  readonly complete: boolean
+  readonly state: 'idle' | 'loading' | 'error'
 }
 
 /** Shared projection values and the lifecycle of their explicit baseline read. */
@@ -117,6 +125,13 @@ export class SessionManager {
   private listError: RemoteFailure | null = null
   private listInflight: Promise<void> | null = null
   private listContinuation: ListContinuation | null = null
+  private workspacePages: Record<string, WorkspaceSessionPage> = {}
+  private readonly workspaceCursors = new Map<string, string>()
+  private readonly workspaceReads = new Map<string, {
+    readonly promise: Promise<void>
+    readonly controller: AbortController
+    readonly mutations: SessionListMutation[]
+  }>()
   private readonly catalogLookups = new Map<SessionId, {
     readonly promise: Promise<boolean>
     readonly controller: AbortController
@@ -219,6 +234,7 @@ export class SessionManager {
    */
   async dispose(): Promise<void> {
     this.disposed = true
+    const workspaceReads = this.resetWorkspacePages()
     this.listMutations = null
     this.listContinuation = null
     this.listInflight = null
@@ -226,7 +242,7 @@ export class SessionManager {
     const lookups = [...this.catalogLookups.values()]
     for (const { controller } of lookups) controller.abort()
     this.catalogLookups.clear()
-    await Promise.allSettled(lookups.map(read => read.promise))
+    await Promise.allSettled([...workspaceReads, ...lookups.map(read => read.promise)])
     const reads = [...this.projectionInflight.values()]
     for (const { controller } of reads) controller.abort()
     this.projectionInflight.clear()
@@ -433,18 +449,79 @@ export class SessionManager {
   /** Refresh recent rows without requesting historical continuations. @returns completion of the shared first-page read. */
   refreshList(): Promise<void> {
     if (this.listInflight !== null) return this.listInflight
+    void this.resetWorkspacePages()
     this.listContinuation = null
     return this.readListPage()
   }
 
-  /** Read one additional page; concurrent requests share the same operation. @returns completion of that page read. */
-  loadMore(): Promise<void> {
+  /**
+   * Read one historical page, optionally restricted to one workspace.
+   * @param cwd - exact workspace directory; omitted for complete-catalog consumers.
+   * @returns completion of the shared page read.
+   */
+  loadMore(cwd?: string): Promise<void> {
+    if (cwd !== undefined) return this.readWorkspacePage(cwd)
     if (this.listInflight !== null) return this.listInflight
     if (this.listContinuation === null) return this.listError === null ? Promise.resolve() : this.refreshList()
     if (this.listError?.code === 'gateway/bad-request') {
       return this.refreshList().then(() => this.loadMore())
     }
     return this.readListPage(this.listContinuation)
+  }
+
+  private resetWorkspacePages(): Promise<void>[] {
+    const reads = [...this.workspaceReads.values()]
+    for (const read of reads) read.controller.abort()
+    this.workspaceReads.clear()
+    this.workspaceCursors.clear()
+    this.workspacePages = {}
+    return reads.map(read => read.promise)
+  }
+
+  private readWorkspacePage(cwd: string): Promise<void> {
+    const existing = this.workspaceReads.get(cwd)
+    if (existing !== undefined) return existing.promise
+    if (this.disposed || this.workspacePages[cwd]?.complete !== false) return Promise.resolve()
+    const controller = new AbortController()
+    const mutations: SessionListMutation[] = []
+    this.workspacePages = { ...this.workspacePages, [cwd]: { complete: false, state: 'loading' } }
+    this.notifier.markDirty()
+    const promise = (async () => {
+      try {
+        let cursor = this.workspaceCursors.get(cwd)
+        let result = await this.remote.session.list({ paged: true, cwd, ...(cursor === undefined ? {} : { cursor }) }, controller.signal)
+        if (!result.ok && result.error.code === 'gateway/bad-request' && cursor !== undefined && !controller.signal.aborted) {
+          cursor = undefined
+          result = await this.remote.session.list({ paged: true, cwd }, controller.signal)
+        }
+        if (controller.signal.aborted || this.disposed) return
+        if (!result.ok) throw result.error
+        if (result.value.nextCursor !== undefined && result.value.nextCursor === cursor) {
+          throw new RemoteError('gateway/internal', 'workspace session cursor did not advance', {})
+        }
+        this.workspaceReads.delete(cwd)
+        const rows = mutations.reduce(applyMutation, [...result.value.items])
+        for (const summary of rows) {
+          this.mergeSummary(summary)
+          if (summary.projections !== undefined) this.applyListBlock(summary.sessionId, summary.projections)
+        }
+        if (result.value.nextCursor === undefined) this.workspaceCursors.delete(cwd)
+        else this.workspaceCursors.set(cwd, result.value.nextCursor)
+        this.workspacePages = {
+          ...this.workspacePages,
+          [cwd]: { complete: result.value.nextCursor === undefined, state: 'idle' },
+        }
+      } catch (error) {
+        if (controller.signal.aborted || this.disposed) return
+        this.workspacePages = { ...this.workspacePages, [cwd]: { complete: false, state: 'error' } }
+        throw error
+      } finally {
+        if (this.workspaceReads.get(cwd)?.controller === controller) this.workspaceReads.delete(cwd)
+        this.notifier.markDirty()
+      }
+    })()
+    this.workspaceReads.set(cwd, { promise, controller, mutations })
+    return promise
   }
 
   /**
@@ -493,6 +570,9 @@ export class SessionManager {
         const result = await this.remote.session.list({ paged: true, ...(cursor === undefined ? {} : { cursor }) })
         if (this.listMutations !== mutations) return
         if (result.ok) {
+          if (continuation === undefined) {
+            this.workspacePages = Object.fromEntries((result.value.workspaceHasMore ?? []).map(cwd => [cwd, { complete: false, state: 'idle' }]))
+          }
           for (const item of result.value.items) received.set(item.sessionId, item)
           cursor = result.value.nextCursor
           if (cursor !== undefined && seenCursors.has(cursor)) {
@@ -502,6 +582,7 @@ export class SessionManager {
           }
           if (cursor !== undefined) seenCursors.add(cursor)
           this.listComplete = cursor === undefined
+          if (this.listComplete) void this.resetWorkspacePages()
           this.listContinuation = cursor === undefined ? null
             : { cursor, established, received, seenCursors, mutations }
           const fetched = [...received.values()]
@@ -691,6 +772,7 @@ export class SessionManager {
   private recordMutation(mutation: SessionListMutation): void {
     if (this.disposed) return
     this.summaries = applyMutation(this.summaries, mutation)
+    for (const read of this.workspaceReads.values()) read.mutations.push(mutation)
     if (this.listMutations !== null) {
       if (this.listInflight === null && this.listContinuation !== null) {
         const id = 'summary' in mutation ? mutation.summary.sessionId : mutation.sessionId
@@ -922,6 +1004,7 @@ export class SessionManager {
       state: this.listState,
       phase: this.listPhase,
       complete: this.listComplete,
+      workspacePages: this.workspacePages,
       error: this.listError,
       projectionsBySession: Object.fromEntries([...this.projectionStores].map(([sessionId, store]) => [
         sessionId,

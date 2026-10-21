@@ -16,6 +16,7 @@ describe('web e2e: progressive Session list', () => {
   let browser: Browser
   let page: Page
   let workspaceId: string
+  let secondaryWorkspaceId: string
   let releaseOlder: (() => void) | undefined
   let pages = 0
   const errors: string[] = []
@@ -34,22 +35,33 @@ describe('web e2e: progressive Session list', () => {
       await workspace.attachSession(id)
       await scaffold.ctx.sessionController.rename({ sessionId: id, title: `Paged conversation ${i}` })
     }
+    const secondaryCwd = join(scaffold.workspaceCwd, 'secondary')
+    await mkdir(secondaryCwd)
+    const secondary = await scaffold.ctx.workspaceRegistry.create(secondaryCwd)
+    secondaryWorkspaceId = secondary.id
+    for (let i = 0; i < 7; i++) {
+      const id = await seedSession({ ...scaffold, workspaceCwd: secondaryCwd }, fixture, `secondary-session-${i}`, undefined, {
+        createdAt: now - (i + 1) * 60_000,
+      })
+      await secondary.attachSession(id)
+      await scaffold.ctx.sessionController.rename({ sessionId: id, title: `Secondary conversation ${i}` })
+    }
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
     await page.clock.setFixedTime(now)
     page.on('pageerror', (error) => { errors.push(error.message) })
     page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
-    await page.addInitScript((account) => {
+    await page.addInitScript((accounts) => {
       localStorage.setItem('dsh.workspace.view.v5', JSON.stringify({
-        groupBy: 'workspace', orderBy: 'updated', groupExpansion: { [account]: true },
+        groupBy: 'workspace', orderBy: 'updated', groupExpansion: Object.fromEntries(accounts.map(account => [account, true])),
         sessionOrderByAccount: {},
       }))
-    }, workspace.id)
+    }, [workspace.id, secondary.id])
     await page.route('**/api/session/list', async (route) => {
-      const body = route.request().postDataJSON() as { payload: { args: { _request: { cursor?: string } } } }
+      const body = route.request().postDataJSON() as { payload: { args: { _request: { cursor?: string; cwd?: string } } } }
       const request = body.payload.args._request
       pages++
-      if (request.cursor !== undefined) {
+      if (request.cwd !== undefined) {
         await new Promise<void>((resolve) => { releaseOlder = resolve })
       }
       await route.continue()
@@ -78,12 +90,14 @@ describe('web e2e: progressive Session list', () => {
     }))
       .toBe('paged-session-0')
     expect(pages).toBe(1)
-    await page.getByRole('button', { name: 'Load more sessions', exact: true }).click()
+    expect(await page.getByRole('button', { name: 'Load more sessions', exact: true }).count()).toBe(0)
+    expect(await page.getByText('Secondary conversation 6', { exact: true }).count()).toBe(0)
+    await page.locator(`[data-row-key="overflow:${workspaceId}"]`).click()
     await expect.poll(() => releaseOlder !== undefined, { timeout: 10_000 }).toBe(true)
     releaseOlder?.()
-    await expect.poll(() => page.getByRole('button', { name: 'Show 4 more sessions' }).count()).toBe(1)
-    await page.getByRole('button', { name: 'Show 4 more sessions' }).click()
     await expect.poll(() => page.getByText('Paged conversation 8', { exact: true }).count()).toBe(1)
+    expect(await page.getByText('Secondary conversation 6', { exact: true }).count()).toBe(0)
+    expect(await page.locator(`[data-row-key="overflow:${secondaryWorkspaceId}"]`).textContent()).toBe('Show more')
     expect(pages).toBe(2)
     expect(errors).toEqual([])
   })
@@ -116,18 +130,24 @@ describe('web e2e: progressive Session list', () => {
   it('keeps three frontends interactive with independent pages and selections', async () => {
     const clients = await Promise.all(Array.from({ length: 3 }, () => newEnglishPage(browser)))
     try {
+      await Promise.all(clients.map(client => client.addInitScript((accounts) => {
+        localStorage.setItem('dsh.workspace.view.v5', JSON.stringify({
+          groupBy: 'workspace', orderBy: 'updated', groupExpansion: Object.fromEntries(accounts.map(account => [account, true])),
+          sessionOrderByAccount: {},
+        }))
+      }, [workspaceId, secondaryWorkspaceId])))
       await Promise.all(clients.map(client => client.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })))
       for (const client of clients) {
         const expand = client.getByRole('button', { name: 'Open sidebar', exact: true })
         if (await expand.count() !== 0) await expand.click()
-        await expect.poll(() => client.getByRole('button', { name: 'Load more sessions', exact: true }).count(), { timeout: 15_000 }).toBe(1)
+        await expect.poll(() => client.getByRole('button', { name: 'Show more', exact: true }).count(), { timeout: 15_000 }).toBe(2)
       }
       const first = clients[0]
       if (first === undefined) throw new Error('Missing first frontend')
-      await first.getByRole('button', { name: 'Load more sessions', exact: true }).click()
-      await expect.poll(() => first.getByRole('button', { name: 'Show 4 more sessions', exact: true }).count()).toBe(1)
+      await first.locator(`[data-row-key="overflow:${workspaceId}"]`).click()
+      await expect.poll(() => first.getByText('Paged conversation 8', { exact: true }).count()).toBe(1)
       for (const client of clients.slice(1)) {
-        expect(await client.getByRole('button', { name: 'Load more sessions', exact: true }).count()).toBe(1)
+        expect(await client.getByRole('button', { name: 'Show more', exact: true }).count()).toBe(2)
       }
       for (const [index, client] of clients.entries()) {
         await client.locator(`[data-row-key="session:paged-session-${index}"]`).click()

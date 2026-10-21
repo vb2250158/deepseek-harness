@@ -1598,6 +1598,89 @@ describe('connected generation', () => {
 })
 
 describe('progressive catalog loading', () => {
+  it('keeps workspace cursors independent from each other and the complete catalog', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1, { cwd: '/a' })], nextCursor: 'all', workspaceHasMore: ['/a', '/b'] }))
+    await manager.refreshList()
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1, { cwd: '/a' })], nextCursor: 'a-next' }))
+    const a = manager.loadMore('/a')
+    expect(manager.loadMore('/a')).toBe(a)
+    await a
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S2, { cwd: '/b' })] }))
+    await manager.loadMore('/b')
+    expect(manager.getListSnapshot().workspacePages).toEqual({
+      '/a': { complete: false, state: 'idle' }, '/b': { complete: true, state: 'idle' },
+    })
+    remote.session.list.mockResolvedValueOnce(ok({ items: [] }))
+    await manager.loadMore('/a')
+    remote.session.list.mockResolvedValueOnce(ok({ items: [] }))
+    await manager.loadMore()
+    expect(remote.session.list.mock.calls.map(([request]) => request)).toEqual([
+      { paged: true }, { paged: true, cwd: '/a' }, { paged: true, cwd: '/b' },
+      { paged: true, cwd: '/a', cursor: 'a-next' }, { paged: true, cursor: 'all' },
+    ])
+  })
+
+  it('preserves removals during a workspace read and retries an expired workspace cursor', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [], nextCursor: 'all', workspaceHasMore: ['/a'] }))
+    await manager.refreshList()
+    const pending = Promise.withResolvers<undefined>()
+    remote.session.list.mockImplementationOnce(async () => {
+      await pending.promise
+      return ok({ items: [summary(S2, { cwd: '/a' })], nextCursor: 'expired' })
+    })
+    const read = manager.loadMore('/a')
+    manager.handleSessionRemoved(S2)
+    pending.resolve(undefined)
+    await read
+    expect(manager.getListSnapshot().items).toEqual([])
+    remote.session.list.mockResolvedValueOnce(err(new RemoteError('gateway/bad-request', 'expired', {})))
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1, { cwd: '/a' })] }))
+    await manager.loadMore('/a')
+    expect(remote.session.list.mock.calls.slice(-2).map(([request]) => request)).toEqual([
+      { paged: true, cwd: '/a', cursor: 'expired' }, { paged: true, cwd: '/a' },
+    ])
+    expect(manager.getListSnapshot().workspacePages['/a']).toEqual({ complete: true, state: 'idle' })
+  })
+
+  it('discards a workspace response after a new catalog generation', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [], nextCursor: 'all', workspaceHasMore: ['/a'] }))
+    await manager.refreshList()
+    const pending = Promise.withResolvers<undefined>()
+    remote.session.list.mockImplementationOnce(async () => {
+      await pending.promise
+      return ok({ items: [summary(S2, { cwd: '/a' })] })
+    })
+    const read = manager.loadMore('/a')
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)] }))
+    await manager.refreshList()
+    pending.resolve(undefined)
+    await read
+    expect(manager.getListSnapshot().items.map(row => row.sessionId)).toEqual([S1])
+    expect(manager.getListSnapshot().workspacePages).toEqual({})
+  })
+
+  it('keeps a workspace failure retryable without changing another project', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'all', workspaceHasMore: ['/a', '/b'] }))
+    await manager.refreshList()
+    remote.session.list.mockResolvedValueOnce(err(new RemoteError('gateway/internal', 'offline', {})))
+    await expect(manager.loadMore('/a')).rejects.toMatchObject({ message: 'offline' })
+    expect(manager.getListSnapshot().workspacePages).toEqual({
+      '/a': { complete: false, state: 'error' }, '/b': { complete: false, state: 'idle' },
+    })
+    remote.session.list.mockResolvedValueOnce(ok({ items: [] }))
+    await manager.loadMore('/a')
+    expect(manager.getListSnapshot().workspacePages['/a']).toEqual({ complete: true, state: 'idle' })
+    expect(manager.getListSnapshot().items.map(row => row.sessionId)).toEqual([S1])
+  })
+
   it('retries the first page after a reconnect refresh fails', async ({ mock, remote }) => {
     const manager = makeManager(mock, remote)
     onTestFinished(() => manager.dispose())

@@ -1,9 +1,16 @@
 - tree "Sessions":
-  - treeitem "{{workspace}}" [expanded]
+  - treeitem "secondary" [expanded]
   - treeitem "New Session" [selected]
+  - treeitem "Secondary conversation 0 {{age}}"
+  - treeitem "Secondary conversation 1 {{age}}"
+  - treeitem "Secondary conversation 2 {{age}}"
+  - treeitem "Secondary conversation 3 {{age}}"
+  - treeitem "Secondary conversation 4 {{age}}"
+  - button "Show more"
+  - treeitem "{{workspace}}" [expanded]
   - treeitem "Paged conversation 0 {{age}}"
   - treeitem "Paged conversation 1 {{age}}"
   - treeitem "Paged conversation 2 {{age}}"
   - treeitem "Paged conversation 3 {{age}}"
   - treeitem "Paged conversation 4 {{age}}"
-- button "Load more sessions"
+  - button "Show more"

@@ -269,6 +269,8 @@ export interface SessionListRequest {
   readonly sessionIds?: readonly SessionId[]
   /** Opt into bounded pages; omitted requests retain the complete-list behavior. */
   readonly paged?: boolean
+  /** Restrict paged history to this exact workspace directory. */
+  readonly cwd?: string
   /** Continuation of one process-local catalog snapshot. */
   readonly cursor?: string
 }
@@ -278,6 +280,8 @@ export interface SessionListValue {
   readonly items: readonly SessionSummary[]
   /** Absent after the complete snapshot has been served. */
   readonly nextCursor?: string
+  /** Workspace directories with older rows outside the initial page. */
+  readonly workspaceHasMore?: readonly string[]
 }
 
 /** Session search request. */
