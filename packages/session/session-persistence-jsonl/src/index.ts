@@ -19,7 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import { createHash, randomBytes } from 'node:crypto'
-import pLimit, { type LimitFunction } from 'p-limit'
+import PQueue from 'p-queue'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
@@ -89,6 +89,8 @@ export const JsonlCompressionSchema: z<JsonlCompression> = z.union([
 
 /** Default maximum listing filesystem operations in flight per backend. */
 const DEFAULT_LIST_CONCURRENCY = 3
+/** Metadata requests precede historical body-discovery work on the same bounded I/O queue. */
+const LIST_METADATA_PRIORITY = 1
 
 /** Plugin config for the JSONL backend's root, physical encoding, and listing concurrency. */
 export interface Config {
@@ -217,17 +219,19 @@ function isENOENT(error: unknown): boolean {
  * settle every call. Callers consume the outcomes in input order, so the first
  * failure they report matches a sequential loop whatever the completion order.
  * A limited task must never wait on the same limiter.
- * @param limit - the backend's shared listing limiter.
+ * @param queue - the backend's shared listing I/O queue.
  * @param items - inputs in their sequential order.
  * @param task - per-item operation.
+ * @param priority - metadata requests precede historical body discovery.
  * @returns one outcome per item, in input order.
  */
 function settleLimited<T, R>(
-  limit: LimitFunction,
+  queue: PQueue,
   items: readonly T[],
   task: (item: T) => Promise<R>,
+  priority: number,
 ): Promise<PromiseSettledResult<R>[]> {
-  return Promise.allSettled(items.map(item => limit(() => task(item))))
+  return Promise.allSettled(items.map(item => queue.add(() => task(item), { priority })))
 }
 
 /**
@@ -299,21 +303,26 @@ class JsonlSessionPersistence extends SessionPersistence {
    * this backend (`list()`, the root encoding check, historical fingerprints).
    * Queued tasks of a cancelled listing run and reject at their signal check.
    */
-  private readonly listLimit: LimitFunction
+  private readonly listQueue: PQueue
   private rootEncodingCheck: Promise<void> | undefined
   private readonly generationFormat: Omit<JsonlGenerationFormatAdapter, 'createRestore'>
   /**
-   * Bounded LRU of parsed, validated stored logs keyed by session id and
+   * Bounded weak LRU of parsed, validated stored logs keyed by session id and
    * guarded by the stat-derived revision, so an immediate cold-read handoff
-   * (observation then resume) parses the artifact once. Every local mutation
+   * (observation then resume) can reuse an uncollected artifact without retaining decoded histories. Every local mutation
    * for an id invalidates its entry; a foreign write misses through the
    * revision guard.
    */
-  private readonly coldLogMemo = new Map<SessionId, StoredLog>()
+  private readonly coldLogMemo = new Map<SessionId, WeakRef<StoredLog>>()
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
-  /** Validated headers for selected physical file revisions; directory enumeration evicts retired paths. */
+  /** Validated headers by physical revision; directory enumeration evicts retired paths. */
   private readonly generationHeaders = new Map<string, { revision: PersistenceRevision; metadata: GenerationHeader }>()
+  /** Generation filenames remain valid only while their containing directory's revision matches. */
+  private readonly generationSelections = new Map<string, {
+    revision: PersistenceRevision
+    selected: ResolvedJsonlGeneration | undefined
+  }>()
 
   constructor(ctx: Context, public config: Config, private readonly tracker: JsonlBackendTracker) {
     super(ctx)
@@ -327,7 +336,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     // Resolve once so later process.cwd() changes cannot split one backend across roots.
     this.root = resolve(config.root)
     this.compression = config.compression ?? DEFAULT_COMPRESSION
-    this.listLimit = pLimit(config.listConcurrency ?? DEFAULT_LIST_CONCURRENCY)
+    this.listQueue = new PQueue({ concurrency: config.listConcurrency ?? DEFAULT_LIST_CONCURRENCY })
     this.generationFormat = {
       currentVersion: sessionFormatCatalog.currentVersion,
       encodeHeader: (header, inheritedEventCount) =>
@@ -503,7 +512,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       return {
         ...metadata,
         revision: selected.sourceVersion < SESSION_FORMAT_VERSION
-          ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal)}`)
+          ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal, LIST_METADATA_PRIORITY)}`)
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
         modifiedAt: Number(identity.mtimeMs),
@@ -529,11 +538,10 @@ class JsonlSessionPersistence extends SessionPersistence {
     // append lands mid-scan is then still in this snapshot (its artifact may
     // predate the scan), so create-to-list visibility never has a hole.
     const pending = [...this.tracker.pendingEntries()]
-    let generations: readonly ResolvedJsonlGeneration[] | undefined
-    const artifacts = await this.listArtifacts(signal, (selected) => { generations = selected })
+    const artifacts = await this.listArtifacts(signal, LIST_METADATA_PRIORITY)
     const corpusRevision = artifacts.some(artifact => artifact.sourceVersion < SESSION_FORMAT_VERSION)
-      ? await this.historicalCorpusRevision(signal, generations) : undefined
-    const statted = settledValues(await settleLimited(this.listLimit, artifacts, async (artifact) => {
+      ? await this.historicalCorpusRevision(signal, LIST_METADATA_PRIORITY) : undefined
+    const statted = settledValues(await settleLimited(this.listQueue, artifacts, async (artifact) => {
       signal?.throwIfAborted()
       try {
         const identity = await stat(artifact.path, { bigint: true })
@@ -544,7 +552,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         if (!isENOENT(error)) throw error
         return undefined
       }
-    }))
+    }, LIST_METADATA_PRIORITY))
     for (const entry of statted) {
       if (entry === undefined) continue
       const { artifact, identity } = entry
@@ -618,10 +626,10 @@ class JsonlSessionPersistence extends SessionPersistence {
       )
     }
     const probe = fileRevision(await stat(selected.sourcePath, { bigint: true }))
-    const memoized = this.coldLogMemo.get(id)
+    const memoized = this.coldLogMemo.get(id)?.deref()
     if (memoized?.status === 'current' && memoized.revision === probe) {
       this.coldLogMemo.delete(id)
-      this.coldLogMemo.set(id, memoized)
+      this.coldLogMemo.set(id, new WeakRef(memoized))
       return memoized
     }
     const current = await readStableJsonlFile(selected.sourcePath, signal)
@@ -642,7 +650,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     signal: AbortSignal,
   ): Promise<PreparedStoredLog> {
     signal.throwIfAborted()
-    const memoized = this.coldLogMemo.get(id)
+    const memoized = this.coldLogMemo.get(id)?.deref()
     if (memoized?.status === 'prepared' && memoized.revision === sourceRevision) {
       try {
         await memoized.validateRelatedSources()
@@ -651,7 +659,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         throw this.generationFailure(id, selected, error)
       }
       this.coldLogMemo.delete(id)
-      this.coldLogMemo.set(id, memoized)
+      this.coldLogMemo.set(id, new WeakRef(memoized))
       return memoized
     }
     return this.prepareStoredMigration(id, selected, signal)
@@ -754,7 +762,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       identity = await migration.value.publish()
     } catch (error: unknown) {
       /* v8 ignore else -- a newer preparation may have replaced this stale cache entry. */
-      if (this.coldLogMemo.get(id) === stored) this.coldLogMemo.delete(id)
+      if (this.coldLogMemo.get(id)?.deref() === stored) this.coldLogMemo.delete(id)
       throw this.generationFailure(id, migration.source, error)
     }
     const published: CurrentStoredLog = {
@@ -804,10 +812,10 @@ class JsonlSessionPersistence extends SessionPersistence {
   async readStoredLog(path: string, expectedId: SessionId, signal?: AbortSignal): Promise<CurrentStoredLog> {
     signal?.throwIfAborted()
     const probe = fileRevision(await stat(path, { bigint: true }))
-    const memoized = this.coldLogMemo.get(expectedId)
+    const memoized = this.coldLogMemo.get(expectedId)?.deref()
     if (memoized?.status === 'current' && memoized.revision === probe) {
       this.coldLogMemo.delete(expectedId)
-      this.coldLogMemo.set(expectedId, memoized)
+      this.coldLogMemo.set(expectedId, new WeakRef(memoized))
       return memoized
     }
     const { bytes, identity } = await readStableJsonlFile(path, signal)
@@ -877,7 +885,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   /** Insert one parsed log into the bounded handoff cache. */
   private memoizeStoredLog(id: SessionId, stored: StoredLog): void {
     this.coldLogMemo.delete(id)
-    this.coldLogMemo.set(id, stored)
+    this.coldLogMemo.set(id, new WeakRef(stored))
     for (const oldest of this.coldLogMemo.keys()) {
       if (this.coldLogMemo.size <= COLD_LOG_MEMO_MAX_ENTRIES) break
       this.coldLogMemo.delete(oldest)
@@ -1080,11 +1088,11 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   /** Enumerate selected physical generations without interpreting their headers or bodies. */
-  private async listGenerations(signal?: AbortSignal): Promise<ResolvedJsonlGeneration[]> {
+  private async listGenerations(signal?: AbortSignal, priority = 0): Promise<ResolvedJsonlGeneration[]> {
     const selected = await this.mapSessionDirectories((dir) => {
       signal?.throwIfAborted()
       return this.resolveGenerationInDirectory(dir, signal)
-    }, signal)
+    }, signal, priority)
     return selected.filter(source => source !== undefined)
   }
 
@@ -1095,16 +1103,18 @@ class JsonlSessionPersistence extends SessionPersistence {
    * traversal after the directories of the projects before it.
    * @param task - per-directory operation; must not wait on the listing limiter.
    * @param signal - optional cancellation for directory listings.
+   * @param priority - metadata requests precede historical body discovery.
    * @returns per-directory results in traversal order.
    */
   private async mapSessionDirectories<R>(
     task: (dir: string) => Promise<R>,
     signal?: AbortSignal,
+    priority = 0,
   ): Promise<R[]> {
-    const limit = this.listLimit
+    const queue = this.listQueue
     // The root read counts against the same bound as every other listing read.
-    const projectDirs = await limit(() => this.listProjectDirs(signal))
-    const projects = await settleLimited(limit, projectDirs, project => this.listSessionDirs(project, signal))
+    const projectDirs = await queue.add(() => this.listProjectDirs(signal), { priority })
+    const projects = await settleLimited(queue, projectDirs, project => this.listSessionDirs(project, signal), priority)
     const dirs: string[] = []
     let projectFailure: PromiseRejectedResult | undefined
     for (const outcome of projects) {
@@ -1115,15 +1125,19 @@ class JsonlSessionPersistence extends SessionPersistence {
       // Appended one by one: spreading a large project as call arguments exceeds the engine's argument limit.
       for (const dir of outcome.value) dirs.push(dir)
     }
-    const results = settledValues(await settleLimited(limit, dirs, task))
+    const retained = new Set(dirs)
+    for (const dir of this.generationSelections.keys()) {
+      if (!retained.has(dir)) this.generationSelections.delete(dir)
+    }
+    const results = settledValues(await settleLimited(queue, dirs, task, priority))
     if (projectFailure !== undefined) throw projectFailure.reason
     return results
   }
 
   /** Historical logical events depend on the corpus, including members with unreadable headers. */
-  private async historicalCorpusRevision(signal?: AbortSignal, generations?: readonly ResolvedJsonlGeneration[]): Promise<string> {
-    const paths = (generations ?? await this.listGenerations(signal)).map(source => source.sourcePath).sort()
-    const entries = settledValues(await settleLimited(this.listLimit, paths, async (path) => {
+  private async historicalCorpusRevision(signal?: AbortSignal, priority = 0): Promise<string> {
+    const paths = (await this.listGenerations(signal, priority)).map(source => source.sourcePath).sort()
+    const entries = settledValues(await settleLimited(this.listQueue, paths, async (path) => {
       signal?.throwIfAborted()
       try {
         return { path, revision: fileRevision(await stat(path, { bigint: true })) }
@@ -1131,7 +1145,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         if (!isENOENT(error)) throw error
         return { path, revision: 'missing' }
       }
-    }))
+    }, priority))
     const hash = createHash('sha256')
     for (const { path, revision } of entries) hash.update(JSON.stringify([path, revision]))
     signal?.throwIfAborted()
@@ -1140,18 +1154,17 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   private async listArtifacts(
     signal?: AbortSignal,
-    onDiscovery?: (generations: readonly ResolvedJsonlGeneration[]) => void,
+    priority = 0,
   ): Promise<Array<GenerationHeader & { path: string; sourceVersion: number }>> {
     signal?.throwIfAborted()
     await this.ensureRootEncoding()
     signal?.throwIfAborted()
-    const generations = await this.listGenerations(signal)
-    onDiscovery?.(generations)
+    const generations = await this.listGenerations(signal, priority)
     const paths = new Set(generations.map(selected => selected.sourcePath))
     for (const path of this.generationHeaders.keys()) {
       if (!paths.has(path)) this.generationHeaders.delete(path)
     }
-    const headers = await settleLimited(this.listLimit, generations, async (selected) => {
+    const headers = await settleLimited(this.listQueue, generations, async (selected) => {
       signal?.throwIfAborted()
       try {
         return { selected, metadata: await this.readGenerationHeader(selected, undefined, signal) }
@@ -1161,7 +1174,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         }
         throw error
       }
-    })
+    }, priority)
     const artifacts: Array<GenerationHeader & { path: string; sourceVersion: number }> = []
     const ids = new Set<SessionId>()
     for (const outcome of headers) {
@@ -1247,7 +1260,6 @@ class JsonlSessionPersistence extends SessionPersistence {
       expectedId,
       signal,
     )
-    const metadata: GenerationHeader = { header, formatStatus: result.status }
     let after: PersistenceRevision
     try {
       after = fileRevision(await stat(selected.sourcePath, { bigint: true }))
@@ -1257,6 +1269,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       return undefined
     }
     signal?.throwIfAborted()
+    const metadata: GenerationHeader = { header, formatStatus: result.status }
     if (after === revision) {
       this.generationHeaders.set(selected.sourcePath, { revision, metadata: { ...metadata, header: { ...header } } })
     }
@@ -1574,10 +1587,21 @@ class JsonlSessionPersistence extends SessionPersistence {
   ): Promise<ResolvedJsonlGeneration | undefined> {
     signal?.throwIfAborted()
     let entries: Dirent[]
+    let revision: PersistenceRevision
     try {
+      const identity = await stat(dir, { bigint: true })
+      signal?.throwIfAborted()
+      // A file in place of the directory must still fail at readdir with ENOTDIR.
+      revision = fileRevision(identity)
+      const cached = this.generationSelections.get(dir)
+      if (cached?.revision === revision) return cached.selected
+      this.generationSelections.delete(dir)
       entries = await readdir(dir, { withFileTypes: true })
     } catch (error: unknown) {
-      if (isENOENT(error)) return undefined
+      if (isENOENT(error)) {
+        this.generationSelections.delete(dir)
+        return undefined
+      }
       throw error
     }
     signal?.throwIfAborted()
@@ -1595,8 +1619,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     if (opposite.length > 0) throw this.encodingMismatch(opposite[0] as string)
     const latest = generations.sort((left, right) => right.version - left.version)[0]
-    if (latest === undefined) return undefined
-    return {
+    const selected = latest === undefined ? undefined : {
       sourcePath: latest.path,
       sourceVersion: latest.version,
       currentPath: join(
@@ -1604,6 +1627,16 @@ class JsonlSessionPersistence extends SessionPersistence {
         generationLogFilename(sessionFormatCatalog.currentVersion, this.compression),
       ),
     }
+    try {
+      const after = fileRevision(await stat(dir, { bigint: true }))
+      signal?.throwIfAborted()
+      if (after === revision) this.generationSelections.set(dir, { revision, selected })
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (isENOENT(error)) return undefined
+      throw error
+    }
+    return selected
   }
 
   /** Find the unique authoritative generation for an id across project directories. */

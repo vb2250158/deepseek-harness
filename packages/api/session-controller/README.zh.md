@@ -4,6 +4,8 @@ kind: "package-reference"
 ---
 # Session Controller
 
+分页会话列表在分配工作区配额前排除未授权会话，并在输出每页时重新检查访问权限；Remote 还会按当前权限过滤最终响应。
+
 [English](README.md) | 中文
 
 桌面埋点遵循[产品采集策略](../../client/product-analytics/README.zh.md)及其启动时开关，不包含 Web 使用情况。

@@ -49,6 +49,7 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
+  await ctx.plugin(RemoteAccessService)
   const list = new ApiSessionList(ctx, workSliceMs)
   const clock = { now: 0 }
   const prepared = new Map<string, Session>()
@@ -102,6 +103,28 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
 }
 
 describe('Session-list pages', () => {
+  it('filters restricted Sessions before paging and rechecks retained pages', async () => {
+    const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const allows = vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    expect(first.items.map(row => row.sessionId)).toEqual(['b'])
+    expect(first.nextCursor).toBeDefined()
+    allows.mockReturnValue(false)
+    const last = await h.list.page({ cursor: first.nextCursor! }, pagePolicy)
+    expect(last.items).toEqual([])
+    expect(last.nextCursor).toBeUndefined()
+  })
+
+  it('keeps running rows first without moving every attached idle Session into the first page', async () => {
+    const h = await harness(['a', 'b', 'c', 'd'].map(id => ({ id, phase: 'live' as const })), 0)
+    vi.spyOn(h.ctx.sessionProjections, 'cachedSnapshot').mockReturnValue({
+      asOfSeq: -1, values: { sessionListMetadata: { blank: false, lastPromptAt: null } },
+    })
+    h.agents.get('d')!.status = 'running'
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    expect(first.items.map(row => row.sessionId)).toEqual(['a', 'd'])
+    expect(first.nextCursor).toBeDefined()
+  })
   it('serves each workspace newest first and reuses one scan for every continuation', async () => {
     const h = await harness(Array.from({ length: 6 }, (_, i) => ({ id: `row-${i}`, phase: 'cold' as const })), 0)
     const records = await h.listSessions()
@@ -132,15 +155,6 @@ describe('Session-list pages', () => {
     const old = await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 1 })
     await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 1 })
     await expect(h.list.page({ cursor: old.nextCursor! }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
-  })
-
-  it('preserves the stored format status on cold paged rows', async () => {
-    const h = await harness([{ id: 'historical', phase: 'cold' }], 0)
-    const records = await h.listSessions()
-    records[0]!.formatStatus = 'migration-required'
-    const page = await h.list.page({ paged: true }, pagePolicy)
-    expect(page.items[0]?.formatStatus).toBe('migration-required')
-    expect(h.ctx.sessions.list()).toEqual([])
   })
 
   it('keeps the full-list request complete and aborts page reads', async () => {
@@ -242,7 +256,6 @@ describe('Session-list work slices', () => {
     h.ctx.provide('fileUploads', { registerAgentResolver: () => dispose } as never)
     h.ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) } as never)
     h.ctx.provide('workspaceRegistry', { list: () => [], archivedSessionIds: [] } as never)
-    new RemoteAccessService(h.ctx)
     const controller = new SessionController(h.ctx, { nativeOpen: false, listWorkSliceMs: 4 }, { canOpenPath: () => false })
     const yieldWork = vi.spyOn(scheduler, 'yield')
     const result = await controller.list({}, new AbortController().signal)

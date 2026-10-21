@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-subagent
 
+无提示消息的续作会在装载子 Agent 前核对真实的活动父 Agent 与直接子代归属；冷恢复要求本地 activation，并保留既有的接纳、取消和结构化输入检查。
+
 [English](README.md) | 中文
 
 ## 概述

@@ -59,7 +59,7 @@ export interface SessionListState {
   ids: SessionId[]
   /** Host/catalog rows plus retained subagent fallbacks; only `ids` expresses Host-list membership. */
   byId: Record<SessionId, SessionSummary>
-  /** Arrival lifecycle projected 1:1 from the manager snapshot (see SessionListPhase): empty-with-ready means "truly no sessions". */
+  /** First-page arrival lifecycle; an empty catalog is authoritative only when complete is true. */
   phase: SessionListPhase
   /** False while historical pages remain; omitted legacy snapshots are complete. */
   complete?: boolean

@@ -1,5 +1,5 @@
 import { mountWorkingDirectoryFixture } from './working-directory-fixture.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, ToolCallId, type ContentBlock, type GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -492,6 +492,13 @@ describe('in-process structured output', () => {
       await expect(ctx.subagents.sendMessage(parent, run.childId, [{ type: 'text', text: 'too early' }], {
         signal: testToolSignal,
       })).rejects.toMatchObject({ code: 'INPUT_CLOSED' })
+      const continueDriver = vi.spyOn(run.localAgent, 'continueInterrupted')
+      const eventCount = run.localAgent.session.snapshotEvents().length
+      await expect(ctx.subagents.continueInterrupted(parent, run.childId, 0, testToolSignal))
+        .rejects.toMatchObject({ code: 'INPUT_CLOSED' })
+      expect(continueDriver).not.toHaveBeenCalled()
+      expect(run.localAgent.session.snapshotEvents()).toHaveLength(eventCount)
+      expect(adapter.requests).toHaveLength(1)
     } finally {
       releaseFlush.resolve(undefined)
       await run.dispose()

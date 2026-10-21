@@ -1,7 +1,7 @@
 import { MessageId, createMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises'
+import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink, utimes } from 'node:fs/promises'
 import * as fileSystem from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -49,6 +49,7 @@ const listingProbe = vi.hoisted(() => ({
   delayMs: 0,
   inFlight: 0,
   maxInFlight: 0,
+  pause: undefined as ((path: string) => Promise<void>) | undefined,
   failures: new Map<string, Error>(),
 }))
 
@@ -79,7 +80,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     listingProbe.inFlight += 1
     listingProbe.maxInFlight = Math.max(listingProbe.maxInFlight, listingProbe.inFlight)
     try {
-      await new Promise(resolvePromise => setTimeout(resolvePromise, listingProbe.delayMs))
+      if (listingProbe.delayMs > 0) {
+        await new Promise(resolvePromise => setTimeout(resolvePromise, listingProbe.delayMs))
+      }
+      await listingProbe.pause?.(path)
       const failure = listingProbe.failures.get(path)
       if (failure !== undefined) throw failure
       return await read()
@@ -770,13 +774,28 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     }
   })
 
+  it('reports artifact modification times without reading session bodies', async () => {
+    const header = meta('modified-metadata', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    await utimes(path, 1000, 1000)
+    const read = vi.spyOn(fileSystem, 'readFile')
+    expect((await ctx.sessionPersistence.stat(header.id))?.modifiedAt).toBe(1000000)
+    expect((await ctx.sessionPersistence.list())[0]?.modifiedAt).toBe(1000000)
+    await utimes(path, 2000, 2000)
+    expect((await ctx.sessionPersistence.list())[0]?.modifiedAt).toBe(2000000)
+    expect((await ctx.sessionPersistence.stat(header.id))?.modifiedAt).toBe(2000000)
+    expect(read.mock.calls.filter(([filename]) => filename === path)).toHaveLength(0)
+  })
+
   it('reuses unchanged generation headers and rereads changed or malformed files', async () => {
     const header = meta('cached-generation-header', '/work')
     const path = rawLogPath(root, header.cwd, header.id)
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
     const opened = vi.spyOn(fileSystem, 'open')
-    const opens = () => opened.mock.calls.filter(args => String(args[0]) === path).length
+    const opens = () => opened.mock.calls.filter(([filename]) => filename === path).length
     const [first] = await ctx.sessionPersistence.list()
     expect(first?.header.createdAt).toBe(header.createdAt)
     const initialReads = opens()
@@ -800,6 +819,81 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     const futurePath = generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION + 1, 'none')
     await writeFile(futurePath, `${JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION + 1, id: header.id })}\n`)
     expect(await ctx.sessionPersistence.list()).toEqual([])
+  })
+
+  it('reuses unchanged directory selections and observes deletion of the selected generation', async () => {
+    const header = meta('cached-directory-selection', '/work')
+    const current = rawLogPath(root, header.cwd, header.id)
+    const predecessor = historicalLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(current), { recursive: true })
+    await writeFile(predecessor, `${JSON.stringify(releasedV0Header(header))}\n`)
+    await writeFile(current, `${JSON.stringify(toHeaderLine(header))}\n`)
+    expect((await ctx.sessionPersistence.list())[0]?.formatStatus).toBe('current')
+    const enumerated = vi.spyOn(fileSystem, 'readdir')
+    await ctx.sessionPersistence.list()
+    expect(enumerated.mock.calls.filter(([dir]) => dir === dirname(current))).toHaveLength(0)
+    await rm(current)
+    expect((await ctx.sessionPersistence.list())[0]?.formatStatus).toBe('migration-required')
+    expect(enumerated.mock.calls.some(([dir]) => dir === dirname(current))).toBe(true)
+  })
+
+  it('refuses an opposite-encoding generation added after warming directory selections', async () => {
+    const header = meta('cached-directory-encoding', '/work')
+    const current = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(current), { recursive: true })
+    await writeFile(current, `${JSON.stringify(toHeaderLine(header))}\n`)
+    await ctx.sessionPersistence.list()
+    await writeFile(generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION, 'zstd'), 'foreign encoding')
+    await expect(ctx.sessionPersistence.list()).rejects.toThrow(/compression|encoding|zstd/)
+  })
+
+  it('serves a metadata list before queued historical discovery without increasing I/O concurrency', async () => {
+    await Promise.all(Array.from({ length: 64 }, async (_, index) => {
+      const header = meta(`priority-${index}`, '/work')
+      const path = rawLogPath(root, header.cwd, header.id)
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    }))
+    const limited = new Context()
+    await limited.plugin(JsonlSessionPersistence, { root, compression: 'none', listConcurrency: 1 })
+    let release!: () => void
+    try {
+      await limited.sessionPersistence.list()
+      listingProbe.active = true
+      listingProbe.delayMs = 0
+      listingProbe.inFlight = 0
+      listingProbe.maxInFlight = 0
+      let started!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      const entered = new Promise<void>((resolve) => { started = resolve })
+      let paused = false
+      listingProbe.pause = async (path) => {
+        if (paused || !path.includes('priority-') || path.endsWith('.jsonl')) return
+        paused = true
+        started()
+        await gate
+      }
+      const backend = limited.sessionPersistence as SessionPersistence & {
+        listArtifacts(): Promise<readonly { header: SessionHeader }[]>
+      }
+      const completed: string[] = []
+      const discovery = backend.listArtifacts().then(() => { completed.push('discovery') })
+      await entered
+      const listing = limited.sessionPersistence.list().then((rows) => {
+        expect(rows).toHaveLength(64)
+        completed.push('list')
+      })
+      await scheduler.yield()
+      release()
+      await Promise.all([discovery, listing])
+      expect(completed).toEqual(['list', 'discovery'])
+      expect(listingProbe.maxInFlight).toBe(1)
+    } finally {
+      release?.()
+      listingProbe.active = false
+      listingProbe.pause = undefined
+      await limited.fiber.dispose()
+    }
   })
 
   it('projects a released v0 header through stat and list without reading or mutating its body', async () => {
@@ -1453,20 +1547,14 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     const pendingRows = await ctx.sessionPersistence.list()
     expect(pendingRows.map(s => s.header.id)).toContain(m.id)
     expect(pending?.sizeBytes).toBeUndefined()
-    expect(pending?.modifiedAt).toBeUndefined()
-    expect(pendingRows.find(s => s.header.id === m.id)?.modifiedAt).toBeUndefined()
     expect(pending?.formatStatus).toBeUndefined()
     expect(pendingRows.find(s => s.header.id === m.id)?.formatStatus).toBeUndefined()
 
     await handle.append(oneTurnLog())
-    await handle.flush()
     expect((await stat(dir)).isDirectory()).toBe(true)
     expect((await stat(rawLogPath(root, '/work', m.id))).isFile()).toBe(true)
     expect((await ctx.sessionPersistence.list()).map(s => s.header.id)).toContain(m.id)
     expect((await ctx.sessionPersistence.stat(m.id))?.formatStatus).toBe('current')
-    const identity = await stat(rawLogPath(root, '/work', m.id), { bigint: true })
-    expect((await ctx.sessionPersistence.stat(m.id))?.modifiedAt).toBe(Number(identity.mtimeMs))
-    expect((await ctx.sessionPersistence.list()).find(s => s.header.id === m.id)?.modifiedAt).toBe(Number(identity.mtimeMs))
     await handle.close()
   })
 
@@ -1602,6 +1690,23 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     ] as SessionEvent[])
     await writer.close()
     expect((await readAll(ctx.sessionPersistence, m.id)).events.map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(readTally.bySuffix.get(path)).toBe(2)
+  })
+
+  it('a collected cold log is decoded again without losing events', async () => {
+    const m = meta('memo-collected', '/work')
+    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
+    const path = rawLogPath(root, '/work', m.id)
+    readTally.enabled = true
+    expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(oneTurnLog())
+    const collected = vi.spyOn(WeakRef.prototype, 'deref').mockReturnValueOnce(undefined)
+    try {
+      expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(oneTurnLog())
+      expect(readTally.bySuffix.get(path)).toBe(2)
+    } finally {
+      collected.mockRestore()
+    }
+    expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(oneTurnLog())
     expect(readTally.bySuffix.get(path)).toBe(2)
   })
 

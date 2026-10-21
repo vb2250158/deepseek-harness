@@ -8,6 +8,8 @@ English | [中文](README.zh.md)
 
 Desktop analytics follows the [product collection policy](../../client/product-analytics/README.md), including its launch-time switch. Web usage is excluded.
 
+Paged Session lists exclude unauthorized Sessions before workspace quotas are assigned and recheck access when each page is emitted. The Remote also filters its final response against current permissions.
+
 ## Summary
 
 `@deepseek-ai/dsh-api-session-controller` owns the Host `ctx.sessionController` service and the generated Client `session`, `skills`, and `fileReferences` Remote namespaces. It serves Session lifecycle and history, the Host-generation model catalog, human background-job kill, workspace-path opening, user-invocable skill discovery, and Agent-scoped file references. Use it through API Gateway when a Client needs operations addressed by a Session.

@@ -29,6 +29,8 @@ Mount this backend when a composition needs durable sessions backed by per-sessi
 
 Materialized `stat()` and `list()` snapshots include the file modification time as `modifiedAt`, in Unix epoch milliseconds. Pending sessions omit it; recovery readers can exclude old artifacts before reading their full logs.
 
+Metadata requests take priority over historical body discovery on the bounded listing queue. Parsed-log reuse uses weak references; generation selections are reused only while their directory revision remains unchanged. These caches do not alter immutable stored generations.
+
 ### When to choose it
 
 Choose this backend when consumers benefit from one artifact per session — navigation, external tooling, or a raw line-readable log. It is the sole first-party Session-persistence provider. The backend keeps sessions under a deployment-controlled root: project-local, shared, temporary, or centralized.

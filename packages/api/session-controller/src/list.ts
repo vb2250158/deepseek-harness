@@ -155,6 +155,7 @@ export class ApiSessionList {
       for (const record of records) {
         const { header } = record
         signal?.throwIfAborted()
+        if (!this.ctx.remoteAccess.allows({ kind: 'session', id: header.id })) continue
         const live = this.ctx.sessions.get(header.id)
         if (live === undefined && header.cwd === undefined) continue
         const block = live === undefined
@@ -176,11 +177,10 @@ export class ApiSessionList {
       const older: SessionRecord[] = []
       const workspaceCounts = new Map<string | undefined, number>()
       for (const row of ranked) {
-        const { header } = row.record
-        const count = workspaceCounts.get(header.cwd) ?? 0
-        if (row.priority || (header.origin !== 'subagent' && count < policy.listInitialPerWorkspace)) {
+        const count = workspaceCounts.get(row.record.header.cwd) ?? 0
+        if (row.priority || (row.record.header.origin !== 'subagent' && count < policy.listInitialPerWorkspace)) {
           initial.push(row.record)
-          if (!row.priority) workspaceCounts.set(header.cwd, count + 1)
+          if (!row.priority) workspaceCounts.set(row.record.header.cwd, count + 1)
         } else older.push(row.record)
       }
       signal?.throwIfAborted()
@@ -205,8 +205,10 @@ export class ApiSessionList {
     const items: SessionSummary[] = []
     let deadline = performance.now() + this.workSliceMs
     for (const record of selected) {
+      const { header } = record
       signal?.throwIfAborted()
-      const live = this.ctx.sessions.get(record.header.id)
+      if (!this.ctx.remoteAccess.allows({ kind: 'session', id: header.id })) continue
+      const live = this.ctx.sessions.get(header.id)
       items.push(live === undefined ? this.summarizeCold(record) : this.summaryFor(live))
       if (performance.now() >= deadline) {
         await scheduler.yield()

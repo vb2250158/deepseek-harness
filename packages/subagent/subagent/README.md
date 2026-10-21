@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-subagent
 
+Prompt-free continuation checks the exact live parent and direct-child ownership before materializing a child. Cold recovery requires a local activation and preserves the existing admission, cancellation and structured-input checks.
+
 English | [中文](README.zh.md)
 
 ## Summary

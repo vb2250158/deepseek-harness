@@ -1240,20 +1240,24 @@ describe('JSONL immutable generation publication', () => {
     expect(await readFile(expected, 'utf8')).toBe(line(header(SESSION_FORMAT_VERSION)) + line(event0))
   })
 
-  it.for(['different', 'malformed', 'symlink', 'directory'] as const)(
-    'fails loud without altering a colliding %s target',
-    async (kind, { skip }) => {
+  for (const kind of ['different', 'malformed', 'symlink', 'directory'] as const) {
+    it(`fails loud without altering a colliding ${kind} target`, async (context) => {
       const root = await tempRoot()
       const request = options(root)
       const source = Buffer.from(line(header(0)) + line(event0))
       await writeFile(request.sourcePath, source)
       if (kind === 'different') await writeFile(request.currentPath, line(header(SESSION_FORMAT_VERSION)) + line(event1))
       if (kind === 'malformed') await writeFile(request.currentPath, '{not-json}\n')
-      if (kind === 'symlink') try { await symlink(request.sourcePath, request.currentPath) } catch (error) {
-        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
-          skip('Windows denied file symlink creation')
+      if (kind === 'symlink') {
+        try {
+          await symlink(request.sourcePath, request.currentPath)
+        } catch (error: unknown) {
+          if (process.platform === 'win32' && error instanceof Error && 'code' in error
+            && (error.code === 'EPERM' || error.code === 'EACCES')) {
+            context.skip('Windows does not permit creating the symlink fixture')
+          }
+          throw error
         }
-        throw error
       }
       if (kind === 'directory') await mkdir(request.currentPath)
 
@@ -1263,8 +1267,8 @@ describe('JSONL immutable generation publication', () => {
 
       expect(await readFile(request.sourcePath)).toEqual(source)
       expect((await readdir(root)).every(name => !name.includes('.tmp'))).toBe(true)
-    },
-  )
+    })
+  }
 
   it('normalizes a non-Error rejection while reopening an existing target', async () => {
     const root = await tempRoot()
