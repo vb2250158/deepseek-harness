@@ -112,4 +112,31 @@ describe('web e2e: progressive Session list', () => {
       await restored.close()
     }
   })
+
+  it('keeps three frontends interactive with independent pages and selections', async () => {
+    const clients = await Promise.all(Array.from({ length: 3 }, () => newEnglishPage(browser)))
+    try {
+      await Promise.all(clients.map(client => client.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })))
+      for (const client of clients) {
+        const expand = client.getByRole('button', { name: 'Open sidebar', exact: true })
+        if (await expand.count() !== 0) await expand.click()
+        await expect.poll(() => client.getByRole('button', { name: 'Load more sessions', exact: true }).count(), { timeout: 15_000 }).toBe(1)
+      }
+      const first = clients[0]
+      if (first === undefined) throw new Error('Missing first frontend')
+      await first.getByRole('button', { name: 'Load more sessions', exact: true }).click()
+      await expect.poll(() => first.getByRole('button', { name: 'Show 4 more sessions', exact: true }).count()).toBe(1)
+      for (const client of clients.slice(1)) {
+        expect(await client.getByRole('button', { name: 'Load more sessions', exact: true }).count()).toBe(1)
+      }
+      for (const [index, client] of clients.entries()) {
+        await client.locator(`[data-row-key="session:paged-session-${index}"]`).click()
+      }
+      for (const [index, client] of clients.entries()) {
+        await expect.poll(() => client.locator(`[data-row-key="session:paged-session-${index}"]`).getAttribute('aria-selected')).toBe('true')
+      }
+    } finally {
+      await Promise.all(clients.map(client => client.close()))
+    }
+  })
 })
