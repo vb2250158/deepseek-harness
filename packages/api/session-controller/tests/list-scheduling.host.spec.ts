@@ -21,7 +21,7 @@ interface Row {
 }
 
 const contexts = new Set<Context>()
-const pagePolicy = { listPageSize: 2, listInitialPerWorkspace: 1, listSnapshotLimit: 2, listSnapshotTtlMs: 1000 }
+const pagePolicy = { listPageSize: 2, listInitialPerWorkspace: 1, listSnapshotLimit: 2, listSnapshotTtlMs: 1000, listDiscoveryCacheMs: 0 }
 const immediates = new Set<ReturnType<typeof setImmediate>>()
 
 afterEach(async () => {
@@ -103,6 +103,51 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
 }
 
 describe('Session-list pages', () => {
+  it('reuses header discovery until expiry, explicit refresh, or a Session catalog change', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listSnapshotLimit: 8 }
+    await h.list.page({ paged: true }, policy)
+    await h.list.page({ paged: true }, policy)
+    await h.list.selected([SessionId('b')])
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+    h.clock.now += 101
+    const refreshed = await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+    await h.list.page({ paged: true, fresh: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+    h.ctx.emit('api-session/added', refreshed.items[0]!)
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(4)
+    h.ctx.emit('api-session/removed', SessionId('b'))
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(5)
+  })
+
+  it('does not retain discovery completed after a Session catalog invalidation', async () => {
+    const h = await harness([{ id: 'a', phase: 'cold' }], 0)
+    const records = await h.listSessions()
+    h.listSessions.mockClear()
+    const gate = Promise.withResolvers<undefined>()
+    h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    const read = h.list.page({ paged: true }, policy)
+    h.ctx.emit('api-session/removed', SessionId('a'))
+    gate.resolve(undefined)
+    await read
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('withdraws retained discovery when an explicit fresh read fails', async () => {
+    const h = await harness([{ id: 'a', phase: 'cold' }], 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    await h.list.page({ paged: true }, policy)
+    h.listSessions.mockRejectedValueOnce(new Error('disk offline'))
+    await expect(h.list.page({ paged: true, fresh: true }, policy)).rejects.toThrow('disk offline')
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+  })
+
   it('pages one workspace independently and rejects another workspace cursor', async () => {
     const h = await harness(Array.from({ length: 6 }, (_, i) => ({ id: `row-${i}`, phase: 'cold' as const })), 0)
     const records = await h.listSessions()

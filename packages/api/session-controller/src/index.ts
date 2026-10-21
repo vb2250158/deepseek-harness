@@ -104,6 +104,8 @@ export interface Config {
   readonly listSnapshotLimit?: number
   /** Catalog continuation lifetime in milliseconds. */
   readonly listSnapshotTtlMs?: number
+  /** Header discovery reuse in milliseconds; zero keeps each first page uncached. */
+  readonly listDiscoveryCacheMs?: number
 }
 
 /** Deployment policy after schema defaults have been applied. */
@@ -113,6 +115,7 @@ type ResolvedConfig = Config & {
   readonly listInitialPerWorkspace: number
   readonly listSnapshotLimit: number
   readonly listSnapshotTtlMs: number
+  readonly listDiscoveryCacheMs: number
 }
 
 /** Host integrations replaceable by direct unit tests. */
@@ -153,6 +156,7 @@ export class SessionController extends TypertRemoteService {
     listInitialPerWorkspace: z.natural().min(1).default(5),
     listSnapshotLimit: z.natural().min(1).default(8),
     listSnapshotTtlMs: z.natural().min(1).default(60_000),
+    listDiscoveryCacheMs: z.natural().default(0),
   })
 
   private readonly agents: ApiSessionAgentController

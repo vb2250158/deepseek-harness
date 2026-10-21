@@ -446,12 +446,16 @@ export class SessionManager {
 
   // ---- List API ----
 
-  /** Refresh recent rows without requesting historical continuations. @returns completion of the shared first-page read. */
-  refreshList(): Promise<void> {
+  /**
+   * Refresh recent rows without requesting historical continuations.
+   * @param fresh - bypass Host header discovery reuse for an explicit refresh.
+   * @returns completion of the shared first-page read.
+   */
+  refreshList(fresh = false): Promise<void> {
     if (this.listInflight !== null) return this.listInflight
     void this.resetWorkspacePages()
     this.listContinuation = null
-    return this.readListPage()
+    return this.readListPage(undefined, fresh)
   }
 
   /**
@@ -553,7 +557,7 @@ export class SessionManager {
     return promise
   }
 
-  private readListPage(continuation?: ListContinuation): Promise<void> {
+  private readListPage(continuation?: ListContinuation, fresh = false): Promise<void> {
     if (this.listInflight !== null) return this.listInflight
     this.listState = 'loading'
     this.listError = null
@@ -567,7 +571,9 @@ export class SessionManager {
         const received = continuation?.received ?? new Map<SessionId, SessionSummary>()
         const seenCursors = continuation?.seenCursors ?? new Set<string>()
         let cursor = continuation?.cursor
-        const result = await this.remote.session.list({ paged: true, ...(cursor === undefined ? {} : { cursor }) })
+        const result = await this.remote.session.list({
+          paged: true, ...(fresh ? { fresh: true } : {}), ...(cursor === undefined ? {} : { cursor }),
+        })
         if (this.listMutations !== mutations) return
         if (result.ok) {
           if (continuation === undefined) {

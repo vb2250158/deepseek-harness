@@ -28,6 +28,7 @@ interface ListPagePolicy {
   readonly listInitialPerWorkspace: number
   readonly listSnapshotLimit: number
   readonly listSnapshotTtlMs: number
+  readonly listDiscoveryCacheMs: number
 }
 
 interface ListCatalog {
@@ -93,12 +94,21 @@ export function truncateUnicodeCodePoints(value: string, maximum: number): strin
 /** Owns list projection registration, bounded cold summaries, and authorized search. */
 export class ApiSessionList {
   private readonly catalogs = new Map<string, ListCatalog>()
+  private discovery: {
+    readonly source: Context['sessionQuery']
+    readonly records: readonly SessionRecord[]
+    readonly expiresAt: number
+  } | undefined
+  private discoveryGeneration = 0
   /**
    * @param ctx - Host context carrying Session, query, persistence, and projection services.
    * @param workSliceMs - Resolved positive integral list-work budget in milliseconds.
    */
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
-    ctx.effect(() => () => { this.catalogs.clear() }, 'api-session.listCatalogs')
+    ctx.effect(() => () => { this.catalogs.clear(); this.discovery = undefined }, 'api-session.listCatalogs')
+    const invalidate = (): void => { this.discovery = undefined; this.discoveryGeneration++ }
+    ctx.on('api-session/added', invalidate)
+    ctx.on('api-session/removed', invalidate)
     ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
       stateSchema: sessionListMetadataSchema,
@@ -153,7 +163,7 @@ export class ApiSessionList {
         throw new RemoteError('gateway/bad-request', 'session list cursor belongs to another workspace', {})
       }
     } else {
-      const records = await this.ctx.sessionQuery.listSessions(signal)
+      const records = await this.discover(policy.listDiscoveryCacheMs, request.fresh === true, signal)
       const ranked: Array<{ record: SessionRecord; updatedAt: number; priority: boolean }> = []
       let deadline = performance.now() + this.workSliceMs
       for (const record of records) {
@@ -232,6 +242,22 @@ export class ApiSessionList {
     return { items, ...(next < catalog.records.length ? { nextCursor: `${token}:${String(next)}` } : {}) }
   }
 
+  private async discover(cacheMs: number, fresh: boolean, signal?: AbortSignal): Promise<readonly SessionRecord[]> {
+    signal?.throwIfAborted()
+    const source = this.ctx.sessionQuery
+    const cached = this.discovery
+    if (!fresh && cacheMs > 0 && cached?.source === source && cached.expiresAt > performance.now()) return cached.records
+    if (fresh) { this.discovery = undefined; this.discoveryGeneration++ }
+    const generation = this.discoveryGeneration
+    const records = await source.listSessions(signal)
+    signal?.throwIfAborted()
+    if (generation === this.discoveryGeneration) {
+      this.discovery = cacheMs === 0 ? undefined
+        : { source, records, expiresAt: performance.now() + cacheMs }
+    }
+    return records
+  }
+
   /**
    * Read authorized metadata for explicit identities without opening history.
    * @param sessionIds - identities requested by navigation or search.
@@ -241,7 +267,10 @@ export class ApiSessionList {
   async selected(sessionIds: readonly SessionId[], signal?: AbortSignal): Promise<SessionSummary[]> {
     const requested = new Set(sessionIds)
     if (requested.size === 0) return []
-    const records = await this.ctx.sessionQuery.listSessions(signal)
+    const cached = this.discovery
+    const records = cached?.source === this.ctx.sessionQuery && cached.expiresAt > performance.now()
+      && sessionIds.every(id => cached.records.some(record => record.header.id === id))
+      ? cached.records : await this.ctx.sessionQuery.listSessions(signal)
     const items: SessionSummary[] = []
     for (const record of records) {
       signal?.throwIfAborted()

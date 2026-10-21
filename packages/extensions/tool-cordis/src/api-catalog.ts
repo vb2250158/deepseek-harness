@@ -7275,7 +7275,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionListRequest',
-    declaration: 'export interface SessionListRequest {\n    readonly sessionIds?: readonly SessionId[];\n    readonly paged?: boolean;\n    readonly cwd?: string;\n    readonly cursor?: string;\n}',
+    declaration: 'export interface SessionListRequest {\n    readonly fresh?: boolean;\n    readonly sessionIds?: readonly SessionId[];\n    readonly paged?: boolean;\n    readonly cwd?: string;\n    readonly cursor?: string;\n}',
   },
   {
     name: 'SessionListValue',

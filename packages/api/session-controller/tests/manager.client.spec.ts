@@ -1706,6 +1706,7 @@ describe('progressive catalog loading', () => {
     await sessions.refresh()
     expect(sessions.list.getSnapshot()).toMatchObject({ ids: [S1, S2], complete: true })
     expect(remote.session.list).toHaveBeenCalledTimes(2)
+    expect(remote.session.list.mock.calls[0]?.[0]).toEqual({ paged: true, fresh: true })
   })
   it('replays updates received while the historical cursor is idle', async ({ mock, remote }) => {
     const manager = makeManager(mock, remote)

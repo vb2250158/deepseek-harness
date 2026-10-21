@@ -265,6 +265,8 @@ export interface SkillListValue {
 
 /** Session list request. */
 export interface SessionListRequest {
+  /** Bypass retained header discovery for an explicit catalog refresh. */
+  readonly fresh?: boolean
   /** Read these identities without fetching historical pages. */
   readonly sessionIds?: readonly SessionId[]
   /** Opt into bounded pages; omitted requests retain the complete-list behavior. */

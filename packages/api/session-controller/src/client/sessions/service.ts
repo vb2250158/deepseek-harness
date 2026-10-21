@@ -358,7 +358,7 @@ export class ClientSessions implements ISessions {
    * @returns completion of the catalog refresh or its reported failure.
    */
   async refresh(): Promise<void> {
-    await this.manager.refreshList()
+    await this.manager.refreshList(true)
     while (!this.closed) {
       const snapshot = this.manager.getListSnapshot()
       if (snapshot.complete || snapshot.state === 'error') return
