@@ -157,6 +157,24 @@ describe('Session Controller access', () => {
     page.mockRestore()
   })
 
+  it('filters explicit Session identities again after permission changes', async () => {
+    const { ctx, as } = await harness()
+    await ctx.plugin(TypertGatewayService)
+    const held = guestPolicy(ctx, LIST_CALLS, READS_SHARED)
+    const owner = await as(OWNER, 'list').sessionController.list({}, new AbortController().signal)
+    const selected = vi.spyOn(ApiSessionList.prototype, 'selected').mockResolvedValue(owner.items.slice())
+    const sessionIds = [PRIVATE, SHARED]
+    try {
+      const read = () => guestCall(ctx, 'list', { _request: { sessionIds } })
+      await expect(read()).resolves.toEqual({ items: owner.items.filter(item => item.sessionId === SHARED) })
+      expect(selected.mock.calls[0]?.[0]).toEqual(sessionIds)
+      held.splice(0, held.length, LIST_CALLS)
+      await expect(read()).resolves.toEqual({ items: [] })
+    } finally {
+      selected.mockRestore()
+    }
+  })
+
   it('returns a non-owner only the session/search hits whose Session a Session role admits', async () => {
     const { ctx, as } = await harness()
     await ctx.plugin(TypertGatewayService)

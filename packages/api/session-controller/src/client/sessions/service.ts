@@ -19,7 +19,7 @@ import type { SessionReferenceSource } from '../index.ts'
 import { createScope, scopeIdentityOf, scopeOf as scopeTagOf } from '../scope.ts'
 import { SessionManager } from './manager.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionListPhase, SessionSearchResultItem, SessionProjectionSnapshot } from './manager.ts'
+import type { SessionListPhase, SessionSearchResultItem, SessionProjectionSnapshot, WorkspaceSessionPage } from './manager.ts'
 import type { Session } from './session.ts'
 import type { SessionListEntry } from './lineage.ts'
 
@@ -63,6 +63,8 @@ export interface SessionListState {
   phase: SessionListPhase
   /** False while historical pages remain; omitted legacy snapshots are complete. */
   complete?: boolean
+  /** Historical paging state keyed by exact workspace directory. */
+  workspacePages?: Readonly<Record<string, WorkspaceSessionPage>>
   /** Shared projection values and explicit-read state, including unopened Sessions. */
   projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>
 }
@@ -352,11 +354,28 @@ export class ClientSessions implements ISessions {
   }
 
   /**
-   * Refresh the real Session baseline, reusing an in-flight pull.
-   * @returns completion of the current or newly started baseline pull.
+   * Explicitly refresh the complete Session catalog, reusing in-flight reads.
+   * @returns completion of the catalog refresh or its reported failure.
    */
-  refresh(): Promise<void> {
-    return this.manager.refreshList()
+  async refresh(): Promise<void> {
+    await this.manager.refreshList(true)
+    while (!this.closed) {
+      const snapshot = this.manager.getListSnapshot()
+      if (snapshot.complete || snapshot.state === 'error') return
+      await this.manager.loadMore()
+    }
+  }
+
+  loadMore(cwd?: string): Promise<void> {
+    return this.manager.loadMore(cwd).then(() => {
+      if (cwd !== undefined) return
+      const error = this.manager.getListSnapshot().error
+      if (error !== null) throw new Error(error.message, { cause: error })
+    })
+  }
+
+  ensureListed(sessionId: SessionId): Promise<boolean> {
+    return this.manager.ensureListed(sessionId)
   }
 
   /**
@@ -621,7 +640,7 @@ export class ClientSessions implements ISessions {
   private projectList(): void {
     const previousById = this.list.getSnapshot().byId
     const {
-      items, phase, complete, projectionsBySession,
+      items, phase, complete, workspacePages, projectionsBySession,
     } = this.manager.getListSnapshot()
     const ids: SessionId[] = []
     const byId: Record<SessionId, SessionSummary> = {}
@@ -690,7 +709,7 @@ export class ClientSessions implements ISessions {
         ...(title === undefined ? {} : { title, displayTitle: title }),
       }
     }
-    this.list.set({ ids, byId, phase, complete, projectionsBySession })
+    this.list.set({ ids, byId, phase, complete, workspacePages, projectionsBySession })
   }
 
   private startScopeDrop(

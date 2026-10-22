@@ -237,6 +237,8 @@ export interface Config {
   readonly listSnapshotLimit?: number
   /** Catalog continuation lifetime in milliseconds. */
   readonly listSnapshotTtlMs?: number
+  /** Header discovery reuse in milliseconds; zero keeps each first page uncached. */
+  readonly listDiscoveryCacheMs?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-api-session-controller -->

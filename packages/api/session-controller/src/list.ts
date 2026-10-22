@@ -28,11 +28,13 @@ interface ListPagePolicy {
   readonly listInitialPerWorkspace: number
   readonly listSnapshotLimit: number
   readonly listSnapshotTtlMs: number
+  readonly listDiscoveryCacheMs: number
 }
 
 interface ListCatalog {
   readonly records: readonly SessionRecord[]
   readonly expiresAt: number
+  readonly cwd?: string
 }
 
 const SEARCH_PROVIDER_CALL_LIMIT = 100
@@ -92,12 +94,25 @@ export function truncateUnicodeCodePoints(value: string, maximum: number): strin
 /** Owns list projection registration, bounded cold summaries, and authorized search. */
 export class ApiSessionList {
   private readonly catalogs = new Map<string, ListCatalog>()
+  private discovery: {
+    readonly records: readonly SessionRecord[]
+    readonly expiresAt: number
+  } | undefined
+  private discoveryGeneration = 0
   /**
    * @param ctx - Host context carrying Session, query, persistence, and projection services.
    * @param workSliceMs - Resolved positive integral list-work budget in milliseconds.
    */
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
-    ctx.effect(() => () => { this.catalogs.clear() }, 'api-session.listCatalogs')
+    ctx.effect(() => () => { this.catalogs.clear(); this.discovery = undefined }, 'api-session.listCatalogs')
+    const invalidate = (): void => { this.discovery = undefined; this.discoveryGeneration++ }
+    ctx.on('api-session/added', invalidate)
+    ctx.on('api-session/removed', invalidate)
+    ctx.inject(['sessionQuery'], (sourceCtx) => {
+      const reset = (): void => { this.catalogs.clear(); invalidate() }
+      reset()
+      sourceCtx.effect(() => reset, 'api-session.listDiscoverySource')
+    })
     ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
       stateSchema: sessionListMetadataSchema,
@@ -148,13 +163,17 @@ export class ApiSessionList {
         throw new RemoteError('gateway/bad-request', 'session list cursor expired or invalid', {})
       }
       catalog = existing
+      if (catalog.cwd !== request.cwd) {
+        throw new RemoteError('gateway/bad-request', 'session list cursor belongs to another workspace', {})
+      }
     } else {
-      const records = await this.ctx.sessionQuery.listSessions(signal)
+      const records = await this.discover(policy.listDiscoveryCacheMs, request.fresh === true, signal)
       const ranked: Array<{ record: SessionRecord; updatedAt: number; priority: boolean }> = []
       let deadline = performance.now() + this.workSliceMs
       for (const record of records) {
         const { header } = record
         signal?.throwIfAborted()
+        if (request.cwd !== undefined && header.cwd !== request.cwd) continue
         if (!this.ctx.remoteAccess.allows({ kind: 'session', id: header.id })) continue
         const live = this.ctx.sessions.get(header.id)
         if (live === undefined && header.cwd === undefined) continue
@@ -164,7 +183,7 @@ export class ApiSessionList {
         const metadata = block?.values.sessionListMetadata
         ranked.push({
           record, updatedAt: updatedAt(header, metadata),
-          priority: this.ctx.agents.get(header.id)?.status === 'running' || metadata?.blank === true,
+          priority: this.ctx.agents.get(header.id)?.status === 'running',
         })
         if (performance.now() >= deadline) {
           await scheduler.yield()
@@ -185,7 +204,10 @@ export class ApiSessionList {
       }
       signal?.throwIfAborted()
       token = randomUUID()
-      catalog = { records: [...initial, ...older], expiresAt: performance.now() + policy.listSnapshotTtlMs }
+      catalog = {
+        records: [...initial, ...older], expiresAt: performance.now() + policy.listSnapshotTtlMs,
+        ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+      }
       offset = 0
       while (this.catalogs.size >= policy.listSnapshotLimit) {
         const first = this.catalogs.keys().next().value
@@ -193,7 +215,11 @@ export class ApiSessionList {
         this.catalogs.delete(first)
       }
       if (older.length > 0) this.catalogs.set(token, catalog)
-      return this.projectPage(catalog, token, offset, initial.length, signal)
+      const page = await this.projectPage(catalog, token, offset,
+        request.cwd === undefined ? initial.length : policy.listPageSize, signal)
+      return request.cwd === undefined
+        ? { ...page, workspaceHasMore: [...new Set(older.flatMap(row => row.header.cwd === undefined ? [] : [row.header.cwd]))] }
+        : page
     }
     return this.projectPage(catalog, token, offset, policy.listPageSize, signal)
   }
@@ -218,6 +244,46 @@ export class ApiSessionList {
     signal?.throwIfAborted()
     const next = offset + selected.length
     return { items, ...(next < catalog.records.length ? { nextCursor: `${token}:${String(next)}` } : {}) }
+  }
+
+  private async discover(cacheMs: number, fresh: boolean, signal?: AbortSignal): Promise<readonly SessionRecord[]> {
+    signal?.throwIfAborted()
+    const source = this.ctx.sessionQuery
+    const cached = this.discovery
+    if (!fresh && cacheMs > 0 && cached !== undefined && cached.expiresAt > performance.now()) return cached.records
+    if (fresh) { this.discovery = undefined; this.discoveryGeneration++ }
+    const generation = this.discoveryGeneration
+    const records = await source.listSessions(signal)
+    signal?.throwIfAborted()
+    if (generation === this.discoveryGeneration) {
+      this.discovery = cacheMs === 0 ? undefined
+        : { records, expiresAt: performance.now() + cacheMs }
+    }
+    return records
+  }
+
+  /**
+   * Read authorized metadata for explicit identities without opening history.
+   * @param sessionIds - identities requested by navigation or search.
+   * @param signal - cancellation for catalog reads.
+   * @returns matching visible summaries, omitting missing or inaccessible identities.
+   */
+  async selected(sessionIds: readonly SessionId[], signal?: AbortSignal): Promise<SessionSummary[]> {
+    const requested = new Set(sessionIds)
+    if (requested.size === 0) return []
+    const cached = this.discovery
+    const records = cached !== undefined && cached.expiresAt > performance.now()
+      && sessionIds.every(id => cached.records.some(record => record.header.id === id))
+      ? cached.records : await this.ctx.sessionQuery.listSessions(signal)
+    const items: SessionSummary[] = []
+    for (const record of records) {
+      signal?.throwIfAborted()
+      if (!requested.has(record.header.id)
+        || !this.ctx.remoteAccess.allows({ kind: 'session', id: record.header.id })) continue
+      const live = this.ctx.sessions.get(record.header.id)
+      items.push(live === undefined ? this.summarizeCold(record) : this.summaryFor(live))
+    }
+    return items
   }
 
   /**

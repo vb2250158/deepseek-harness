@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { GlobalStandardProps, RenderOpts } from '@deepseek-ai/dsh-client-ui-slots'
+import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { allowAllAccess, bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -99,10 +99,12 @@ function dragData(): Pick<DataTransfer, 'effectAllowed' | 'dropEffect' | 'setDat
 // The default child stub: an open directory flow shows its marker; the two
 // Session row lists stay empty (their entries have their own spec). A stub
 // satisfies the generic render signature only with an erased owner type.
-const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object, opts?: RenderOpts) =>
+const renderDirectoryFlowOnly: WorkspaceBrowserProps['renderSlot'] = (
+  name: string, owner: object, options?: Parameters<WorkspaceBrowserProps['renderSlot']>[2],
+) =>
   name === 'sidebar.workspaces.directoryFlow' && (owner as DirectoryFlowOwnerProps).open
     ? <div data-testid="directory-flow" />
-    : opts?.fallback ?? null
+    : options?.fallback ?? null
 
 function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
   const controls = createWorkspaceShortcutControls()
@@ -129,6 +131,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     open: vi.fn(),
     searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
     searchResultLimit: 20,
+    loadMoreSessions: vi.fn(async () => {}),
     notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
@@ -152,6 +155,44 @@ function rerender(b: ReturnType<typeof mount>, overrides: Partial<WorkspaceBrows
 }
 
 describe('WorkspaceBrowser', () => {
+  it('requests older rows only after a click and keeps a failed request retryable', async () => {
+    const request = Promise.withResolvers<undefined>()
+    const loadMoreSessions = vi.fn().mockReturnValueOnce(request.promise).mockResolvedValueOnce(undefined)
+    const browser = mount({ useSessions: hook(sessionState([summary('recent', 1)], { complete: false })), loadMoreSessions })
+    act(() => { browser.store.actions.setGroupBy('flat') })
+    act(() => { browser.store.actions.setGroupExpanded(UNGROUPED_KEY, true) })
+    expect(loadMoreSessions).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '加载更多会话' }))
+    expect(loadMoreSessions).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '正在加载更多会话…' }).hasAttribute('disabled')).toBe(true)
+    await act(async () => { request.reject(new Error('fixture offline')) })
+    fireEvent.click(screen.getByRole('button', { name: '加载失败，点击重试' }))
+    await waitFor(() => { expect(loadMoreSessions).toHaveBeenCalledTimes(2) })
+    expect(screen.getByText('recent')).not.toBeNull()
+  })
+  it('places independent history controls directly under their expanded projects', async () => {
+    const loadMoreSessions = vi.fn(async () => {})
+    const browser = mount({
+      useSessions: hook(sessionState([], { complete: false, workspacePages: {
+        '/projects/alpha': { complete: false, state: 'idle' },
+        '/projects/beta': { complete: false, state: 'idle' },
+      } })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', []), workspace('beta', [])])),
+      loadMoreSessions,
+    })
+    act(() => {
+      browser.store.actions.setGroupExpanded('alpha', true)
+      browser.store.actions.setGroupExpanded('beta', true)
+    })
+    expect(screen.queryByRole('button', { name: '加载更多会话' })).toBeNull()
+    const controls = screen.getAllByRole('button', { name: '展开显示' })
+    expect(controls).toHaveLength(2)
+    fireEvent.click(controls[0]!)
+    await waitFor(() => { expect(loadMoreSessions).toHaveBeenCalledWith('/projects/alpha') })
+    expect(loadMoreSessions).toHaveBeenCalledTimes(1)
+    act(() => { browser.store.actions.setGroupExpanded('beta', false) })
+    expect(screen.getAllByRole('button', { name: '展开显示' })).toHaveLength(1)
+  })
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps %s recency independent of arrival order and saved manual positions', (mode) => {
     localStorage.clear()
     const preferences = createWorkspaceViewStore().create()
@@ -729,9 +770,9 @@ describe('WorkspaceBrowser', () => {
 
   it('renders both Session row lists for every visible row in the grouped tree and the flat list', () => {
     const rendered = vi.fn()
-    const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object, opts?: RenderOpts) => {
+    const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) => {
       rendered(name, owner)
-      return opts?.fallback ?? null
+      return null
     }
     const b = mount({
       useSessions: hook(sessionState([summary('alpha-s', 1)])),

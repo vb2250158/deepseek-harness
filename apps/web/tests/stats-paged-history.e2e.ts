@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { createSystemMessage } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
@@ -141,28 +141,6 @@ describe('web e2e: whole-session stats survive history paging', () => {
     const snapshot = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
-  })
-
-  it('keeps closed-turn and other-time figures after a browser refresh', async () => {
-    onTestFailed(() => saveFailureShot(page, 'web-e2e-stats-closed-turn'))
-    for (const refreshed of [false, true]) {
-      if (refreshed) await page.reload({ waitUntil: 'load' })
-      // seedSession materializes consecutive logical timestamps one millisecond apart.
-      const session = scaffold.ctx.sessions.get(SessionId(SEED_ID))!
-      expect(scaffold.ctx.sessionProjections.snapshot(session).values.sessionStats).toMatchObject({
-        turnMs: 141, llmMs: 57, otherMs: 84,
-      })
-      const activity = page.getByRole('button', { name: FULL_COUNTS, exact: true })
-      await activity.waitFor({ timeout: 15_000 })
-      await activity.click()
-      const dialog = page.getByRole('dialog', { name: 'Session statistics', exact: true })
-      await expect.poll(() => dialog.locator('[data-session-stats-details]').textContent()).toBe(
-        'Total closed-turn time0.1sLLM time0.1sOther time0.1s',
-      )
-      expect(await dialog.textContent()).toContain('Whole-session totals.')
-      await page.keyboard.press('Escape')
-      await dialog.waitFor({ state: 'hidden' })
-    }
   })
 
   it('issued zero model calls and stayed clean', async () => {

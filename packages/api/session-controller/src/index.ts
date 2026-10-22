@@ -104,6 +104,8 @@ export interface Config {
   readonly listSnapshotLimit?: number
   /** Catalog continuation lifetime in milliseconds. */
   readonly listSnapshotTtlMs?: number
+  /** Header discovery reuse in milliseconds; zero keeps each first page uncached. */
+  readonly listDiscoveryCacheMs?: number
 }
 
 /** Deployment policy after schema defaults have been applied. */
@@ -113,6 +115,7 @@ type ResolvedConfig = Config & {
   readonly listInitialPerWorkspace: number
   readonly listSnapshotLimit: number
   readonly listSnapshotTtlMs: number
+  readonly listDiscoveryCacheMs: number
 }
 
 /** Host integrations replaceable by direct unit tests. */
@@ -153,6 +156,7 @@ export class SessionController extends TypertRemoteService {
     listInitialPerWorkspace: z.natural().min(1).default(5),
     listSnapshotLimit: z.natural().min(1).default(8),
     listSnapshotTtlMs: z.natural().min(1).default(60_000),
+    listDiscoveryCacheMs: z.natural().default(0),
   })
 
   private readonly agents: ApiSessionAgentController
@@ -288,15 +292,18 @@ export class SessionController extends TypertRemoteService {
 
   /**
    * Read visible Session rows without resuming an Agent.
-   * @param _request - full-list selection or continuation of a bounded snapshot.
+   * @param _request - explicit identities, a full list, or continuation of a bounded snapshot.
    * @param signal - cancellation for persistence reads and summary generation.
    * @returns visible Session summaries ordered by activity.
    */
   @Remote('list')
   async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue> {
-    const value = _request.paged || _request.cursor !== undefined
-      ? await this.listState.page(_request, this.listPolicy, signal)
-      : { items: await this.listState.list(signal) }
+    const request = _request
+    const value = request.sessionIds !== undefined
+      ? { items: await this.listState.selected(request.sessionIds, signal) }
+      : request.paged || request.cursor !== undefined
+        ? await this.listState.page(request, this.listPolicy, signal)
+        : { items: await this.listState.list(signal) }
     return { ...value, items: value.items.filter(item => this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId })) }
   }
 

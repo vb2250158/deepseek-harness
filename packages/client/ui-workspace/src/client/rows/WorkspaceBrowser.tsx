@@ -259,10 +259,14 @@ type SessionTreeProps = Pick<
   | 'sidebar.workspaces.session.row.action'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
+  | 'sidebar.session.row.badges'
+  | 'sidebar.session.row.title'
 > & {
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]
   /** Always-mounted Session list snapshot. */
   list: SessionListState
+  /** Load one workspace's historical page without expanding other projects. */
+  loadMoreSessions: (cwd?: string) => Promise<void>
   /** Host account home for POSIX hover-path abbreviation. */
   home?: string | undefined
   /** Workspaces in Host group order with browser-projected Session order. */
@@ -315,7 +319,7 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreePro
 
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
-  list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
+  list, loadMoreSessions, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
@@ -480,11 +484,14 @@ function SessionTree({
     const collapsed = watermarkRows(group.sessions, baselines.get(group.key) ?? SESSION_WATERMARK_BASE)
     const visible = watermarkRows(group.sessions, watermark)
     const sessionsExpanded = visible.hiddenCount === 0
+    const page = group.cwd === undefined ? undefined : list.workspacePages?.[group.cwd]
+    const hasMore = page?.complete === false
+    const overflow = group.expanded && (collapsed.hiddenCount > 0 || hasMore)
     rowKeys.push(`workspace:${group.key}`)
     const childRows = group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []
     const sessions = visible.rows
     for (const node of sessions) rowKeys.push(`session:${node.id}`)
-    if (collapsed.hiddenCount > 0) rowKeys.push(`overflow:${group.key}`)
+    if (overflow) rowKeys.push(`overflow:${group.key}`)
     const workspaceMarker = workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
       ? workspaceDrag.over.half
       : null
@@ -562,9 +569,7 @@ function SessionTree({
             home={home}
             t={t}
             onToggle={() => {
-              if (group.expanded) {
-                dropWatermarks(key => withinGroup(key, group.key))
-              }
+              if (group.expanded) dropWatermarks(key => withinGroup(key, group.key))
               setGroupExpanded(group.key, !group.expanded)
             }}
             onCreate={() => {
@@ -641,27 +646,38 @@ function SessionTree({
             />
           )
         })}
-        {collapsed.hiddenCount > 0 && (
+        {overflow && (
           <button
             type="button"
             className={css.sessionOverflowButton}
             data-row-key={`overflow:${group.key}`}
-            aria-expanded={sessionsExpanded}
+            aria-expanded={sessionsExpanded && !hasMore}
+            disabled={page?.state === 'loading'}
             onClick={() => {
+              if (sessionsExpanded && hasMore) {
+                void loadMoreSessions(group.cwd).then(() => {
+                  setStoredWatermarks(marks => ({ ...marks, [group.key]: watermark + SESSION_WATERMARK_BASE }))
+                  setWatermarkMotionKey(key => key + 1)
+                }).catch((_error: unknown) => { /* The workspace page exposes the retry state. */ })
+                return
+              }
               if (sessionsExpanded) {
                 dropWatermarks(key => key === group.key)
                 return
               }
               setStoredWatermarks(marks => ({
                 ...marks,
-                [group.key]: visible.hiddenCount <= SESSION_WATERMARK_BASE ? Infinity : watermark + SESSION_WATERMARK_BASE,
+                [group.key]: !hasMore && visible.hiddenCount <= SESSION_WATERMARK_BASE ? Infinity : watermark + SESSION_WATERMARK_BASE,
               }))
               setWatermarkMotionKey(key => key + 1)
             }}
           >
-            {sessionsExpanded
-              ? t('sessions.collapse')
-              : t('sessions.expand', { n: visible.hiddenCount })}
+            {page?.state === 'loading' ? t('sessions.loadingMore')
+              : page?.state === 'error' ? t('sessions.loadMoreFailed')
+                : sessionsExpanded && hasMore ? t('sessions.showMore')
+                  : sessionsExpanded
+                    ? t('sessions.collapse')
+                    : t('sessions.expand', { n: visible.hiddenCount })}
           </button>
         )}
       </div>
@@ -811,8 +827,8 @@ function SearchResults({
   query,
   remote,
   resultLimit,
-  usePanelInfo,
   renderSlot,
+  usePanelInfo,
   t,
 }: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'renderSlot'> & {
   workspaces: readonly WorkspaceView[]
@@ -919,6 +935,7 @@ export function WorkspaceBrowser({
   createWorkspace,
   searchSessions,
   searchResultLimit,
+  loadMoreSessions,
   useDirectoryFlow,
   useHostInfo,
   useShortcuts,
@@ -937,6 +954,8 @@ export function WorkspaceBrowser({
   const shortcutState = useWorkspaceShortcuts(state => state)
   // Ordering remains live while the rail or search replaces the list body.
   const list = useSessions(state => state)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false)
   const storedWorkspaces = useWorkspaces(state => state.items)
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
@@ -1405,7 +1424,7 @@ export function WorkspaceBrowser({
 
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
-      <div className={css.listArea}>
+      <div className={css.listArea} data-dsh-session-list>
         {wide && (normalizedQuery !== ''
           ? (
             <SearchResults
@@ -1446,6 +1465,7 @@ export function WorkspaceBrowser({
             )
             : (
               <SessionTree
+                loadMoreSessions={loadMoreSessions}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 shortcuts={shortcuts}
@@ -1483,6 +1503,22 @@ export function WorkspaceBrowser({
                 }}
               />
             ))}
+        {wide && groupBy === 'flat' && normalizedQuery === '' && list.phase === 'ready' && list.complete === false && (
+          <button
+            type="button"
+            className={css.sessionOverflowButton}
+            disabled={loadingMore}
+            onClick={() => {
+              setLoadingMore(true)
+              setLoadMoreFailed(false)
+              void loadMoreSessions().catch((_error: unknown) => {
+                setLoadMoreFailed(true)
+              }).finally(() => { setLoadingMore(false) })
+            }}
+          >
+            {t(loadingMore ? 'sessions.loadingMore' : loadMoreFailed ? 'sessions.loadMoreFailed' : 'sessions.loadMore')}
+          </button>
+        )}
       </div>
 
       <Modal

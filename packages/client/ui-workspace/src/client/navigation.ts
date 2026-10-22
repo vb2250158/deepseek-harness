@@ -274,6 +274,18 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   openSession(target: SessionTarget): void {
+    const catalog = this.sessions.list.getSnapshot()
+    if (typeof target === 'string' && catalog.complete === false && catalog.byId[target] === undefined) {
+      const signal = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+      void this.sessions.ensureListed(target).then((found) => {
+        if (signal.aborted) return
+        if (found) this.replaceMain(target, signal, 'reveal')
+        else this.notify({ kind: 'metadataFailed' })
+      }).catch((_error: unknown) => {
+        if (!signal.aborted) this.notify({ kind: 'metadataFailed' })
+      })
+      return
+    }
     this.replaceMain(target, this.lifetime.signal, 'reveal')
   }
 
@@ -445,7 +457,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       this.replaceMain(saved.subagentAddress, this.lifetime.signal, 'preserve')
       return
     }
-    const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
+    let summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
+    if (saved.sessionId !== undefined && summary === undefined && sessions.complete === false) {
+      await this.sessions.ensureListed(saved.sessionId)
+      if (this.lifetime.signal.aborted || this.mainReference !== undefined) return
+      summary = this.sessions.list.getSnapshot().byId[saved.sessionId]
+    }
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
     if (summary !== undefined && (!summary.blank || workspace === undefined)) {

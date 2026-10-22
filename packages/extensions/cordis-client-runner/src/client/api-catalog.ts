@@ -661,7 +661,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ISessions',
-    declaration: 'export interface ISessions {\n    readonly list: ObservableSnapshot<SessionListState>;\n    retain(target: SessionTarget, options: SessionRetainOptions): SessionReference;\n    using<T>(target: SessionTarget, options: SessionRetainOptions, operation: (reference: SessionReference) => T | Promise<T>): Promise<T>;\n    retainInfo(id: SessionId): ObservableSnapshot<SessionRetainInfo>;\n    readonly searchResultLimit: number;\n    create(opts?: {\n        workspaceId?: WorkspaceId;\n        cwd?: string;\n        sessionId?: SessionId;\n        agentPreset?: string;\n    }): Promise<SessionId>;\n    subagentAddress(id: SessionId): SubagentAddress | undefined;\n    refreshProjections(sessionId: SessionId): Promise<void>;\n    refresh(): Promise<void>;\n    search(query: string, signal: AbortSignal): Promise<RemoteResult<{\n        items: SessionSearchResultItem[];\n        hasMore: boolean;\n    }>>;\n    fork(opts: {\n        sessionId: SessionId;\n        atSeq?: number;\n        increaseTitle?: boolean;\n        onCreated?: (childId: SessionId) => void;\n        allowMigration?: boolean;\n    }): Promise<SessionId>;\n    scope(id: SessionId): AgentContext | undefined;\n    scopeOf(ctx: Context): SessionId | undefined;\n    sessionOf(ctx: Context): SessionFace | undefined;\n    binding(id: SessionId): SessionBinding | undefined;\n}',
+    declaration: 'export interface ISessions {\n    readonly list: ObservableSnapshot<SessionListState>;\n    retain(target: SessionTarget, options: SessionRetainOptions): SessionReference;\n    using<T>(target: SessionTarget, options: SessionRetainOptions, operation: (reference: SessionReference) => T | Promise<T>): Promise<T>;\n    retainInfo(id: SessionId): ObservableSnapshot<SessionRetainInfo>;\n    readonly searchResultLimit: number;\n    create(opts?: {\n        workspaceId?: WorkspaceId;\n        cwd?: string;\n        sessionId?: SessionId;\n        agentPreset?: string;\n    }): Promise<SessionId>;\n    subagentAddress(id: SessionId): SubagentAddress | undefined;\n    refreshProjections(sessionId: SessionId): Promise<void>;\n    refresh(): Promise<void>;\n    loadMore(cwd?: string): Promise<void>;\n    ensureListed(sessionId: SessionId): Promise<boolean>;\n    search(query: string, signal: AbortSignal): Promise<RemoteResult<{\n        items: SessionSearchResultItem[];\n        hasMore: boolean;\n    }>>;\n    fork(opts: {\n        sessionId: SessionId;\n        atSeq?: number;\n        increaseTitle?: boolean;\n        onCreated?: (childId: SessionId) => void;\n        allowMigration?: boolean;\n    }): Promise<SessionId>;\n    scope(id: SessionId): AgentContext | undefined;\n    scopeOf(ctx: Context): SessionId | undefined;\n    sessionOf(ctx: Context): SessionFace | undefined;\n    binding(id: SessionId): SessionBinding | undefined;\n}',
   },
   {
     name: 'KeyedHooksSources',
@@ -905,7 +905,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionListState',
-    declaration: 'export interface SessionListState {\n    ids: SessionId[];\n    byId: Record<SessionId, SessionSummary>;\n    phase: SessionListPhase;\n    complete?: boolean;\n    projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>;\n}',
+    declaration: 'export interface SessionListState {\n    ids: SessionId[];\n    byId: Record<SessionId, SessionSummary>;\n    phase: SessionListPhase;\n    complete?: boolean;\n    workspacePages?: Readonly<Record<string, WorkspaceSessionPage>>;\n    projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>;\n}',
   },
   {
     name: 'SessionMaybeStandardProps',
@@ -1078,6 +1078,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'UseFactorySlot',
     declaration: 'export type UseFactorySlot<F extends keyof SlotFactoryMap & string> = <N extends FactoryLocalNameOf<F>>(name: N, fallback: FactoryLocalComponent<F, N>) => SlotComponent<FactoryLocalInputPropsOf<F, N>>;',
+  },
+  {
+    name: 'WorkspaceSessionPage',
+    declaration: 'export interface WorkspaceSessionPage {\n    readonly complete: boolean;\n    readonly state: \'idle\' | \'loading\' | \'error\';\n}',
   },
   {
     name: 'WorkspaceView',

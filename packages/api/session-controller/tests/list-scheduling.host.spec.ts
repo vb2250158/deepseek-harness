@@ -1,6 +1,6 @@
 /** Event-loop fairness and cancellation of synchronous Session-list summaries. */
 
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -21,7 +21,7 @@ interface Row {
 }
 
 const contexts = new Set<Context>()
-const pagePolicy = { listPageSize: 2, listInitialPerWorkspace: 1, listSnapshotLimit: 2, listSnapshotTtlMs: 1000 }
+const pagePolicy = { listPageSize: 2, listInitialPerWorkspace: 1, listSnapshotLimit: 2, listSnapshotTtlMs: 1000, listDiscoveryCacheMs: 0 }
 const immediates = new Set<ReturnType<typeof setImmediate>>()
 
 afterEach(async () => {
@@ -84,7 +84,11 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
     return { header: session.header, live: row.phase === 'live', persisted: true }
   })
   const listSessions = vi.fn(async (_signal?: AbortSignal) => records)
-  ctx.provide('sessionQuery', { listSessions } as never)
+  class ListingSource extends Service {
+    readonly listSessions = listSessions
+    constructor(sourceCtx: Context) { super(sourceCtx, 'sessionQuery') }
+  }
+  let source = await ctx.plugin(ListingSource)
   ctx.provide('sessionProjectionCache', {
     cachedSnapshot: (header: SessionRecord['header']) => {
       recordSummary('cold', header.id)
@@ -99,10 +103,104 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
     return summary
   })
   vi.spyOn(performance, 'now').mockImplementation(() => clock.now)
-  return { ctx, list, listSessions, trace, observer, attach, agents, detach, clock }
+  const replaceSource = async (): Promise<void> => {
+    await source.dispose()
+    source = await ctx.plugin(ListingSource)
+  }
+  return { ctx, list, listSessions, trace, observer, attach, agents, detach, clock, replaceSource }
 }
 
 describe('Session-list pages', () => {
+  it('discards discovery and continuations when the query service is replaced', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    const first = await h.list.page({ paged: true }, policy)
+    await h.replaceSource()
+    await expect(h.list.page({ cursor: first.nextCursor! }, policy)).rejects.toThrow('cursor expired or invalid')
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+  it('reuses header discovery through Cordis service accessors until expiry, refresh, or a catalog change', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listSnapshotLimit: 8 }
+    await h.list.page({ paged: true }, policy)
+    await h.list.page({ paged: true }, policy)
+    await h.list.selected([SessionId('b')])
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+    h.clock.now += 101
+    const refreshed = await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+    await h.list.page({ paged: true, fresh: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+    h.ctx.emit('api-session/added', refreshed.items[0]!)
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(4)
+    h.ctx.emit('api-session/removed', SessionId('b'))
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(5)
+  })
+
+  it('does not retain discovery completed after a Session catalog invalidation', async () => {
+    const h = await harness([{ id: 'a', phase: 'cold' }], 0)
+    const records = await h.listSessions()
+    h.listSessions.mockClear()
+    const gate = Promise.withResolvers<undefined>()
+    h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    const read = h.list.page({ paged: true }, policy)
+    h.ctx.emit('api-session/removed', SessionId('a'))
+    gate.resolve(undefined)
+    await read
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('withdraws retained discovery when an explicit fresh read fails', async () => {
+    const h = await harness([{ id: 'a', phase: 'cold' }], 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    await h.list.page({ paged: true }, policy)
+    h.listSessions.mockRejectedValueOnce(new Error('disk offline'))
+    await expect(h.list.page({ paged: true, fresh: true }, policy)).rejects.toThrow('disk offline')
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+  })
+
+  it('pages one workspace independently and rejects another workspace cursor', async () => {
+    const h = await harness(Array.from({ length: 6 }, (_, i) => ({ id: `row-${i}`, phase: 'cold' as const })), 0)
+    const records = await h.listSessions()
+    records.forEach((record, i) => {
+      record.header = { ...record.header, createdAt: i, cwd: i % 2 === 0 ? '/a' : '/b' }
+    })
+    const first = await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 4 })
+    expect(first.workspaceHasMore).toEqual(['/b', '/a'])
+    const a = await h.list.page({ paged: true, cwd: '/a' }, { ...pagePolicy, listSnapshotLimit: 4 })
+    expect(a.items.map(row => row.sessionId)).toEqual(['row-4', 'row-2'])
+    await expect(h.list.page({ cwd: '/b', cursor: a.nextCursor! }, pagePolicy)).rejects.toThrow('another workspace')
+    const last = await h.list.page({ cwd: '/a', cursor: a.nextCursor! }, pagePolicy)
+    expect(last.items.map(row => row.sessionId)).toEqual(['row-0'])
+    expect(last.nextCursor).toBeUndefined()
+    expect(h.ctx.sessions.list()).toEqual([])
+  })
+
+  it.each<Phase>(['live', 'cold'])('keeps old %s blank rows within the workspace limit', async (phase) => {
+    const h = await harness(['a', 'b', 'c', 'd'].map(id => ({ id, phase })), 0)
+    const cache = phase === 'cold' ? h.ctx.sessionProjectionCache : h.ctx.sessionProjections
+    vi.spyOn(cache, 'cachedSnapshot').mockReturnValue({
+      asOfSeq: -1, values: { sessionListMetadata: { blank: true, lastPromptAt: null } },
+    })
+    const first = await h.list.page({ paged: true }, pagePolicy)
+    expect(first.items.map(row => row.sessionId)).toEqual(['a'])
+    expect(first.nextCursor).toBeDefined()
+    if (phase === 'cold') expect(h.ctx.sessions.list()).toEqual([])
+  })
+
+  it('reads only explicit visible metadata targets without activating cold Sessions', async () => {
+    const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
+    vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')
+    const selected = await h.list.selected([SessionId('a'), SessionId('b'), SessionId('missing')])
+    expect(selected.map(row => row.sessionId)).toEqual(['b'])
+    expect(h.ctx.sessions.list()).toEqual([])
+  })
   it('filters restricted Sessions before paging and rechecks retained pages', async () => {
     const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
     const allows = vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')

@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { HoverCardGroup, MenuItemButton, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsRenderSlots, RenderOpts } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MenuOpenState, SessionRowOwnerProps } from '../src/client/contract/slots.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { RowDragProps } from '../src/client/rows/Rows.tsx'
@@ -33,10 +32,10 @@ type RowSlotName =
   | 'sidebar.session.row.hover'
   | 'sidebar.session.row.badges'
   | 'sidebar.session.row.title'
-type RowRenderSlot = PropsRenderSlots<RowSlotName>['renderSlot']
+type RowRenderSlot = (name: RowSlotName, owner: object, opts?: { fallback?: ReactNode }) => ReactNode
 type SessionNodeItemProps = ComponentProps<typeof SessionNodeItemComponent>
 
-const renderNoRowEntries: RowRenderSlot = (_name: RowSlotName, _owner: object, opts?: RenderOpts) => opts?.fallback ?? null
+const renderNoRowEntries: RowRenderSlot = (_name, _owner, opts) => opts?.fallback ?? null
 
 function SearchResultItem(props: Omit<ComponentProps<typeof SearchResultItemComponent>, 'renderSlot'>) {
   return <SearchResultItemComponent {...props} renderSlot={renderNoRowEntries} />
@@ -821,7 +820,7 @@ describe('workspace browser rows', () => {
         id: sid('action-hover'), title: 'Action hover', blank: false, running: false,
         runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
       }
-      const renderSlot: RowRenderSlot = (name: RowSlotName, _owner: object, opts?: RenderOpts) => name === 'sidebar.workspaces.session.row.action'
+      const renderSlot: RowRenderSlot = (name, _owner, opts) => name === 'sidebar.workspaces.session.row.action'
         ? <Tooltip label="Archive" delayMs={500}><button type="button" aria-label="Archive" /></Tooltip>
         : opts?.fallback ?? null
       const { rerender } = render(<SessionNodeItem node={node} currentId={undefined} now={0}
@@ -1246,7 +1245,7 @@ it.each([['未命名', t], ['Untitled', tEn]])('labels unnamed search results as
 })
 
 describe('persistent row labels and display titles', () => {
-  const renderStatus = (name: RowSlotName, _owner: object, opts?: RenderOpts) => {
+  const renderStatus: RowRenderSlot = (name, _owner, opts) => {
     if (name === 'sidebar.session.row.badges') return <span data-testid="plan-label">已绑定</span>
     if (name === 'sidebar.session.row.title') return '实际任务'
     return opts?.fallback ?? null
@@ -1278,8 +1277,8 @@ describe('persistent row labels and display titles', () => {
       id: sid('search-bound'), title: '[Project]实际任务', workspace: 'Project',
       running: false, runningSubagentCount: 0, completed: false, archived: true,
     }
-    const renderSlot: RowRenderSlot = (name: RowSlotName, owner: object, opts?: RenderOpts) => {
-      if (name === 'sidebar.session.row.badges' || name === 'sidebar.session.row.title') expect(owner).toHaveProperty('sessionId', result.id)
+    const renderSlot: RowRenderSlot = (name, owner, opts) => {
+      if (name === 'sidebar.session.row.badges' || name === 'sidebar.session.row.title') expect(owner).toMatchObject({ sessionId: result.id })
       return renderStatus(name, owner, opts)
     }
     render(<SearchResultItemComponent result={result} currentId={sid('other')} onOpen={vi.fn()}

@@ -4,8 +4,6 @@ kind: "package-reference"
 ---
 # Session Controller
 
-分页会话列表在分配工作区配额前排除未授权会话，并在输出每页时重新检查访问权限；Remote 还会按当前权限过滤最终响应。
-
 [English](README.md) | 中文
 
 桌面埋点遵循[产品采集策略](../../client/product-analytics/README.zh.md)及其启动时开关，不包含 Web 使用情况。
@@ -47,7 +45,7 @@ Client 列表行和驻留 Session 使用当前 `sessionListMetadata` 投影纠�
 
 Client 列表刷新保留未变化的行对象，并在顺序和值均相同时复用条目数组。每行的 `retainedBy` 包含正数的本地引用来源计数，Host 元数据刷新不能覆盖它们。缓存成员检查使用每次刷新构建的 ID 集合，因此对账成本随当前列表和保留缓存的规模线性增长。 Host 摘要更新会替换运行状态与 Agent 可用性；本地 create/fork 响应只补充已有行缺失的元数据。普通 Session 被移除后，仅在目录仍有子项时保留其投影 store。
 
-Web 客户端通过 `session.list({ paged: true })` 分批读取：首批包含各工作区最近会话、运行中会话和空白会话，旧会话随后从同一次目录快照分批补齐。每批成功后立即显示；未加载完时保留已有列表，合并加载期间的实时更新，最后一批到达后才核对删除。`SessionListState.complete` 区分部分到达与完整空列表。不传 `paged` 时仍返回完整列表；游标在 `listSnapshotTtlMs` 到期或快照淘汰后失效。首次请求仍发现全部 header，后续页复用发现结果，仅生成本页的完整投影。
+Web 客户端通过 `session.list({ paged: true })` 读取各工作区近期会话和运行中会话；空白会话仍受工作区条数限制。启动和重连的自动刷新在首批完成后停止。`workspaceHasMore` 标识仍有历史行的项目。`sessions.loadMore(cwd)` 只读取该目录的一页历史会话，游标与重试状态由 `SessionListState.workspacePages` 按项目独立维护；省略 `cwd` 时读取完整目录的下一页；显式 `sessions.refresh()` 保留完整目录刷新语义。每批成功后立即显示；未加载完时保留已有行并重放 Host 更新，末页到达后对账移除项。`SessionListState.complete` 区分部分到达和完整空列表。导航可调用 `sessions.ensureListed(id)`，通过 `session.list({ sessionIds: [id] })` 单独读取获准会话的元数据，不加载其它分页或打开历史。未指定分页或身份选择的请求保留完整列表语义。续页游标在 `listSnapshotTtlMs` 到期或快照淘汰后失效；显式重试先刷新快照再续页。首次发现全部 header，续页复用该目录，只投影选中行。可选 `listDiscoveryCacheMs` 在首批请求之间复用已完成的 header 发现。会话增删会立即使其失效，到期或查询服务被替换后重新发现。显式 `sessions.refresh()` 发送 `fresh: true`，跳过复用。每批仍重新校验访问权限、运行状态与投影提示。
 
 后台 job 的名册行与观测流属于 [`dsh-api-job-controller`](../job-controller/README.zh.md)；控制流只承载投影。
 
@@ -102,6 +100,11 @@ GUI 模型选择要求确切提供方／模型对出现在可用目录中；不�
 |---|---:|---|
 | `nativeOpen` | 平台探测 | 是否能把 Session 工作区路径交给原生桌面打开器 |
 | `listWorkSliceMs` | `16` | 列表工作时间片，单位为毫秒，取正整数；在完整条目之间检查 |
+| `listPageSize` | `50` | 每个后续页的旧会话数量 |
+| `listInitialPerWorkspace` | `5` | 首批每个工作区的最近空闲根会话数量 |
+| `listSnapshotLimit` | `8` | 同时保留的目录快照上限 |
+| `listSnapshotTtlMs` | `60000` | 游标有效期，单位为毫秒 |
+| `listDiscoveryCacheMs` | `0` | 分页刷新之间复用已完成 header 发现的毫秒数；零表示不复用 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-session-controller)是所有受支持字段及其 JSDoc 的完整来源。
 

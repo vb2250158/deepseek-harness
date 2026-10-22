@@ -141,6 +141,8 @@ class FakeSessions implements ISessions {
   readonly fork = vi.fn<ISessions['fork']>(async () => sid('forked'))
   readonly retained: RetainedSession[] = []
   readonly refreshProjections = vi.fn<ISessions['refreshProjections']>(() => Promise.resolve())
+  readonly loadMore = vi.fn<ISessions['loadMore']>(async () => {})
+  readonly ensureListed = vi.fn<ISessions['ensureListed']>(async () => false)
   readonly retain = vi.fn<ISessions['retain']>((target) => {
     const release = vi.fn<() => void>()
     const sessionId = typeof target === 'string' ? target : target.childSessionId
@@ -320,6 +322,23 @@ function lastOpening(open: MockInstance<UiWorkspaceService['openWorkspace']>): P
 }
 
 describe('UiWorkspaceService', () => {
+  it('restores an older saved selection through one targeted metadata lookup', async () => {
+    persistSelection({ sessionId: sid('older') })
+    const partial = { ...sessionState([summary('recent')]), complete: false }
+    const b = bench({
+      sessions: partial,
+      workspaces: workspaceState([workspace('alpha', [sid('recent'), sid('older')])]),
+      configureSessions: (sessions) => {
+        sessions.ensureListed.mockImplementation(async (id) => {
+          sessions.list.set({ ...sessionState([summary('recent'), summary(id)]), complete: false })
+          return true
+        })
+      },
+    })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledWith('older', { source: 'mainView' }) })
+    expect(b.sessions.ensureListed).toHaveBeenCalledExactlyOnceWith('older')
+    expect(b.sessions.loadMore).not.toHaveBeenCalled()
+  })
   it('prepares and selects the default Workspace after both startup baselines', async () => {
     const b = bench({ configureWorkspaces: (workspaces) => {
       workspaces.initializeDefault.mockImplementation(async () => {
