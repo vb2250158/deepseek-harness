@@ -5,6 +5,21 @@ import { join } from 'node:path'
 import { DesktopSharedWebBackend, readSharedWebBackendConfig } from '../src/shared-web-backend.ts'
 
 const stringify = JSON.stringify
+
+it('declines original-file authorization without requesting or interpreting a renderer resource', async () => {
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  const backend = new DesktopSharedWebBackend('unused', {
+    url: 'http://127.0.0.1:3180/', timeoutMs: 1000, cookieLifetimeMs: 1000,
+  })
+  expect(await backend.resolveDragResource('file:///private/local-file')).toBeNull()
+  expect(fetch).not.toHaveBeenCalled()
+  const aborted = new AbortController()
+  aborted.abort()
+  await expect(backend.resolveDragResource('resource', aborted.signal)).rejects.toThrow()
+  await backend.stop()
+  await expect(backend.resolveDragResource('resource')).rejects.toThrow()
+})
 const roots: string[] = []
 afterEach(async () => {
   vi.unstubAllGlobals()

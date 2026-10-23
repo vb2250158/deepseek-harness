@@ -10,6 +10,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as nativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { createProcessDeepSeekHarness, validatedSessionEvent } from '../src/api.ts'
@@ -22,6 +23,7 @@ const fakeRuntime = fileURLToPath(new URL('./fake-runtime.ts', import.meta.url))
 it('ends the failed run at its first idle while projecting pending work as a separate turn', async () => {
   const ctx = new Context()
   const trace: HarnessNotification[] = []
+  const failures: string[] = []
   const adapter = new MockAdapter([textResponse('after')])
   try {
     await ctx.plugin(LlmRuntime)
@@ -29,6 +31,7 @@ it('ends the failed run at its first idle while projecting pending work as a sep
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(nativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     ctx.llm.registerAdapter(['mock'], adapter)
@@ -38,7 +41,7 @@ it('ends the failed run at its first idle while projecting pending work as a sep
       if (!failed) { failed = true; throw new Error('prompt hook broke') }
       return { kind: 'enter' as const, messages }
     })
-    ctx.on('agent/error', () => {})
+    ctx.on('agent/error', ({ error }) => { failures.push(error instanceof Error ? error.message : String(error)) })
     ctx.on('agent/status', ({ agent: subject, status }) => {
       if (subject === agent) trace.push({ method: 'session.status', params: { sessionId: agent.id, status } })
     })
@@ -57,6 +60,7 @@ it('ends the failed run at its first idle while projecting pending work as a sep
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'second' }], source: { kind: 'user' } }))
     await firstIdle
     await agent.whenIdle()
+    expect(failures).toEqual(['prompt hook broke'])
     expect(adapter.requests).toHaveLength(1)
     expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('second')
     expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('first')

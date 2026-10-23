@@ -516,6 +516,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
         modifiedAt: Number(identity.mtimeMs),
+        location: { kind: 'jsonl', path: selected.sourcePath },
       }
     } catch (error: unknown) {
       options?.signal?.throwIfAborted()
@@ -565,6 +566,7 @@ class JsonlSessionPersistence extends SessionPersistence {
           : fileRevision(identity),
         sizeBytes: Number(identity.size),
         modifiedAt: Number(identity.mtimeMs),
+        location: { kind: 'jsonl', path: artifact.path },
       })
     }
     for (const [id, entry] of pending) {

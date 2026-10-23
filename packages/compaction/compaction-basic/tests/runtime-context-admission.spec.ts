@@ -8,7 +8,7 @@ import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepse
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import BasicCompaction from '@deepseek-ai/dsh-compaction-basic'
 import { expect, it } from 'vitest'
 
@@ -53,6 +53,13 @@ it('retains required cwd in the first request after proactive compaction with op
     }))
     await ctx.plugin(BasicCompaction, {
       auto: true, thresholdRatio: 0.5, headroomTokens: 0, retainTokens: 20, maxTokens: 32, compactionRetries: 0,
+    })
+    // Retain the initial request so next-step compaction covers its cwd snapshot.
+    ctx.on('compaction/pressure-policy', (_request, next) => {
+      const policy = next()
+      return adapter.conversation.length === 0
+        ? { ...policy, thresholdTokens: Number.MAX_SAFE_INTEGER }
+        : policy
     })
     const harness = await mountAgentLoopTestHarness(ctx)
     const agent = await harness.create(SessionId('compaction-admission'), { provider: 'mock', model: 'mock' }, { cwd: root })

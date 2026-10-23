@@ -10,6 +10,7 @@ import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import SessionController from '../src/index.ts'
+import { createSessionTestController, TEST_IMAGE_LIMITS } from './test-remote.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiSessionList } from '../src/list.ts'
 
@@ -50,7 +51,9 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(RemoteAccessService)
+  ctx.provide('attachments', { imageLimits: TEST_IMAGE_LIMITS } as never)
   const list = new ApiSessionList(ctx, workSliceMs)
+  await list.initialize()
   const clock = { now: 0 }
   const prepared = new Map<string, Session>()
   const agents = new Map<string, { status: Agent['status'] }>()
@@ -233,7 +236,7 @@ describe('Session-list pages', () => {
     const cache = vi.spyOn(h.ctx.sessionProjectionCache, 'cachedSnapshot')
     const first = await h.list.page({ paged: true }, pagePolicy)
     expect(first.items.map(row => row.sessionId)).toEqual(['row-5', 'row-4'])
-    expect(cache.mock.calls.filter(([, keys]) => keys === undefined)).toHaveLength(2)
+    expect(cache.mock.calls.filter(([, keys]) => keys === h.ctx.sessionProjections.summaryKeys())).toHaveLength(2)
     const second = await h.list.page({ cursor: first.nextCursor! }, pagePolicy)
     const last = await h.list.page({ cursor: second.nextCursor! }, pagePolicy)
     expect([...first.items, ...second.items, ...last.items].map(row => row.sessionId))
@@ -354,7 +357,10 @@ describe('Session-list work slices', () => {
     h.ctx.provide('fileUploads', { registerAgentResolver: () => dispose } as never)
     h.ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) } as never)
     h.ctx.provide('workspaceRegistry', { list: () => [], archivedSessionIds: [] } as never)
-    const controller = new SessionController(h.ctx, { nativeOpen: false, listWorkSliceMs: 4 }, { canOpenPath: () => false })
+    const controller = await createSessionTestController(h.ctx, {
+      nativeOpen: false, listWorkSliceMs: 4, canOpenPath: () => false,
+      defaultModelSelection: () => ({ provider: 'test', model: 'test' }), cwd: '/tmp',
+    })
     const yieldWork = vi.spyOn(scheduler, 'yield')
     const result = await controller.list({}, new AbortController().signal)
     expect(result.items).toHaveLength(3)
