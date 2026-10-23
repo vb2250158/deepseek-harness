@@ -1,0 +1,65 @@
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash
+
+- id: agent-instructions
+  disabled: true
+
+- id: working-directory
+  disabled: true
+
+- id: tool-working-directory
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- id: subagent
+  disabled: true
+
+- id: subagent-spawn-in-process
+  disabled: true
+
+- id: subagent-fork-in-process
+  disabled: true
+
+- id: tool-subagent-control
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: workflow-ptc
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: hooks-claude-code
+  disabled: true
+
+- id: hooks-codex
+  disabled: true
+
+- id: skill
+  disabled: true
+
+- id: skill-filesystem
+  disabled: true
+
+- id: tool-skill
+  disabled: true
+
+- id: system-prompt
+  config:
+    personaPrefix: 'The selected model is {{model}}. Reply briefly without tools.'

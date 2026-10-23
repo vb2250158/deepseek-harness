@@ -17,7 +17,7 @@ import {
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
 } from './types.ts'
 import type {
-  SessionListMetadata, SessionProjectionHints, SessionProjectionValues, SessionSearchItem,
+  SessionListMetadata, SessionProjectionHints, SessionSearchItem,
   SessionSearchValue, SessionSummary,
   SessionListRequest, SessionListValue,
 } from './types.ts'
@@ -113,7 +113,14 @@ export class ApiSessionList {
       reset()
       sourceCtx.effect(() => reset, 'api-session.listDiscoverySource')
     })
-    ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
+  }
+
+  /**
+   * Acquire projection readers before exposing dependent operations.
+   * @returns when all required registrations are ready.
+   */
+  async initialize(): Promise<void> {
+    await this.ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
       key: 'sessionListMetadata',
       stateSchema: sessionListMetadataSchema,
       init: () => ({ blank: true, lastPromptAt: null }),
@@ -121,18 +128,17 @@ export class ApiSessionList {
       wire: { viewSchema: sessionListMetadataSchema, view: state => state },
       stateVersion: 1,
     })
-    ctx.inject(['attachments'], (attachmentCtx) => {
-      ctx.sessionProjections.register<'imageLimits', null>({
-        key: 'imageLimits',
-        stateSchema: z.null(),
-        init: () => null,
-        apply: state => state,
-        wire: {
-          viewSchema: imageLimitsSchema,
-          view: () => attachmentCtx.attachments.imageLimits,
-        },
-        stateVersion: 1,
-      })
+    await this.ctx.sessionProjections.register<'imageLimits', null>({
+      key: 'imageLimits',
+      stateSchema: z.null(),
+      init: () => null,
+      apply: state => state,
+      wire: {
+        viewSchema: imageLimitsSchema,
+        view: () => this.ctx.attachments.imageLimits,
+        summary: false,
+      },
+      stateVersion: 1,
     })
   }
 
@@ -475,16 +481,21 @@ export class ApiSessionList {
     session: Session | undefined,
   ): SessionProjectionHints | undefined {
     try {
+      // The registry derives the summary key set from its registrations and
+      // hands back one stable set until the key table changes; both faces below
+      // serve only those keys, so a list row cannot carry a unit that declares
+      // itself summary-excluded.
+      const keys = this.ctx.sessionProjections.summaryKeys()
       if (session !== undefined) {
         // The live registry computed the block for this Session: its watermark
         // shares the sequence space of the Session's baselines and frames.
-        return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session))
+        return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session, keys))
       }
       // A cold row reads the persisted cache by header alone; the cache serves
       // seeded and unseeded lifecycles alike because a listing never seeds a
       // fold. The watermark is the stored record's own.
       const cache = this.ctx.get('sessionProjectionCache')
-      return hintsOf('cached', cache?.cachedSnapshot(header) ?? cache?.cachedPredecessorTitle(header))
+      return hintsOf('cached', cache?.cachedSnapshot(header, keys) ?? cache?.cachedPredecessorTitle(header))
     } catch (error) {
       this.ctx.logger.warn(
         `api-session.list: projection column for "${header.id}" failed; serving the row without it: ${String(error)}`,
@@ -495,7 +506,8 @@ export class ApiSessionList {
 }
 
 /**
- * Wrap one projection block as Session-list hints of the named sequence space.
+ * Wrap one summary projection block as Session-list hints of the named sequence space.
+ * The block is the summary key set's values, not every value the source holds.
  * @param kind - which sequence space the block's watermark belongs to.
  * @param block - the block, or `undefined` when no source served one.
  * @returns the hints, or `undefined` when the block is absent or carries no value.
@@ -505,9 +517,9 @@ function hintsOf(
   block: ProjectionSnapshot | undefined,
 ): SessionProjectionHints | undefined {
   if (block === undefined || Object.keys(block.values).length === 0) return undefined
-  // Listing hints contain every wire value the source currently holds but
-  // remain partial: missing cells and cache rows are never materialized here.
-  return { kind, asOfSeq: block.asOfSeq, values: block.values as SessionProjectionValues }
+  // Listing hints contain every summary wire value the source currently holds
+  // but remain partial: missing cells and cache rows are never materialized here.
+  return { kind, asOfSeq: block.asOfSeq, values: block.values }
 }
 
 function normalizeSearchQuery(query: string): string {

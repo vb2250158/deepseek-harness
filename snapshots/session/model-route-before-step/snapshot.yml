@@ -1,0 +1,8 @@
+version: 1
+scenario: model-route-before-step
+profile: headless
+composition: model-route-before-step
+recording: authored
+header:
+  class: model-route-before-step
+  pin: true

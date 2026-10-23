@@ -57,7 +57,7 @@ export function installDraftCompletion(editor: LexicalEditor, provider: DraftCom
     const controller = new AbortController()
     request = controller
     origin = prefix
-    const timeout = setTimeout(() => controller.abort(new Error('completion timeout')), provider.timeoutMs)
+    const timeout = setTimeout(() =>{  controller.abort(new Error('completion timeout')) }, provider.timeoutMs)
     try {
       for await (const delta of provider.complete({ prefix, signal: controller.signal })) {
         if (disposed || controller.signal.aborted || request !== controller || read() !== prefix) break
@@ -118,11 +118,12 @@ export function installDraftCompletion(editor: LexicalEditor, provider: DraftCom
       return true
     }, COMMAND_PRIORITY_HIGH),
     editor.registerCommand(KEY_TAB_COMMAND, (event) => {
-      if (event?.shiftKey || event?.ctrlKey || event?.metaKey || event?.altKey || event?.isComposing
-        || event?.keyCode === 229 || ghost === '' || read() !== origin) return false
+      if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.isComposing
+        // oxlint-disable-next-line typescript/no-deprecated -- Legacy IME key events use 229 before isComposing becomes true.
+        || event.keyCode === 229 || ghost === '' || read() !== origin) return false
       const text = ghost
       cancel()
-      event?.preventDefault()
+      event.preventDefault()
       editor.update(() => {
         const selection = $getSelection()
         if ($isRangeSelection(selection) && selection.isCollapsed()) selection.insertText(text)
@@ -137,7 +138,7 @@ export function installDraftCompletion(editor: LexicalEditor, provider: DraftCom
   return () => {
     disposed = true
     cancel()
-    off.forEach(dispose => dispose())
+    off.forEach((dispose) =>{  dispose() })
     bind(null, root)
   }
 }

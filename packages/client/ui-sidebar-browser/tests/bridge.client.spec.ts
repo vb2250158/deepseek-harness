@@ -19,7 +19,7 @@ it('keeps tabs scoped to their Session and withdraws the exact controller regist
   const release = service.register(session, face)
   expect(() => service.register(session, face)).toThrow('already registered')
   expect(service.read(session, tab)).toBeUndefined()
-  expect(() => service.navigate(session, tab, 'https://example.test')).toThrow('not mounted')
+  expect(() =>{  service.navigate(session, tab, 'https://example.test') }).toThrow('not mounted')
   const host = document.createElement('div')
   host.id = 'bridge-viewport'
   document.body.append(host)
@@ -27,7 +27,7 @@ it('keeps tabs scoped to their Session and withdraws the exact controller regist
   try {
     face.mount({ tabId: tab, signal: lifetime.signal, viewportId: host.id, applicationOrigin: 'https://dsh.test',
       initial: undefined, initialUrl: 'https://example.test/one', openTab: vi.fn() })
-    expect(() => service.reload(other, tab)).toThrow('not mounted')
+    expect(() =>{  service.reload(other, tab) }).toThrow('not mounted')
     const element = host.querySelector('iframe')!
     const rect = new DOMRect(0, 0, 100, 100)
     const rects: DOMRectList = {
@@ -44,13 +44,13 @@ it('keeps tabs scoped to their Session and withdraws the exact controller regist
     expect(post).toHaveBeenCalledWith({ challenge: 'fixture' }, '*')
     host.hidden = true
     expect(lease.isVisible()).toBe(false)
-    expect(() => lease.send({ challenge: 'hidden' })).toThrow('no longer visible')
+    expect(() =>{  lease.send({ challenge: 'hidden' }) }).toThrow('no longer visible')
     host.hidden = false
     service.navigate(session, tab, 'https://example.test/two')
     expect(service.read(session, tab)?.frame.target?.url).toBe('https://example.test/two')
     expect(store.getSnapshot().byTab[tab]?.entries.at(-1)?.url).toBe('https://example.test/two')
     expect(lease.isVisible()).toBe(false)
-    expect(() => lease.send({ challenge: 'replaced' })).toThrow('no longer visible')
+    expect(() =>{  lease.send({ challenge: 'replaced' }) }).toThrow('no longer visible')
     service.navigate(session, tab, 'javascript:alert(1)')
     expect(service.read(session, tab)?.addressFailure).toBeDefined()
     expect(service.read(session, tab)?.frame.target?.url).toBe('https://example.test/two')

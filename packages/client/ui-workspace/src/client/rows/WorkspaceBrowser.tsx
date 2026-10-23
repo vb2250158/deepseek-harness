@@ -17,7 +17,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
+  AnimatedRows, Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
   IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular,
   IconFlatListOutlineRegular, IconFolderCloseRegular, IconProjectAddOutlineRegular,
   IconQueueOutlineRegular, IconSearchOutlineRegular, IconSlidersTwoOutlineRegular,
@@ -37,7 +37,6 @@ import {
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
-import { AnimatedRows } from './AnimatedRows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -254,9 +253,11 @@ type SessionTreeProps = Pick<
   WorkspaceBrowserProps,
   'useSessionStatus' | 'startSession' | 'open'
   | 'insertWorkspaceBefore' | 't' | 'usePanelInfo'
+  | 'useRemoteAccess' | 'useSessionAccess' | 'useWorkspaceAccess'
 > & PropsRenderSlots<
   | 'sidebar.workspaces.session.menu.item'
   | 'sidebar.workspaces.session.row.action'
+  | 'sidebar.session.row.trailing'
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
   | 'sidebar.session.row.badges'
@@ -321,7 +322,7 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreePro
 function SessionTree({
   list, loadMoreSessions, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
-  workspaceReady, animationResetKey, usePanelInfo,
+  workspaceReady, animationResetKey, usePanelInfo, useRemoteAccess, useSessionAccess, useWorkspaceAccess,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
   renderSlot,
   insertWorkspaceBefore,
@@ -565,6 +566,8 @@ function SessionTree({
           <ProjectRowItem
             newShortcut={shortcuts.find(row => row.id === 'session.new')}
             group={group}
+            useRemoteAccess={useRemoteAccess}
+            useWorkspaceAccess={useWorkspaceAccess}
             containsCurrentDescendant={currentAncestors.has(group.key)}
             home={home}
             t={t}
@@ -642,6 +645,8 @@ function SessionTree({
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
               drag={dragProps}
+              home={home}
+              useSessionAccess={useSessionAccess}
               t={t}
             />
           )
@@ -690,6 +695,7 @@ function SessionTree({
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
       <AnimatedRows
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
+        role="tree"
         label={t('section.sessions')}
         rowKeys={rowKeys}
         ready={list.phase === 'ready' && workspaceReady && !nativeDragActive}
@@ -707,12 +713,13 @@ function SessionTree({
 
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
-  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, open, onSessionRenameRequest,
+  list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionAccess, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, t,
+  revealSessionId, onSessionRevealed, renderSlot, home, t,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
+  | 'useSessionAccess'
   | 'open'
   | 'onSessionRenameRequest'
   | 'renderSlot'
@@ -724,6 +731,7 @@ function FlatList({
   | 'onSessionRevealed'
   | 'rowState'
   | 'onLeaveArchivedOnly'
+  | 'home'
   | 't'
 > & {
   list: SessionListState
@@ -753,6 +761,7 @@ function FlatList({
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
       <AnimatedRows
         className={clsx(css.list, css.flatList)}
+        role="tree"
         label={t('section.sessions')}
         rowKeys={rows.length === 0 ? ['empty'] : rows.map(row => `session:${row.id}`)}
         ready={list.phase === 'ready' && workspaceReady && drag === null}
@@ -777,6 +786,7 @@ function FlatList({
               onReveal={node.id === revealSessionId
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
+              useSessionAccess={useSessionAccess}
               drag={{
                 start: () => {
                   dropCommitted.current = false
@@ -798,6 +808,7 @@ function FlatList({
                   dropCommitted.current = false
                 },
               }}
+              home={home}
               t={t}
             />
           )
@@ -829,8 +840,9 @@ function SearchResults({
   resultLimit,
   renderSlot,
   usePanelInfo,
+  useSessionAccess,
   t,
-}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'renderSlot'> & {
+}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'renderSlot' | 'useSessionAccess'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
   /** Search matches follow the archived filter selected for the list. */
@@ -877,6 +889,7 @@ function SearchResults({
               onOpen={open}
               onUnarchive={onUnarchive}
               renderSlot={renderSlot}
+              useSessionAccess={useSessionAccess}
               t={t}
             />
           ))}
@@ -921,6 +934,9 @@ export function WorkspaceBrowser({
   expandSidebar,
   useSessions,
   useSessionStatus,
+  useRemoteAccess,
+  useSessionAccess,
+  useWorkspaceAccess,
   useWorkspaces,
   useStore,
   actions,
@@ -1429,6 +1445,7 @@ export function WorkspaceBrowser({
           ? (
             <SearchResults
               usePanelInfo={usePanelInfo}
+              useSessionAccess={useSessionAccess}
               useSessions={useSessions}
               useSessionStatus={useSessionStatus}
               open={openSearchResult}
@@ -1446,6 +1463,7 @@ export function WorkspaceBrowser({
           : groupBy === 'flat'
             ? (
               <FlatList
+                useSessionAccess={useSessionAccess}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 sessionIds={orderedFlatSessionIds}
@@ -1460,12 +1478,16 @@ export function WorkspaceBrowser({
                 setSessionOrder={saveSessionOrder}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
+                home={home}
                 t={t}
               />
             )
             : (
               <SessionTree
                 loadMoreSessions={loadMoreSessions}
+                useRemoteAccess={useRemoteAccess}
+                useSessionAccess={useSessionAccess}
+                useWorkspaceAccess={useWorkspaceAccess}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 shortcuts={shortcuts}

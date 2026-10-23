@@ -11,11 +11,14 @@ import type {
   AgentOptions,
   AgentStatus,
   CancelOptions,
+  ModelSelection,
+  ModelSelectionProjectionState,
   InboxTarget,
+  InboxState,
   PreStepDecision,
   RequestErrorAction,
 } from '@deepseek-ai/dsh-agent'
-import { agentEvents, assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { AgentModel, agentEvents, assembleContextFor } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, LlmCallConfig, Message, PreparedLlmCall } from '@deepseek-ai/dsh-llm'
 import {
   LlmError,
@@ -31,13 +34,15 @@ import type { EpochHeader, RequestContext, Session, SessionId, SessionSeq, TurnE
 import { canonicalHeader, headerEquals, ToolCallRecovery } from '@deepseek-ai/dsh-session'
 import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-session-projection'
+import { ToolActivationError, ToolBatchExecutionError } from '@deepseek-ai/dsh-tools'
+import type { ResolvedToolSet } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import { ReactLoopInbox } from './inbox.ts'
 import { RuntimeContextProjection } from './runtime-context.ts'
 import { AssistantStreamAttempt } from './assistant-stream.ts'
 import { SystemPromptProjection } from './runtime-context.ts'
-import { executeToolCalls } from './tool-calls.ts'
+
+type PendingWake = 'none' | 'live' | 'deferred'
 
 type Phase =
   | { kind: 'idle'; lastTurn: number }
@@ -45,9 +50,9 @@ type Phase =
     kind: 'maintenance'
     abort: AbortController
     lastTurn: number
-    wakeRequested: boolean
+    wakeRequested: PendingWake
   }
-  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean; continueWithoutInput: boolean }
+  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: PendingWake; continueWithoutInput: boolean }
 
 type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
 
@@ -58,6 +63,9 @@ type PreparedStep =
     messages: UserMessage[]
     startsRequestSeries?: true
     assembly: PromptAssembly
+    selection: Readonly<ModelSelection>
+    /** Admission shared by the step's declarations and dispatch; the turn disposes it after the step. */
+    toolSet: ResolvedToolSet
   }
 
 /** Remove adapter-derived values before plugins propose the next request config. */
@@ -96,6 +104,7 @@ function abortedCancelCause(signal: AbortSignal): AgentCancelCause | undefined {
 
 /** Drives one session through turn and step boundaries. */
 export class ReactLoopAgent implements Agent {
+  readonly model: AgentModel
   readonly inbox: ReactLoopInbox
   private phase: Phase
   private activityDone: Promise<void> = Promise.resolve()
@@ -124,14 +133,16 @@ export class ReactLoopAgent implements Agent {
     public readonly id: SessionId,
     public readonly options: AgentOptions,
     public readonly session: Session,
+    readModel: () => ModelSelectionProjectionState,
+    readInbox: () => InboxState,
+    lastTurn: number,
   ) {
     this.requestSurfaceGeneration = session.surface.contentGeneration
     this.dispatch = agentEvents(loopCtx, this)
     this.scope = createScope(loopCtx, this)
     this.ctx = this.scope.ctx
-    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch)
-    /* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
-    const lastTurn = this.loopCtx.sessionProjections.stateOf(session, 'turnBoundary')?.lastTurn ?? 0
+    this.model = new AgentModel(readModel, session, options)
+    this.inbox = new ReactLoopInbox(readInbox, session, this.dispatch)
     this.phase = { kind: 'idle', lastTurn }
     this.runtimeContext = new RuntimeContextProjection(this.ctx, session)
     this.systemPrompt = new SystemPromptProjection(session)
@@ -157,7 +168,7 @@ export class ReactLoopAgent implements Agent {
     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
     this.inbox.splice(resolvedTarget, Infinity, 0, [message])
-    if (wakeup) this.wakeDriver(wakingAfterAbort)
+    if (wakeup) this.wakeDriver()
   }
 
   followup(input: UserMessage): void {
@@ -175,6 +186,7 @@ export class ReactLoopAgent implements Agent {
   /** 恢复资格在启动驱动前同步核验，避免过期请求或重复请求开启新轮次。 */
   private continueTurn(startSeq: number, kind: 'interrupted' | 'quota'): boolean {
     if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing recovery scan retained during the rc.3 merge.
     const events = this.session.snapshotEvents()
     const start = events.findLast(event => event.type === 'turn/start'
       && event.seq >= this.session.inheritedEventCount)
@@ -189,7 +201,7 @@ export class ReactLoopAgent implements Agent {
         && !(failure.code === 'PI_AI_ERROR' && /402 status code/u.test(failure.message))) return false
     }
     if (end !== undefined && events.some(event => event.type === 'user/message' && event.seq > end.seq)) return false
-    this.wakeDriver(false, true)
+    this.wakeDriver(true)
     return true
   }
 
@@ -204,7 +216,7 @@ export class ReactLoopAgent implements Agent {
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
     if (!options.keepInbox) {
       this.inbox.clear()
-      if (this.phase.kind !== 'idle') this.phase.wakeRequested = false
+      if (this.phase.kind !== 'idle') this.phase.wakeRequested = 'none'
     }
     if (this.phase.kind !== 'idle') this.phase.abort.abort(cause)
   }
@@ -216,7 +228,7 @@ export class ReactLoopAgent implements Agent {
       kind: 'maintenance',
       abort: new AbortController(),
       lastTurn: this.phase.lastTurn,
-      wakeRequested: false,
+      wakeRequested: 'none',
     }
     this.setPhase(maintenance)
     this.activityDone = done.promise
@@ -226,29 +238,26 @@ export class ReactLoopAgent implements Agent {
       } finally {
         this.setPhase({ kind: 'idle', lastTurn: maintenance.lastTurn })
         const cause = abortedCancelCause(maintenance.abort.signal)
-        if (cause?.kind !== 'disposed' && maintenance.wakeRequested && this.inbox.hasPending) this.wakeDriver()
+        if (cause?.kind !== 'disposed' && maintenance.wakeRequested === 'deferred' && this.inbox.hasPending) this.wakeDriver()
         done.resolve()
       }
     })()
   }
 
   /**
-   * Start one driver, or latch its wake behind maintenance or an aborted
-   * activity. A wake sent while idle always opens its turn boundary, even
+   * Start one driver, or retain a wake until the active driver or maintenance
+   * finishes. A wake sent while idle always opens its turn boundary, even
    * when its message was cleared; only a latched replay is suppressed when
    * the queue no longer holds the wake.
-   * @param wakeAfterAbort - the {@link send} classification, captured before
-   *   the inbox insertion so a reentrant cancel cannot reclassify it.
    * @param continueWithoutInput - 允许已核验的恢复轮次在无新输入时发起首次请求。
    */
-  private wakeDriver(wakeAfterAbort = false, continueWithoutInput = false): void {
+  private wakeDriver(continueWithoutInput = false): void {
     if (this.phase.kind !== 'idle') {
-      // Maintenance and aborted drivers cannot deliver the wake: latch it for
-      // replay at convergence. Live drivers claim queued work themselves;
-      // disposal never latches, so teardown waits on no model turn.
+      // A live driver normally claims this input; a failed one leaves the
+      // explicit wake for convergence. Non-waking context never sets it.
       const reason = abortedCancelCause(this.phase.abort.signal)
-      if (reason?.kind !== 'disposed' && (this.phase.kind === 'maintenance' || wakeAfterAbort)) {
-        this.phase.wakeRequested = true
+      if (reason?.kind !== 'disposed') {
+        this.phase.wakeRequested = this.phase.kind === 'maintenance' || this.phase.abort.signal.aborted ? 'deferred' : 'live'
       }
       return
     }
@@ -259,7 +268,7 @@ export class ReactLoopAgent implements Agent {
       abort: new AbortController(),
       turn: this.phase.lastTurn,
       step: 0,
-      wakeRequested: false,
+      wakeRequested: 'none',
       continueWithoutInput,
     })
     this.loopCtx.agents.withInitiator(this, () => this.kick()).then(driver.resolve, driver.reject)
@@ -295,7 +304,8 @@ export class ReactLoopAgent implements Agent {
         this.setPhase({ kind: 'idle', lastTurn: turn })
         // A non-cancelled failure can leave a waking message behind its terminal
         // boundary. Replay it once idle instead of requiring another send.
-        if ((wakeRequested || failed) && this.inbox.hasPending) this.wakeDriver()
+        if (this.inbox.hasPending && (wakeRequested === 'deferred'
+          || (failed && (wakeRequested === 'live' || this.inbox.nextTurn.length > 0)))) this.wakeDriver()
       }
     }
   }
@@ -304,23 +314,42 @@ export class ReactLoopAgent implements Agent {
     /* v8 ignore next -- private callers establish the running phase before proposing a step */
     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
+    this.phase.wakeRequested = 'none'
     const claimed = this.inbox.claim(target, position.turn)
-    const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
+    const sourceSelection = this.model.current()
+    if (sourceSelection === undefined) {
+      throw new Error(`agent "${this.id}" has no provider/model: set AgentOptions.provider and AgentOptions.model or record a model selection`)
+    }
+    const selection = deepFreeze(structuredClone(await this.dispatch.waterfall(
+      'agent/resolve-model', { ...position, signal, sourceSelection },
+      () => Promise.resolve(sourceSelection),
+    )))
     signal.throwIfAborted()
-    const decision = await this.dispatch.waterfall(
-      'agent/pre-step', { messages: claimed, ...position, signal },
-      (): Promise<PreStepDecision> => {
-        const sections = renderContextSections(assembly)
-        const context = this.runtimeContext.project(joinContextSections(sections), sections)
-        return Promise.resolve<PreStepDecision>({
-          kind: 'enter',
-          messages: context === undefined ? claimed : [...claimed, context],
-        })
-      },
-    )
-    signal.throwIfAborted()
-    if (decision.kind === 'reject') return decision
-    return { ...decision, assembly }
+    const toolSet = await this.loopCtx.tools.resolve({ agent: this, modelSelection: selection, signal })
+    try {
+      const assembly = await this.loopCtx.systemPrompt.assemble({ ...assembleContextFor(this, signal), modelSelection: selection, toolSet })
+      signal.throwIfAborted()
+      const decision = await this.dispatch.waterfall(
+        'agent/pre-step', { messages: claimed, ...position, signal, modelSelection: selection },
+        (): Promise<PreStepDecision> => {
+          const sections = renderContextSections(assembly)
+          const context = this.runtimeContext.project(joinContextSections(sections), sections)
+          return Promise.resolve<PreStepDecision>({
+            kind: 'enter',
+            messages: context === undefined ? claimed : [...claimed, context],
+          })
+        },
+      )
+      signal.throwIfAborted()
+      if (decision.kind === 'reject') {
+        toolSet.dispose()
+        return decision
+      }
+      return { ...decision, assembly, selection, toolSet }
+    } catch (error: unknown) {
+      toolSet.dispose()
+      throw error
+    }
   }
 
   /** Whether the assembled tool schemas differ from the logged request header's. */
@@ -356,43 +385,48 @@ export class ReactLoopAgent implements Agent {
           turnEnds = { kind: 'blocked' }
           return false
         }
-        if (turnEnds && decision.messages.length === 0) break
-        // A removed waking message or an enter decision rewritten to empty
-        // still owns the initial turn boundary, but it spends no model call.
-        if (phase.step === 0 && decision.messages.length === 0 && !phase.continueWithoutInput) {
-          turnEnds = { kind: 'completed' }
-          return false
-        }
-        signal.throwIfAborted()
-        phase.continueWithoutInput = false
-        this.session.append('step/start', { turn, step })
-        phase.step = step
-        const toolRecovery = new ToolCallRecovery()
-        const stopRecovery = this.ctx.on('session/event', (session, event) => {
-          if (session === this.session) toolRecovery.observe(event)
-        })
         try {
-          // max-tokens is sticky: once any step hits the ceiling, later steps
-          // that complete normally must not downgrade the turn outcome.
-          const stepEnd = await this.step(decision)
-          // max-tokens stays sticky: a later completed step must not
-          // downgrade the turn outcome.
-          if (turnEnds === null || turnEnds.kind !== 'max-tokens') turnEnds = stepEnd
-        } catch (error: unknown) {
-          try {
-            for (const event of toolRecovery.results()) {
-              this.session.append('tool/result', event.data, {
-                surfaceOp: 'append',
-                ...event.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: event.sourceEventSeqs },
-              })
-            }
-          } catch (recoveryError: unknown) {
-            throw new AggregateError([error, recoveryError], 'Step failed and its pending tool results could not be recorded', { cause: error })
+          if (turnEnds && decision.messages.length === 0) break
+          // A removed waking message or an enter decision rewritten to empty
+          // still owns the initial turn boundary, but it spends no model call.
+          if (phase.step === 0 && decision.messages.length === 0 && !phase.continueWithoutInput) {
+            turnEnds = { kind: 'completed' }
+            return false
           }
-          throw error
+          signal.throwIfAborted()
+          phase.continueWithoutInput = false
+          this.session.append('step/start', { turn, step })
+          phase.step = step
+          const toolRecovery = new ToolCallRecovery()
+          const stopRecovery = this.ctx.on('session/event', (session, event) => {
+            if (session === this.session) toolRecovery.observe(event)
+          })
+          try {
+            // max-tokens is sticky: once any step hits the ceiling, later steps
+            // that complete normally must not downgrade the turn outcome.
+            const stepEnd = await this.step(decision)
+            // max-tokens stays sticky: a later completed step must not
+            // downgrade the turn outcome.
+            if (turnEnds === null || turnEnds.kind !== 'max-tokens') turnEnds = stepEnd
+          } catch (error: unknown) {
+            try {
+              for (const event of toolRecovery.results()) {
+                this.session.append('tool/result', event.data, {
+                  surfaceOp: 'append',
+                  ...event.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: event.sourceEventSeqs },
+                })
+              }
+            } catch (recoveryError: unknown) {
+              throw new AggregateError([error, recoveryError], 'Step failed and its pending tool results could not be recorded', { cause: error })
+            }
+            throw error
+          } finally {
+            stopRecovery()
+            this.session.append('step/end', { turn, step })
+          }
         } finally {
-          stopRecovery()
-          this.session.append('step/end', { turn, step })
+          // Admission closes once the step's tool batch settles or no step opens.
+          decision.toolSet.dispose()
         }
         signal.throwIfAborted()
         if (turnEnds && this.inbox.nextStep.length === 0) {
@@ -409,13 +443,14 @@ export class ReactLoopAgent implements Agent {
         turnEnds = { kind: 'aborted', reason: cause }
         throw error
       }
-      // Every failure is structured: an `LlmError` keeps its facts, anything
-      // else flattens to `errorChain` text under the `UNKNOWN` code.
+      // Every failure is structured: an `LlmError` keeps its facts, a tool
+      // activation failure keeps its code, and anything else flattens to
+      // `errorChain` text under the `UNKNOWN` code.
       turnEnds = {
         kind: 'error',
         error: error instanceof LlmError
           ? error.failure
-          : { message: errorChain(error), code: 'UNKNOWN' },
+          : { message: errorChain(error), code: error instanceof ToolActivationError ? error.code : 'UNKNOWN' },
       }
       this.throwError(error)
     } finally {
@@ -429,7 +464,7 @@ export class ReactLoopAgent implements Agent {
     if (!this.inbox.hasPending) return false
     phase.abort = new AbortController()
     // A fresh controller makes a latch set on the old one stale: the live driver claims the queue itself.
-    phase.wakeRequested = false
+    phase.wakeRequested = 'none'
     phase.step = 0
     return true
   }
@@ -444,8 +479,10 @@ export class ReactLoopAgent implements Agent {
     const renderedPrompt = renderPrompt(assembly)
     let firstAttempt = true
     while (true) {
-      const { config, preparedCall } = await this.prepareRequest(turn, step, signal)
-      const currentContext = this.loopCtx.systemPrompt.refreshContext(assembly, assembleContextFor(this, signal))
+      const { config, preparedCall } = await this.prepareRequest(turn, step, decision.selection, signal)
+      const currentContext = this.loopCtx.systemPrompt.refreshContext(assembly, {
+        ...assembleContextFor(this, signal), modelSelection: decision.selection,
+      })
       const sections = renderContextSections(currentContext)
       const context = this.runtimeContext.project(joinContextSections(sections), sections)
       signal.throwIfAborted()
@@ -585,11 +622,23 @@ export class ReactLoopAgent implements Agent {
 
         const toolCalls = message.content.filter(block => block.type === 'tool-call')
         if (toolCalls.length === 0) return { kind: 'completed' }
-        const { concluded } = await executeToolCalls(
-          this.loopCtx, turn, step, toolCalls, signal,
-          context => this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context]),
-        )
-        return concluded ? { kind: 'completed' } : null
+        const maxParallelToolCalls = this.loopCtx.agentLoop.config.maxParallelToolCalls.get()
+        try {
+          const result = await this.loopCtx.tools.execute({
+            calls: toolCalls, signal, agent: this, log: { turn, step },
+            maxParallelToolCalls, toolSet: decision.toolSet,
+          })
+          for (const context of result.additionalContexts) {
+            this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context])
+          }
+          return result.concluded ? { kind: 'completed' } : null
+        } catch (error: unknown) {
+          if (!(error instanceof ToolBatchExecutionError)) throw error
+          for (const context of error.partial.additionalContexts) {
+            this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context])
+          }
+          throw error.cause
+        }
       } catch (error: unknown) {
         if (!live.ended) live.abandon()
         throw error
@@ -597,43 +646,34 @@ export class ReactLoopAgent implements Agent {
     }
   }
 
-  /** Resolve request config and bind its adapter before admitting model-visible input. */
+  /** Resolve request config for the step's selection and bind its adapter before admitting model-visible input. */
   private async prepareRequest(
     turn: number,
     step: number,
+    selection: Readonly<ModelSelection>,
     signal: AbortSignal,
   ): Promise<{ config: LlmCallConfig; preparedCall?: PreparedLlmCall }> {
     const { session } = this
 
-    // A loop instance starts from its declared route, restoring only an explicit
-    // effort owned by that exact model. Later steps re-resolve marked defaults.
-    const persistedHeader = session.requestHeader()
-    const persistedConfig = persistedHeader?.config
-    const route = { provider: this.options.provider ?? '', model: this.options.model ?? '' }
-    const persistedReasoningEffort = persistedConfig?.provider === route.provider
-      && persistedConfig.model === route.model
-      && persistedHeader?.adapterDefaults?.reasoningEffort !== true
-      ? persistedConfig.reasoningEffort
-      : undefined
-    const reasoningEffort = this.options.reasoningEffort ?? persistedReasoningEffort
+    // A loop instance seeds output controls from its options until it logs its
+    // own header; later steps re-resolve marked defaults.
     const maxTokens = this.options.maxTokens
-    const seedConfig = deepFreeze(structuredClone(
-      this.requestHeaderLogged
-        // oxlint-disable-next-line typescript/no-non-null-assertion -- the instance logged the header it now folds
-        ? requestProposal(persistedHeader!)
-        : {
-          ...route,
-          ...reasoningEffort === undefined ? {} : { reasoningEffort },
-          ...maxTokens === undefined ? {} : { maxTokens },
-        },
-    ))
+    const persisted: Partial<LlmCallConfig> = this.requestHeaderLogged
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- the instance logged the header it now folds
+      ? requestProposal(session.requestHeader()!)
+      : maxTokens === undefined ? {} : { maxTokens }
+    const { provider: _provider, model: _model, reasoningEffort: _effort, ...controls } = persisted
+    const seedConfig = deepFreeze(structuredClone({ ...controls, ...selection }))
     const proposedConfig = await this.dispatch.waterfall(
       'agent/request', { turn, step, signal },
       () => Promise.resolve(seedConfig),
     )
     signal.throwIfAborted()
-    if (!proposedConfig.provider || !proposedConfig.model) {
-      throw new Error(`agent "${this.id}" has no provider/model: set AgentOptions.provider and AgentOptions.model or supply both via the agent/request waterfall`)
+    if (proposedConfig.provider !== selection.provider || proposedConfig.model !== selection.model) {
+      throw new Error(`agent "${this.id}": agent/request proposed "${proposedConfig.provider}/${proposedConfig.model}" after step preparation fixed "${selection.provider}/${selection.model}"; use agent.model.select() before step preparation`)
+    }
+    if (proposedConfig.reasoningEffort !== selection.reasoningEffort) {
+      throw new Error(`agent "${this.id}": agent/request proposed reasoning effort "${proposedConfig.reasoningEffort ?? 'adapter default'}" after step preparation fixed "${selection.reasoningEffort ?? 'adapter default'}"; use agent.model.select() before step preparation`)
     }
     let config: LlmCallConfig
     let preparedCall: PreparedLlmCall | undefined

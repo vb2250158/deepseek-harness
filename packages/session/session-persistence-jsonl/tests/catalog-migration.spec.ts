@@ -305,6 +305,12 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
     const f = await fixture()
     const childPath = await f.write('child', [], true)
     expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', mode: 'unknown' } }])
+    // oxlint-disable-next-line typescript/unbound-method -- Each invocation below explicitly supplies its native WeakRef receiver.
+    const deref: (this: WeakRef<object>) => object | undefined = WeakRef.prototype.deref
+    vi.spyOn(WeakRef.prototype, 'deref').mockImplementation(function (this: WeakRef<object>) {
+      const value = deref.call(this)
+      return value !== undefined && 'status' in value && value.status === 'prepared' ? undefined : value
+    })
     await f.write('child', [f.descriptor], true)
     await expect(f.ctx.sessionPersistence.open(f.parent, 'write')).rejects.toThrow(childPath)
     const parentPath = generationLogPath(f.root, undefined, f.parent, 3, compression)
