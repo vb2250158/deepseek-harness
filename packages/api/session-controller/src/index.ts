@@ -10,6 +10,7 @@ import { errorChain, ReasoningEffortId, type MessageSource } from '@deepseek-ai/
 import type {} from '@deepseek-ai/dsh-client-file-upload'
 import { canOpenNativePath, nativeFileManager, nativeFileApplications, openNativeFileApplication, openNativeAssociatedPath, revealNativePath } from '@deepseek-ai/dsh-native-command'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { Remote, RemoteError, TypertRemoteService, principalOf, type TypertResourceResolveInput } from '@deepseek-ai/dsh-typert-protocol'
@@ -18,6 +19,7 @@ import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
 import {
   ApiSessionAgentController,
+  inspectApiSession,
   type ApiSessionAgentResult,
 } from './agent.ts'
 import { SessionCommandController, hasPromptContent } from './commands.ts'
@@ -278,6 +280,28 @@ export class SessionController extends TypertRemoteService {
    */
   resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult> {
     return this.agents.resolveAgent(sessionId)
+  }
+
+  /**
+   * Inspect one attached or persisted Session without activating its Agent.
+   * @param sessionId - durable Session identity.
+   * @param signal - optional caller cancellation for persistence reads.
+   * @returns the current attached state or persisted header and event prefix.
+   */
+  inspect(
+    sessionId: SessionId,
+    signal?: AbortSignal,
+  ): Promise<SessionInspection> {
+    const attached = this.ctx.sessions.get(sessionId)
+    if (attached !== undefined) {
+      return Promise.resolve({
+        meta: attached.header,
+        inheritedEventCount: attached.inheritedEventCount,
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
+        events: attached.snapshotEvents(),
+      })
+    }
+    return inspectApiSession(this.ctx, sessionId, signal)
   }
 
   /**

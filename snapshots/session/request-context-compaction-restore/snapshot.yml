@@ -1,0 +1,9 @@
+version: 1
+scenario: request-context-compaction-restore
+profile: headless
+composition: request-context-compaction-restore
+recording: authored
+header:
+  class: request-context-compaction-restore
+  pin: true
+  changes: 1

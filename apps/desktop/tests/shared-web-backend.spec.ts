@@ -5,6 +5,21 @@ import { join } from 'node:path'
 import { DesktopSharedWebBackend, readSharedWebBackendConfig } from '../src/shared-web-backend.ts'
 
 const stringify = JSON.stringify
+
+it('declines original-file authorization without requesting or interpreting a renderer resource', async () => {
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  const backend = new DesktopSharedWebBackend('unused', {
+    url: 'http://127.0.0.1:3180/', timeoutMs: 1000, cookieLifetimeMs: 1000,
+  })
+  expect(await backend.resolveDragResource('file:///private/local-file')).toBeNull()
+  expect(fetch).not.toHaveBeenCalled()
+  const aborted = new AbortController()
+  aborted.abort()
+  await expect(backend.resolveDragResource('resource', aborted.signal)).rejects.toThrow()
+  await backend.stop()
+  await expect(backend.resolveDragResource('resource')).rejects.toThrow()
+})
 const roots: string[] = []
 afterEach(async () => {
   vi.unstubAllGlobals()
@@ -56,9 +71,6 @@ it('uses the existing signing record without changing credentials, and detaches 
   expect(() => backend.request('http://127.0.0.1:4190/')).toThrow('another origin')
   for (const action of ['inspect', 'lock', 'unlock'] as const) expect(await backend.updateTasks(action)).toBe(false)
   expect(await backend.inspectQuit()).toEqual({ activeTasks: false, scheduledTasks: false })
-  expect(await backend.resolveDragResource('session-file:test')).toBeNull()
-  expect(() => backend.resolveDragResource('session-file:test', AbortSignal.abort(new Error('cancelled'))))
-    .toThrow('cancelled')
   await backend.stop(true)
   expect(send).toHaveBeenCalledTimes(1)
   expect(send.mock.calls[0]?.[1]?.signal?.aborted).toBe(true)

@@ -54,6 +54,13 @@ it('retains required cwd in the first request after proactive compaction with op
     await ctx.plugin(BasicCompaction, {
       auto: true, thresholdRatio: 0.5, headroomTokens: 0, retainTokens: 20, maxTokens: 32, compactionRetries: 0,
     })
+    // Retain the initial request so next-step compaction covers its cwd snapshot.
+    ctx.on('compaction/pressure-policy', (_request, next) => {
+      const policy = next()
+      return adapter.conversation.length === 0
+        ? { ...policy, thresholdTokens: Number.MAX_SAFE_INTEGER }
+        : policy
+    })
     const harness = await mountAgentLoopTestHarness(ctx)
     const agent = await harness.create(SessionId('compaction-admission'), { provider: 'mock', model: 'mock' }, { cwd: root })
     agent.followup(createUserMessage({
@@ -73,6 +80,23 @@ it('retains required cwd in the first request after proactive compaction with op
     }
     expect(events.filter(event => event.type === 'user/message' && event.data.source.kind === 'user')).toHaveLength(1)
     expect(events.findLast(event => event.type === 'turn/end')?.data.reason.kind).toBe('completed')
+    const lifecycle = events.flatMap((event) => {
+      if (event.type === 'turn/start' || event.type === 'step/start' || event.type === 'step/end'
+        || event.type === 'request/header' || event.type === 'compaction/start'
+        || event.type === 'compaction/summary' || event.type === 'turn/end') {
+        return [{ type: event.type }]
+      }
+      return []
+    })
+    await expect(JSON.stringify({
+      lifecycle,
+      requests: adapter.conversation.map(request => ({
+        hasRequiredCwd: request.messages.some(message => message.role === 'user'
+          && message.source?.kind === 'runtime-context'
+          && message.content.some(block => block.type === 'text' && block.text.includes(JSON.stringify(root)))),
+        lastMessageRole: request.messages.at(-1)?.role,
+      })),
+    }, null, 2) + '\n').toMatchFileSnapshot(join(import.meta.dirname, 'expected', 'runtime-context-admission.json'))
   } finally {
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true })

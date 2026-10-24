@@ -102,7 +102,7 @@ kind: "package-reference"
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
-自动压力检查通过 `agent/pre-step` 在输入接纳及运行时上下文整理之前执行。压缩遮蔽已保留的运行时上下文快照时，循环会在派发下一次请求之前追加新快照。可选 `compaction/pressure-policy` 监听者提供触发、压缩目标及尾部保留预算。容量复用最近一次匹配的持久化请求上下文，避免再次查询模型。摘要需达到目标；普通摘要失败仍记录警告，真实上下文溢出的恢复保持可用。
+自动压力检查通过 `agent/request-context` 在输入接纳及运行时上下文整理之后执行。压缩遮蔽已保留的运行时上下文快照时，循环会在派发下一次请求之前追加新快照。可选 `compaction/pressure-policy` 监听者提供触发、压缩目标及尾部保留预算。容量复用最近一次匹配的持久化请求上下文，避免再次查询模型。摘要需达到目标；普通摘要失败仍记录警告，真实上下文溢出的恢复保持可用。
 
 摘要请求自身返回 `CONTEXT_WINDOW_EXCEEDED` 时，自动压缩会在平衡边界缩小已定价的历史前缀后重试。每次失败都会闭合日志标记；成功摘要只替换选中的范围，原始事件仍可读取。首个不可分单元无法容纳或轮次被取消时，恢复停止。
 
@@ -124,9 +124,9 @@ kind: "package-reference"
 
 `agent/request` listener 等待路由 listener 选定目标，再在新 header 记入日志前检查其压力。它直接使用 `compactPressure`，因为 `compactIfNeeded` 读取的是已提交的 header；两条路径都通过 `summarize()` 生成摘要。
 
-当 `auto: true` 时，串行 `agent/pre-step` listener 会在请求派生前检查压力：它通过 `ctx.tokenMeter` 为最新持久路由请求 envelope 定价，当压力越过路由模型的阈值时，先剪枝，再在保留已定价近期尾部的同时摘要最旧的平衡范围。每个选定范围都从第一个不是 `system/message` 的 surface 节点开始，因此位于 surface 节点 0 的系统提示词永不会被遮蔽；由历史内提示词更新追加的后续 `system/message` 是普通历史，范围可以遮蔽它，agent loop（智能体循环）的投影随后会在二者文本不同时用当前提示词替换节点 0（[决策规则](../../core/agent-loop/README.zh.md#understand-the-implementation)）。`agent/request-error` listener 响应提供方确认的 `CONTEXT_WINDOW_EXCEEDED`：它绕过常规阈值与保留策略，尝试一次最大平衡头部缩减，并且只在表层替换 generation 前进后才授权重试。取消全程保持最终决定权。
+当 `auto: true` 时，串行 `agent/request-context` listener 会在请求派生前检查压力：它通过 `ctx.tokenMeter` 为最新持久路由请求 envelope 定价，当压力越过路由模型的阈值时，先剪枝，再在保留已定价近期尾部的同时摘要最旧的平衡范围。每个选定范围都从第一个不是 `system/message` 的 surface 节点开始，因此位于 surface 节点 0 的系统提示词永不会被遮蔽；由历史内提示词更新追加的后续 `system/message` 是普通历史，范围可以遮蔽它，agent loop（智能体循环）的投影随后会在二者文本不同时用当前提示词替换节点 0（[决策规则](../../core/agent-loop/README.zh.md#understand-the-implementation)）。`agent/request-error` listener 响应提供方确认的 `CONTEXT_WINDOW_EXCEEDED`：它绕过常规阈值与保留策略，尝试一次最大平衡头部缩减，并且只在表层替换 generation 前进后才授权重试。取消全程保持最终决定权。
 
-压力策略从拥有持久路由的适配器解析容量。容量缺失、输出预留与余量耗尽窗口，或保留预算不小于阈值时，手动压力路径会抛出目标特定配置错误。`agent/pre-step` listener 会对该精确目标警告一次，并继续本轮；提供方确认溢出后的恢复仍然可用。模型切换检查则以 `MODEL_SWITCH_COMPACTION_FAILED` 拒绝请求，容量或适配器查找失败时亦如此。
+压力策略从拥有持久路由的适配器解析容量。容量缺失、输出预留与余量耗尽窗口，或保留预算不小于阈值时，手动压力路径会抛出目标特定配置错误。`agent/request-context` listener 会对该精确目标警告一次，并继续本轮；提供方确认溢出后的恢复仍然可用。模型切换检查则以 `MODEL_SWITCH_COMPACTION_FAILED` 拒绝请求，容量或适配器查找失败时亦如此。
 
 ### 摘要机制
 

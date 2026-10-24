@@ -513,7 +513,13 @@ export class ReactLoopAgent implements Agent {
         this.session.append('user/message', context, { surfaceOp: 'append' })
       }
       firstAttempt = false
-      const request = await this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
+      const request = await this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal, () => {
+        for (const { message, intent } of this.systemPrompt.project(renderedPrompt, {
+          inHistory: preparedCall?.systemPromptUpdate === 'in-history', startsSeries: true,
+        })) this.session.append('system/message', { turn, step, message }, intent)
+        const restored = this.runtimeContext.project(joinContextSections(sections), sections)
+        if (restored !== undefined) this.session.append('user/message', restored, { surfaceOp: 'append' })
+      })
       const live = new AssistantStreamAttempt(
         this.session.id,
         ++this.assistantAttemptCounter,
@@ -697,6 +703,7 @@ export class ReactLoopAgent implements Agent {
     position: { turn: number; step: number },
     startsRequestSeries: boolean,
     signal: AbortSignal,
+    restoreSurface: () => void,
   ): Promise<GenerateOptions> {
     const { session } = this
     const surfaceGeneration = session.surface.contentGeneration
@@ -766,6 +773,7 @@ export class ReactLoopAgent implements Agent {
     await this.dispatch.waterfall('agent/request-context-ready', { ...position, signal }, async () => {})
     signal.throwIfAborted()
     if (session.surface.contentGeneration !== admittedGeneration) {
+      restoreSurface()
       session.append('request/header', { header, reason: 'series' })
       this.requestSurfaceGeneration = session.surface.contentGeneration
     }

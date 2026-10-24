@@ -109,17 +109,6 @@ export class DesktopSharedWebBackend {
     return request
   }
 
-  /**
-   * Shared Web attachment has no private Host IPC authorization for native drag paths.
-   * @param _address - Session-scoped file reference.
-   * @param signal - preparation cancellation.
-   * @returns null so the carrier declines native file dragging.
-   */
-  resolveDragResource(_address: string, signal?: AbortSignal): Promise<null> {
-    signal?.throwIfAborted()
-    return Promise.resolve(null)
-  }
-
   /** @returns Completion of attachment cancellation; the shared backend keeps running. */
   async stop(_requireCleanStop?: boolean): Promise<void> {
     this.abort.abort()
@@ -137,5 +126,19 @@ export class DesktopSharedWebBackend {
   /** @returns No owned tasks; closing this carrier cannot interrupt shared work. */
   inspectQuit(): Promise<{ activeTasks: boolean; scheduledTasks: boolean }> {
     return Promise.resolve({ activeTasks: false, scheduledTasks: false })
+  }
+
+  /**
+   * Shared Web has no private Host channel authorizing original local-file drags.
+   * @param _address - Renderer-supplied resource reference; never interpreted as a path.
+   * @param signal - Optional preparation cancellation.
+   * @returns Null because original-file authorization requires the owned Desktop Host.
+   */
+  resolveDragResource(_address: string, signal?: AbortSignal): Promise<null> {
+    return Promise.resolve().then(() => {
+      this.abort.signal.throwIfAborted()
+      signal?.throwIfAborted()
+      return null
+    })
   }
 }

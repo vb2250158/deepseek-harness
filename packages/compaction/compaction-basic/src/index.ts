@@ -12,7 +12,7 @@ import type { EpochHeader, Session, SessionSeq } from '@deepseek-ai/dsh-session'
 import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 // Type-only: makes the optional sibling service available to `ctx.get()`.
 import type {} from '@deepseek-ai/dsh-compaction-tool-result-pruner'
@@ -141,7 +141,7 @@ export class BasicCompactionEngine extends CompactionEngine {
 
   /**
    * Register between-step pressure, model-switch pressure, and request-overflow
-   * recovery. Pre-step and overflow listeners dispatch through `compactIfNeeded`;
+   * recovery. Admitted-request and overflow listeners dispatch through `compactIfNeeded`;
    * model switches price the proposed header directly. All summaries use `summarize`.
    */
   private _registerAutomaticCompaction(): void {
@@ -154,25 +154,25 @@ export class BasicCompactionEngine extends CompactionEngine {
       )
     }
 
-    ctx.on('agent/pre-step', async (
+    ctx.on('agent/request-context', async (
       { agent, signal },
       next,
-    ): Promise<PreStepDecision> => {
+    ): Promise<void> => {
+      await next()
       if (!signal.aborted) {
         try {
           const result = await this.compactIfNeeded(agent, 'pressure', signal)
           if (result !== null) logResult(result, 'step pressure')
         } catch (error: unknown) {
           if (error instanceof TargetPressureConfigError) {
-            if (this.warnedPressureConfigTargets.has(error.targetKey)) return next()
+            if (this.warnedPressureConfigTargets.has(error.targetKey)) return
             this.warnedPressureConfigTargets.add(error.targetKey)
           }
           const message = error instanceof Error ? error.message : String(error)
           signal.throwIfAborted()
-          ctx.logger.warn(`step compaction failed: ${message}; continuing the turn`)
+          ctx.logger.warn(`request compaction failed: ${message}; continuing the turn`)
         }
       }
-      return next()
     })
 
     ctx.on('agent/status', ({ agent, status }) => {
@@ -328,8 +328,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     const admitted = agent.session.requestContext()
     const info = admitted?.provider === target.provider && admitted.model === target.model
       ? {
-        context: admitted.contextWindow === undefined ? undefined : { contextWindow: admitted.contextWindow },
-        defaultMaxTokens: undefined,
+        context: admitted.contextWindow === undefined ? undefined : { contextWindow: admitted.contextWindow }, defaultMaxTokens: undefined,
       }
       : await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
     assertNoActiveCompaction(agent.session, 'automatic pressure compaction')

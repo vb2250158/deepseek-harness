@@ -1,0 +1,10 @@
+- id: llm-deepseek
+  name: "@deepseek-ai/dsh-llm-deepseek-api-key"
+  disabled: true
+
+- id: plugin-package-inventory-deepseek
+  disabled: true
+
+- insert:
+    - id: request-context-compaction-driver
+      name: "./driver.mjs"

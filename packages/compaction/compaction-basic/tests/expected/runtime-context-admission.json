@@ -1,0 +1,44 @@
+{
+  "lifecycle": [
+    {
+      "type": "turn/start"
+    },
+    {
+      "type": "step/start"
+    },
+    {
+      "type": "request/header"
+    },
+    {
+      "type": "step/end"
+    },
+    {
+      "type": "step/start"
+    },
+    {
+      "type": "compaction/start"
+    },
+    {
+      "type": "compaction/summary"
+    },
+    {
+      "type": "request/header"
+    },
+    {
+      "type": "step/end"
+    },
+    {
+      "type": "turn/end"
+    }
+  ],
+  "requests": [
+    {
+      "hasRequiredCwd": true,
+      "lastMessageRole": "user"
+    },
+    {
+      "hasRequiredCwd": true,
+      "lastMessageRole": "user"
+    }
+  ]
+}
