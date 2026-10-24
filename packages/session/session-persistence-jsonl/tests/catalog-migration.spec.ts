@@ -2,7 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { SessionId, type SessionHeader } from '@deepseek-ai/dsh-session'
 import { SessionFormatUnsupportedError, SessionPersistenceCorruptionError } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -302,17 +302,48 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
   })
 
   it('recollects newly available discovery fields before publishing a prepared parent', async () => {
+    let collected = false
+    const NativeWeakRef = globalThis.WeakRef
+    vi.stubGlobal('WeakRef', class<T extends object> extends NativeWeakRef<T> {
+      override deref(): T | undefined {
+        const value = super.deref()
+        return collected && value !== undefined && 'status' in value && value.status === 'prepared' ? undefined : value
+      }
+    })
+    onTestFinished(() => vi.unstubAllGlobals())
     const f = await fixture()
     const childPath = await f.write('child', [], true)
     expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', mode: 'unknown' } }])
+    collected = true
     await f.write('child', [f.descriptor], true)
-    await expect(f.ctx.sessionPersistence.open(f.parent, 'write')).rejects.toThrow(childPath)
+    await expect(f.ctx.sessionPersistence.open(f.parent, 'write').then(async (handle) => {
+      await handle.close()
+      return 'unexpected migration publication'
+    })).rejects.toThrow(childPath)
     const parentPath = generationLogPath(f.root, undefined, f.parent, 3, compression)
     expect((await readdir(dirname(parentPath))).filter(name => name !== 'session.lock'))
       .toEqual([compression === 'none' ? 'session.v3.jsonl' : 'session.v3.jsonl.zstd'])
     expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', label: 'old child' } }])
     const writer = await f.ctx.sessionPersistence.open(f.parent, 'write')
     await writer.close()
+  })
+
+  it('recomputes an evicted preparation after related child discovery changes', async () => {
+    const f = await fixture()
+    const parentPath = generationLogPath(f.root, undefined, f.parent, 3, compression)
+    const original = await readFile(parentPath)
+    await f.write('child', [], true)
+    expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { mode: 'unknown' } }])
+    for (const id of ['other-one', 'other-two']) {
+      await f.write(id, [])
+      const reader = await f.ctx.sessionPersistence.open(SessionId(id), 'read')
+      try { await reader.read() } finally { await reader.close() }
+    }
+    await f.write('child', [f.descriptor], true)
+    const writer = await f.ctx.sessionPersistence.open(f.parent, 'write')
+    await writer.close()
+    expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', label: 'old child' } }])
+    expect(await readFile(parentPath)).toEqual(original)
   })
 
   it('reads current children without recursive migration and preserves current parent fast reads', async () => {

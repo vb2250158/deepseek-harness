@@ -12,12 +12,30 @@ import type { JsonlCompression } from './format.ts'
 import { JsonlGenerationSourceChangedError, readDecodedJsonlSource } from './generation.ts'
 import type { JsonlPhysicalIdentity } from './generation.ts'
 
+/** A child source path and its physical revision before descriptor extraction. */
+interface CatalogSourceWitness {
+  readonly path: string
+  identity: JsonlPhysicalIdentity
+}
+
+/** Retain only source paths and physical revisions while a parent waits for publication. */
+function createCatalogSourceValidation(witnesses: readonly CatalogSourceWitness[]): () => Promise<void> {
+  return async () => {
+    for (const witness of witnesses) {
+      const current = await stat(witness.path, { bigint: true })
+      if (current.dev !== witness.identity.dev || current.ino !== witness.identity.ino
+        || current.size !== witness.identity.size || current.mtimeNs !== witness.identity.mtimeNs
+        || current.ctimeNs !== witness.identity.ctimeNs) throw new JsonlGenerationSourceChangedError(witness.path)
+    }
+  }
+}
+
 /** Per-parent supplemental facts and the source checks required before serving or publishing them. */
 interface PreparedCatalogFacts {
   readonly facts: readonly SessionFormatJsonObject[]
   readonly failures: readonly { readonly path: string; readonly error: unknown }[]
   /** @returns resolves while every inspected child still has the captured physical revision. */
-  validate(): Promise<void>
+  readonly validate: () => Promise<void>
 }
 
 /**
@@ -36,12 +54,12 @@ export async function prepareCatalogFacts(
 ): Promise<PreparedCatalogFacts> {
   const facts: SessionFormatJsonObject[] = []
   const failures: { path: string; error: unknown }[] = []
-  const witnesses: { path: string; identity: JsonlPhysicalIdentity }[] = []
+  const witnesses: CatalogSourceWitness[] = []
   for (const source of sources) {
     signal.throwIfAborted()
     const version = parseGenerationLogFilename(basename(source.path), compression)
     if (version === undefined) throw new SessionFormatUnsupportedMigrationError(`unrecognized historical child generation ${source.path}`)
-    const witness: { path: string; identity: JsonlPhysicalIdentity } = {
+    const witness: CatalogSourceWitness = {
       path: source.path, identity: await stat(source.path, { bigint: true }),
     }
     witnesses.push(witness)
@@ -80,13 +98,6 @@ export async function prepareCatalogFacts(
   return {
     facts,
     failures,
-    async validate() {
-      for (const witness of witnesses) {
-        const current = await stat(witness.path, { bigint: true })
-        if (current.dev !== witness.identity.dev || current.ino !== witness.identity.ino
-          || current.size !== witness.identity.size || current.mtimeNs !== witness.identity.mtimeNs
-          || current.ctimeNs !== witness.identity.ctimeNs) throw new JsonlGenerationSourceChangedError(witness.path)
-      }
-    },
+    validate: createCatalogSourceValidation(witnesses),
   }
 }
