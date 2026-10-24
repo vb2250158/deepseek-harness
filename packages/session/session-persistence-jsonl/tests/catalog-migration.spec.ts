@@ -310,7 +310,7 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
         return collected && value !== undefined && 'status' in value && value.status === 'prepared' ? undefined : value
       }
     })
-    onTestFinished(() => vi.unstubAllGlobals())
+    onTestFinished(() => { vi.unstubAllGlobals() })
     const f = await fixture()
     const childPath = await f.write('child', [], true)
     expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', mode: 'unknown' } }])
