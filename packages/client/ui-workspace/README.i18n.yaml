@@ -3,11 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-workspace/README.md
 /:
-  en: cb3f91d54eee30e5
-  zh: cb3f91d54eee30e5
-/description-shared-workspace-browser-and-picker-plugin-for-the-dsh-web-client-grouped-or-flat-session-rows-management-actions-the-slot-composed-session-row-actions-and-directory-picking-kind-package-reference:
-  en: 31972a524fd9e99c
-  zh: 2998f4efda8ff653
+  en: 7c0f613105d4008a
+  zh: c36c0cdff7e77576
 /deepseek-ai-dsh-client-ui-workspace:
   en: b286adf3aca51710
   zh: 6122f6e7c8015197
@@ -15,8 +12,8 @@
   en: 1a76ace6a18e3ab5
   zh: b274d1e98e133851
 /deepseek-ai-dsh-client-ui-workspace/table-of-contents:
-  en: eb6ed279e78f8b65
-  zh: 5583226de8ecca29
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
 /deepseek-ai-dsh-client-ui-workspace/use-this-package:
   en: f7c6b33d488e3d67
   zh: 1b39b51e94fe6819
@@ -39,8 +36,8 @@
   en: 2168316f604893a5
   zh: fe11347009339a9a
 /deepseek-ai-dsh-client-ui-workspace/understand-the-implementation:
-  en: 51e336a848ddbb4a
-  zh: 33a60b050708f6dd
+  en: 8880357066c4f7a3
+  zh: 5030744b30b189ca
 /deepseek-ai-dsh-client-ui-workspace/understand-the-implementation/the-directory-flow-hole:
   en: 868904dbfb5713f8
   zh: 225906bfef7398bf
@@ -60,8 +57,8 @@
   en: 8bcb7bd90d7c5773
   zh: 17663be926a099d2
 /deepseek-ai-dsh-client-ui-workspace/further-exploration:
-  en: 85b90d1e0753acc6
-  zh: 2e8a84721c2f1e04
+  en: 2abbf27abbd71ba4
+  zh: ace33fa2ea042357
 /deepseek-ai-dsh-client-ui-workspace/model-experience:
   en: 3120df665299c634
   zh: 1d9f365d091d0d2a
@@ -69,8 +66,8 @@
   en: ca75c51c89c2c9b0
   zh: de54f3467ef3b9be
 /deepseek-ai-dsh-client-ui-workspace/known-limitations-and-deferred-work:
-  en: 71bd926dac3bf4f3
-  zh: dd81357caefa8739
+  en: 8211860a1b10ac61
+  zh: 4ef11b1fce30cacd
 /deepseek-ai-dsh-client-ui-workspace/known-limitations-and-deferred-work/dev-note:
-  en: 34651d247c0d1bba
-  zh: b8b78bf26d28e4d6
+  en: e67f633dc6fe7773
+  zh: 3bb0c20c93f16f98
