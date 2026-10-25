@@ -3,7 +3,8 @@
  * TypeScript ESM project using NodeNext resolution.
  *
  * Run after `pnpm run build` has emitted declaration files under package
- * `lib/types` directories.
+ * `lib/types` directories. Temporary package directories use junctions on
+ * Windows, where directory symlinks otherwise require extra OS privileges.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -11,6 +12,7 @@ import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sym
 import { dirname, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
+const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir'
 
 interface ExportTarget {
   types?: string
@@ -84,7 +86,7 @@ function linkPackage(pkg: WorkspacePackage, nodeModules: string): void {
   const parts = pkg.name.split('/')
   const link = resolve(nodeModules, ...parts)
   mkdirSync(dirname(link), { recursive: true })
-  symlinkSync(pkg.dir, link, 'dir')
+  symlinkSync(pkg.dir, link, directoryLinkType)
 }
 
 const packages = workspacePackages()
@@ -117,7 +119,7 @@ try {
   if (existsSync(rootTypes)) {
     const typesDir = resolve(nodeModules, '@types')
     mkdirSync(typesDir, { recursive: true })
-    symlinkSync(rootTypes, resolve(typesDir, 'node'), 'dir')
+    symlinkSync(rootTypes, resolve(typesDir, 'node'), directoryLinkType)
   }
 
   writeFileSync(resolve(tmp, 'package.json'), `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`)
