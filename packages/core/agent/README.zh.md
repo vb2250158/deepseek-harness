@@ -227,3 +227,5 @@ await handle.agent.whenIdle()
 本开发备注是维护者的工作上下文；它明确不具权威性。尚未决定的开放方向：委派之外的 agent 间通道——共享状态、流式子输出以及后台或轮询语义仍不在当前委派 seam 之内；以及 `SessionStartSource` 的 `'clear'`/`'compact'` 值已保留但尚无发出方，待驱动子系统落地。
 
 </details>
+
+可选 `agentPreStepTiming.run(position, operation, task)` 服务用于测量预处理提供方自己的异步工作。提供方先通过 `next()` 委托下游，再测量自有操作，并显式传入 Agent、轮次与步骤。计时提供方保留结果和错误，只记录名称与耗时，不记录任务输入或输出；服务缺失时，消费者直接执行原任务。

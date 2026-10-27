@@ -200,45 +200,51 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     { agent, turn, step, signal },
     next,
   ): Promise<PreStepDecision> => {
-    const timeContextProjectionHandle = await projectionReady
+    const ready = () => projectionReady
+    const timeContextProjectionHandle = await (ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+      { plugin: '@deepseek-ai/dsh-time-context', operation: 'projection-ready' }, ready) ?? ready())
     ctx.fiber.assertActive()
     const decision = await next()
-    if (decision.kind === 'reject' || signal.aborted) return decision
-    const now = Date.now()
-    const state = timeContextProjectionHandle.stateOf(agent.session)
-    if (refreshIntervalMs > 0) {
-      const lastInjection = state.lastInjectionTime
-      if (lastInjection != null
-        && now >= lastInjection
-        && now - lastInjection < refreshIntervalMs) return decision
+    const work = async (): Promise<PreStepDecision> => {
+      if (decision.kind === 'reject' || signal.aborted) return decision
+      const now = Date.now()
+      const state = timeContextProjectionHandle.stateOf(agent.session)
+      if (refreshIntervalMs > 0) {
+        const lastInjection = state.lastInjectionTime
+        if (lastInjection != null
+          && now >= lastInjection
+          && now - lastInjection < refreshIntervalMs) return decision
+      }
+      /* v8 ignore next 3 -- every later step follows a recorded injection in the same turn */
+      const previous = step === 1
+        ? state.lastMessageTime ?? undefined
+        : state.lastTurnInjectionTime ?? undefined
+      const browser = state.browserTurn === turn
+        ? deriveBrowserTimeZoneContext(decision.messages, state.browserTimeZones)
+        : deriveBrowserTimeZoneContext(requestMessages(agent, turn, decision.messages))
+      const selectedTimeZone = browser.kind === 'resolved' ? browser.timeZone : fallbackTimeZone
+      const text = renderText(
+        now,
+        turn,
+        step,
+        previous,
+        formatterFor(selectedTimeZone),
+        selectedTimeZone,
+        browser,
+      )
+      return {
+        ...decision,
+        messages: [
+          ...decision.messages,
+          createUserMessage({
+            content: [{ type: 'text', text }],
+            source: { kind: name, form: 'snapshot', sections: [{ name, text }] },
+          }),
+        ],
+      }
     }
-    /* v8 ignore next 3 -- every later step follows a recorded injection in the same turn */
-    const previous = step === 1
-      ? state.lastMessageTime ?? undefined
-      : state.lastTurnInjectionTime ?? undefined
-    const browser = state.browserTurn === turn
-      ? deriveBrowserTimeZoneContext(decision.messages, state.browserTimeZones)
-      : deriveBrowserTimeZoneContext(requestMessages(agent, turn, decision.messages))
-    const selectedTimeZone = browser.kind === 'resolved' ? browser.timeZone : fallbackTimeZone
-    const text = renderText(
-      now,
-      turn,
-      step,
-      previous,
-      formatterFor(selectedTimeZone),
-      selectedTimeZone,
-      browser,
-    )
-    return {
-      ...decision,
-      messages: [
-        ...decision.messages,
-        createUserMessage({
-          content: [{ type: 'text', text }],
-          source: { kind: name, form: 'snapshot', sections: [{ name, text }] },
-        }),
-      ],
-    }
+    return ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+      { plugin: '@deepseek-ai/dsh-time-context', operation: 'time-context' }, work) ?? work()
   }, { prepend: true })
   await projectionReady
 }

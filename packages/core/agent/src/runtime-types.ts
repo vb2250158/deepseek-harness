@@ -15,6 +15,28 @@ export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
 import type { Agent, InboxTarget, ModelSelection } from './types.ts'
 export type { Agent } from './types.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+
+/** Optional elapsed-time instrumentation for a pre-step provider's own work. */
+export interface AgentPreStepTiming {
+  /**
+   * Measure one operation, excluding delegation to downstream pre-step listeners.
+   * Implementations preserve the task's result and rejection, including recording failures.
+   * @param position - owning agent and current turn/step.
+   * @param operation - public plugin and operation names; never input contents.
+   * @param task - provider-owned work to execute once.
+   * @returns the task's result.
+   */
+  run<T>(position: { agent: Agent; turn: number; step: number },
+    operation: { plugin: string; operation: string }, task: () => Promise<T>): Promise<T>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Optional provider of named pre-step operation timings. */
+    agentPreStepTiming: AgentPreStepTiming
+  }
+}
+
 declare module '@deepseek-ai/dsh-system-prompt' {
   interface AssembleContext {
     /** Agent for this assembly; absent on diagnostics. When present, `scope` must identify the same agent. */

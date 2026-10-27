@@ -125,13 +125,15 @@ export class SessionReferenceResolver extends TypertRemoteService {
         'SESSION_REFERENCE_INVALID_CONFIG',
       )
     }
-    ctx.on('agent/pre-step', async ({ agent, signal, modelSelection }, next): Promise<PreStepDecision> => {
+    ctx.on('agent/pre-step', async ({ agent, turn, step, signal, modelSelection }, next): Promise<PreStepDecision> => {
       const decision = await next()
       if (decision.kind === 'reject') return decision
-      return {
+      const work = async (): Promise<PreStepDecision> => ({
         ...decision,
         messages: await this.prepareDirectMessages(agent, decision.messages, modelSelection, signal),
-      }
+      })
+      return ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+        { plugin: '@deepseek-ai/dsh-session-reference', operation: 'session-references' }, work) ?? work()
     }, { prepend: true })
   }
 

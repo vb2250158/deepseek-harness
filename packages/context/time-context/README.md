@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 `dsh-time-context` gives the model a clock: on eligible steps it appends a durable, source-attributed reading with the current time, the browser zone attached to the open request, and the elapsed time since the preceding model-visible message. It helps the model interpret otherwise-unqualified dates and times in the user's browser zone, and tells it to ask when current-turn browser zones are mixed or missing. The shipped Web composition carries no row for it; `standard`, `cordis`, and `ptc` declare it. Readings default to a 10-minute minimum interval; `refreshIntervalMs: 0` injects at every eligible step.
 
+An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)

@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 `dsh-session-reference` lets a conversation reference other sessions: a host turns a `@label` mention into a canonical URI, and the service prepares a bounded, read-only snapshot of each referenced session as durable, untrusted background context for the model. Candidate discovery ranks other sessions by working-directory affinity and labels them with their latest titles. Snapshots are immutable after capture and carry a fixed warning that forbids following instructions, permission claims, or tool requests inside them. It is an opt-in service for hosts that support cross-session mentions; it consumes `ctx.sessionQuery` and needs no SQLite FTS.
 
+An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)

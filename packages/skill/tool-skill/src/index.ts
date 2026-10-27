@@ -177,32 +177,36 @@ export function apply(ctx: Context, config: Config = {}): void {
   // This is the only entry point for `disable-model-invocation` skills; the
   // catalog and the `skill` tool below never see them.
   ctx.on('agent/pre-step', async (
-    { agent, messages, signal },
+    { agent, messages, turn, step, signal },
     next,
   ): Promise<PreStepDecision> => {
     const decision = await next()
-    if (decision.kind === 'reject') return decision
-    const names = invokedSkillNames(messages)
-    if (names.length === 0) return decision
-    signal.throwIfAborted()
-    const lookup = { cwd: await ctx.workingDirectory.ensure(agent, signal), signal, scope: agent }
-    const injections: UserMessage[] = []
-    for (const name of names) {
-      const skill = await ctx.skills.get(name, lookup)
+    const work = async (): Promise<PreStepDecision> => {
+      if (decision.kind === 'reject') return decision
+      const names = invokedSkillNames(messages)
+      if (names.length === 0) return decision
       signal.throwIfAborted()
-      // Unknown names and user-disabled skills stay plain prose: the
-      // gesture was never a claim this boundary recognizes. The check sits
-      // on the loaded definition — the single lookup that produces what is
-      // actually injected.
-      if (skill === undefined || !isUserInvocable(skill)) continue
-      const source: SkillInvocationSource = { kind: 'skill-invocation', name, form: 'instructions' }
-      injections.push(createUserMessage({
-        content: [{ type: 'text', text: renderSkillContent(skill) }],
-        source,
-      }))
+      const lookup = { cwd: await ctx.workingDirectory.ensure(agent, signal), signal, scope: agent }
+      const injections: UserMessage[] = []
+      for (const name of names) {
+        const skill = await ctx.skills.get(name, lookup)
+        signal.throwIfAborted()
+        // Unknown names and user-disabled skills stay plain prose: the
+        // gesture was never a claim this boundary recognizes. The check sits
+        // on the loaded definition — the single lookup that produces what is
+        // actually injected.
+        if (skill === undefined || !isUserInvocable(skill)) continue
+        const source: SkillInvocationSource = { kind: 'skill-invocation', name, form: 'instructions' }
+        injections.push(createUserMessage({
+          content: [{ type: 'text', text: renderSkillContent(skill) }],
+          source,
+        }))
+      }
+      if (injections.length === 0) return decision
+      return { ...decision, messages: [...decision.messages, ...injections] }
     }
-    if (injections.length === 0) return decision
-    return { ...decision, messages: [...decision.messages, ...injections] }
+    return ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+      { plugin: '@deepseek-ai/dsh-tool-skill', operation: 'skill-invocation' }, work) ?? work()
   })
 
   // Register after the tool so reverse teardown removes guidance first. Exact definition
@@ -213,43 +217,47 @@ export function apply(ctx: Context, config: Config = {}): void {
   // scope, so a plugin mounted inside an agent preset registers for that agent
   // alone and an unscoped lookup correctly finds nothing.
   ctx.on('agent/pre-step', async (
-    { agent, signal },
+    { agent, turn, step, signal },
     next,
   ): Promise<PreStepDecision> => {
     const decision = await next()
-    if (decision.kind === 'reject') return decision
-    signal.throwIfAborted()
-    const toolVisible = ctx.tools.get(skillTool.name, agent) === skillTool
-    const snapshot = toolVisible
-      ? await ctx.skills.snapshot({ cwd: await ctx.workingDirectory.ensure(agent, signal), signal, scope: agent })
-      : { skills: [], complete: true }
-    signal.throwIfAborted()
-    if (!snapshot.complete) return decision
-    const skills = snapshot.skills.filter(isModelInvocable)
-    const entries = catalogSourceEntries(skills, catalogDescriptionMaxLength)
-    const digest = digestCatalogEntries(entries)
-    const history = catalogHistory(agent)
-    const existing = catalogMessage(decision.messages)
-    if (history.visibleDigest === digest) {
-      return existing === undefined
-        ? decision
-        : { ...decision, messages: decision.messages.filter(message => message.id !== existing.message.id) }
+    const work = async (): Promise<PreStepDecision> => {
+      if (decision.kind === 'reject') return decision
+      signal.throwIfAborted()
+      const toolVisible = ctx.tools.get(skillTool.name, agent) === skillTool
+      const snapshot = toolVisible
+        ? await ctx.skills.snapshot({ cwd: await ctx.workingDirectory.ensure(agent, signal), signal, scope: agent })
+        : { skills: [], complete: true }
+      signal.throwIfAborted()
+      if (!snapshot.complete) return decision
+      const skills = snapshot.skills.filter(isModelInvocable)
+      const entries = catalogSourceEntries(skills, catalogDescriptionMaxLength)
+      const digest = digestCatalogEntries(entries)
+      const history = catalogHistory(agent)
+      const existing = catalogMessage(decision.messages)
+      if (history.visibleDigest === digest) {
+        return existing === undefined
+          ? decision
+          : { ...decision, messages: decision.messages.filter(message => message.id !== existing.message.id) }
+      }
+      if (existing !== undefined && digestCatalogEntries(existing.entries) === digest) return decision
+      if (!history.published && skills.length === 0) {
+        return existing === undefined
+          ? decision
+          : { ...decision, messages: decision.messages.filter(message => message.id !== existing.message.id) }
+      }
+      const catalog = history.published
+        ? renderCatalogUpdate(entries)
+        : renderCatalogMessage(entries)
+      return {
+        ...decision,
+        messages: existing === undefined
+          ? [...decision.messages, catalog]
+          : decision.messages.map(message => message.id === existing.message.id ? catalog : message),
+      }
     }
-    if (existing !== undefined && digestCatalogEntries(existing.entries) === digest) return decision
-    if (!history.published && skills.length === 0) {
-      return existing === undefined
-        ? decision
-        : { ...decision, messages: decision.messages.filter(message => message.id !== existing.message.id) }
-    }
-    const catalog = history.published
-      ? renderCatalogUpdate(entries)
-      : renderCatalogMessage(entries)
-    return {
-      ...decision,
-      messages: existing === undefined
-        ? [...decision.messages, catalog]
-        : decision.messages.map(message => message.id === existing.message.id ? catalog : message),
-    }
+    return ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+      { plugin: '@deepseek-ai/dsh-tool-skill', operation: 'skill-snapshot' }, work) ?? work()
   })
 }
 

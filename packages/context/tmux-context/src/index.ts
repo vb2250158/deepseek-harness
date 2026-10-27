@@ -241,32 +241,38 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     { agent, turn, step, signal },
     next,
   ): Promise<PreStepDecision> => {
-    const tmuxContextProjectionHandle = await projectionReady
+    const ready = () => projectionReady
+    const tmuxContextProjectionHandle = await (ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+      { plugin: '@deepseek-ai/dsh-tmux-context', operation: 'projection-ready' }, ready) ?? ready())
     ctx.fiber.assertActive()
     const decision = await next()
-    if (decision.kind === 'reject' || signal.aborted || step !== 1) return decision
-    const bash = ctx.get('shell')
-    if (bash === undefined) return decision
-    const previous = tmuxContextProjectionHandle.stateOf(agent.session)
-    if (refreshIntervalMs !== undefined && refreshIntervalMs > 0 && previous !== null) {
-      const now = Date.now()
-      if (now >= previous.time && now - previous.time < refreshIntervalMs) return decision
+    const work = async (): Promise<PreStepDecision> => {
+      if (decision.kind === 'reject' || signal.aborted || step !== 1) return decision
+      const bash = ctx.get('shell')
+      if (bash === undefined) return decision
+      const previous = tmuxContextProjectionHandle.stateOf(agent.session)
+      if (refreshIntervalMs !== undefined && refreshIntervalMs > 0 && previous !== null) {
+        const now = Date.now()
+        if (now >= previous.time && now - previous.time < refreshIntervalMs) return decision
+      }
+      const location = await queryTmuxLocation(bash, ctx.logger, process.pid, signal)
+      if (location === undefined) return decision
+      const state = renderState(location)
+      if (previous !== null && previous.state === state) return decision
+      const text = renderReading(location, turn)
+      return {
+        ...decision,
+        messages: [
+          createUserMessage({
+            content: [{ type: 'text', text }],
+            source: { kind: name, form: 'snapshot', sections: [{ name, text }] },
+          }),
+          ...decision.messages,
+        ],
+      }
     }
-    const location = await queryTmuxLocation(bash, ctx.logger, process.pid, signal)
-    if (location === undefined) return decision
-    const state = renderState(location)
-    if (previous !== null && previous.state === state) return decision
-    const text = renderReading(location, turn)
-    return {
-      ...decision,
-      messages: [
-        createUserMessage({
-          content: [{ type: 'text', text }],
-          source: { kind: name, form: 'snapshot', sections: [{ name, text }] },
-        }),
-        ...decision.messages,
-      ],
-    }
+    return ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
+      { plugin: '@deepseek-ai/dsh-tmux-context', operation: 'tmux-query' }, work) ?? work()
   }, { prepend: true })
   await projectionReady
 }
