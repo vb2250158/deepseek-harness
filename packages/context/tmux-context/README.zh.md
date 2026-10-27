@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。
+
 当 agent 进程运行在 tmux 内、且模型需要知道其 window 与 pane 位置时，挂载此插件。每条读数都是持久历史中额外的一条 user 角色消息；位置未变化时不添加任何内容，因此长时会话累积很少。
 
 ### 模型能得到什么
@@ -140,5 +142,3 @@ window active=<0|1>, pane active=<0|1>, layout <window-layout>
 无。
 
 </details>
-
-可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。

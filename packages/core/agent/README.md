@@ -11,8 +11,6 @@ English | [中文](README.zh.md)
 
 Use `dsh-agent` to create or resume live agents, send follow-up or steering input, inject model-facing context, cancel work, and wait for idle completion. Plugins, UI, hooks, and orchestrators can also observe or intercept agent activity and apply capabilities to one agent without affecting others. Choose it when code needs to control or extend live agents through the public `Agent` API. Pair it with an agent driver such as `dsh-agent-loop`; this package does not create model requests by itself. Initiator attribution is process-local and must be carried explicitly across workers, processes, durable queues, and restarts.
 
-The optional `agentPreStepTiming.run(position, operation, task)` service measures a pre-step provider's own asynchronous work. Providers delegate with `next()` before timing their work and pass the owning Agent, turn and step explicitly. The timing provider preserves results and errors and records names and elapsed time without task inputs or outputs. Without a timing provider, consumers execute their original task directly.
-
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -26,6 +24,8 @@ The optional `agentPreStepTiming.run(position, operation, task)` service measure
 
 <a id="use-this-package"></a>
 ## Use this package
+
+The optional `agentPreStepTiming.run(position, operation, task)` service measures a pre-step provider's own asynchronous work. Providers delegate with `next()` before timing their work and pass the owning Agent, turn and step explicitly. The timing provider preserves results and errors and records names and elapsed time without task inputs or outputs. Without a timing provider, consumers execute their original task directly.
 
 Mount `dsh-agent` with `dsh-session-projection`: it provides `ctx.agents`, the `Agent` handle, and `turnBoundaryOf(session)` for recorded turn and step positions. Creating or resuming an Agent also requires a driver to register a factory; the shipped driver is `dsh-agent-loop`. [Session model selection](#model-selection) is available on each handle as `agent.model`.
 

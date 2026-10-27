@@ -11,8 +11,6 @@ English | [中文](README.zh.md)
 
 `dsh-tmux-context` lets the model identify the tmux session, window, pane, and pane-tree layout containing its agent process. It adds a durable, source-attributed reading on the first step of a turn only when that location changed. Terminals that merely inherit tmux environment variables without running in the named pane add nothing; failed queries also add nothing and do not fail the turn. This package is opt-in and is not included in the shipped Web or headless profiles.
 
-An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
-
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -26,6 +24,8 @@ An optional `agentPreStepTiming` provider can measure this plugin's own pre-step
 
 <a id="use-this-package"></a>
 ## Use this package
+
+An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
 
 Mount this plugin when the agent process runs inside tmux and the model benefits from knowing its window and pane location. Each reading is one additional user-role message in durable history; an unchanged location adds nothing, so long-running sessions accumulate little.
 

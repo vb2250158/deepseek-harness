@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。
+
 当模型需要按用户所在时区解释未限定的日期与时间，且请求本地浏览器时区可用或已配置的回退值可接受时，挂载此插件。每次注入都是持久历史中额外的一条 user 角色消息；当按步骤读数超出对话需要时，用 `refreshIntervalMs` 调度。随发行版交付的 Web 组合不含宿主 `time-context` 行，由 `standard`、`cordis` 与 `ptc` preset 把它声明在消费它的提醒工具旁，而 `minimal` 两者都不声明。
 
 ### 模型能得到什么
@@ -151,5 +153,3 @@ Elapsed since the preceding step context: <duration-or-unavailable>.
 无。
 
 </details>
-
-可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。

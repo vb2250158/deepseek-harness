@@ -275,6 +275,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'agentPreStepTiming',
+    summary: 'Optional elapsed-time instrumentation for a pre-step provider\'s own work.',
+    description: 'Optional elapsed-time instrumentation for a pre-step provider\'s own work.',
+    methods: [
+      {
+        signature: 'run<T>(position: { agent: Agent; turn: number; step: number }, operation: { plugin: string; operation: string }, task: () => Promise<T>): Promise<T>',
+        description: 'Measure one operation, excluding delegation to downstream pre-step listeners. Implementations preserve the task\'s result and rejection, including recording failures.',
+        parameters: [{ name: 'position', description: 'owning agent and current turn/step.' }, { name: 'operation', description: 'public plugin and operation names; never input contents.' }, { name: 'task', description: 'provider-owned work to execute once.' }],
+        returns: 'the task\'s result.',
+      },
+    ],
+  },
+  {
     key: 'agents',
     summary: 'Agent service (`ctx.agents`): tracks live agents and carries the initiating Agent through one process-local asynchronous driver chain.',
     description: 'Agent service (`ctx.agents`): tracks live agents and carries the initiating Agent through one process-local asynchronous driver chain. Agent *creation* is provided by whichever plugin implements the AgentFactory (`@deepseek-ai/dsh-agent-loop`), registered via setFactory.\n\nInitiator methods provide same-process causal attribution only. Ambient presence is neither liveness proof nor authorization; subjects and owners remain explicit, as does identity at worker, process, persistence, and wire boundaries. Returned Promise boundaries drain during teardown, except a nested lineage that starts an owning-fiber unload is excluded from its own drain.',

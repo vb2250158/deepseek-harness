@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。
+
 切换 Session 工作目录后，下一次请求前会重新加载适用的项目指令链。
 
 当 agent 需要依据工作区自身的指令文件工作时，挂载此插件。`dsh-base` 已包含它，并为每条指令链给予 65,536 字节预算，因此基于 base 的 profile 仅在需要其他 `maxBytes` 时替换该配置行；没有文件系统提供方的树加载不到任何内容，直到提供方出现。
@@ -237,5 +239,3 @@ The previously loaded instructions from this file no longer apply.
 无。
 
 </details>
-
-可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。

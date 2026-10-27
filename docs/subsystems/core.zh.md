@@ -705,6 +705,26 @@ Types: [ScopeKey](scope.zh.md) · [Session](session.zh.md)
 
 Source: [`packages/preset/agent-preset-registry/src/index.ts`](../../packages/preset/agent-preset-registry/src/index.ts)
 
+<a id="ctxagentpresteptiming--agentpresteptiming"></a>
+
+### `ctx.agentPreStepTiming` — `AgentPreStepTiming`
+
+Optional elapsed-time instrumentation for a pre-step provider's own work.
+
+```ts cordis-catalog
+/**
+ * Measure one operation, excluding delegation to downstream pre-step listeners.
+ * Implementations preserve the task's result and rejection, including recording failures.
+ * @param position - owning agent and current turn/step.
+ * @param operation - public plugin and operation names; never input contents.
+ * @param task - provider-owned work to execute once.
+ * @returns the task's result.
+ */
+run<T>(position: { agent: Agent; turn: number; step: number }, operation: { plugin: string; operation: string }, task: () => Promise<T>): Promise<T>
+```
+
+Source: [`packages/core/agent/src/runtime-types.ts`](../../packages/core/agent/src/runtime-types.ts)
+
 <a id="ctxagents--agentregistry"></a>
 
 ### `ctx.agents` — `AgentRegistry`

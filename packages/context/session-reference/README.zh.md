@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。
+
 当宿主应允许用户提及另一个会话并把其上下文交给模型时，启用此服务。由于它消费后端无关的 compact 检查点标记，任何 session-query 后端都可配合使用。
 
 ### mention 语法
@@ -145,5 +147,3 @@ kind: "package-reference"
 无。
 
 </details>
-
-可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。

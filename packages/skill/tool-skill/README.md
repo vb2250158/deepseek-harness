@@ -11,8 +11,6 @@ English | [中文](README.zh.md)
 
 Agents can discover and load skills during a session. Before the first request, when model-invocable skills exist and the `skill` tool is visible, they receive a durable catalog of available skill names and capped descriptions, and can use the `skill` tool to load full instructions. Users can invoke a user-invocable skill with `/name`, which injects the same instructions into that step. Catalog changes append a complete replacement, including an empty catalog that retires old names; configure `catalogDescriptionMaxLength` to limit each description.
 
-An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
-
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -26,6 +24,8 @@ An optional `agentPreStepTiming` provider can measure this plugin's own pre-step
 
 <a id="use-this-package"></a>
 ## Use this package
+
+An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
 
 Skill discovery, catalog updates, and explicit skill invocation use the Session's current working directory.
 

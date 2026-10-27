@@ -658,6 +658,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns live Agent handles, the create/resume factory seam, and process-local initiator propagation.',
   },
   {
+    key: 'agentPreStepTiming',
+    pkg: 'agent',
+    title: 'Optional pre-step operation timing',
+    mode: 'service',
+    consumers: ['agent-instructions', 'session-reference', 'time-context', 'tmux-context', 'tool-skill'],
+    note: 'External instrumentation plugins may provide named operation timings. Consumers execute their original work directly when no provider is mounted.',
+  },
+  {
     key: 'agentDefaultModel',
     pkg: 'agent-default-model',
     title: 'Default Agent model selection',

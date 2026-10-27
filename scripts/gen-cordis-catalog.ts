@@ -72,6 +72,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   agentDefaultModel: 'core.md',
   agentPresets: 'core.md',
   agents: 'core.md',
+  agentPreStepTiming: 'core.md',
   approval: 'approval.md',
   officeToPdf: 'office-to-pdf.md',
   attachments: 'attachment.md',
