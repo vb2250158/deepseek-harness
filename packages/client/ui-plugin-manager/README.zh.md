@@ -119,6 +119,8 @@ ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+页面先通过 `pluginInventory/managementAvailable` 检查管理能力，再加载组合包和插件行，无需等待设置页的完整清单或预设诊断。
+
 插件管理依据 profile 的依赖记录：已安装组合包可启停、可移除，随安装提供的组合包保持锁定。profile 与安装都不持有的已选组合包同样提供卸载，卸载只把它从 profile 的组合包列表中移除。这一区分不决定启动失败策略。
 
 <details>

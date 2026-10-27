@@ -118,6 +118,8 @@ Failures: `plugin-manager/unknown-bundle` for a bundle `listBundles()` does not 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+Plugin row listing reads Loader entries without waiting for agent-preset diagnostics. Display resources reuse the [profile metadata cache](../app-boot/README.md#reading-plugin-display-metadata).
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

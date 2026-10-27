@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +8,7 @@ import { PluginPackages, readPluginMeta, type RuntimeResolution } from '@deepsee
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentPresetRegistry } from '@deepseek-ai/dsh-agent-preset-registry'
-import PluginInventoryGateway from '../src/index.ts'
+import PluginInventoryGateway, { readPluginInventory } from '../src/index.ts'
 
 const contexts: Context[] = []
 const roots: string[] = []
@@ -138,13 +138,33 @@ describe('PluginInventoryGateway', () => {
     }
   })
 
-  it('publishes one direct list method under the pluginInventory namespace', async () => {
+  it('reads management availability and Loader entries while preset diagnostics are pending', async () => {
+    const { ctx, inventory } = await harness()
+    const gate = Promise.withResolvers<never[]>()
+    const compositionInventory = vi.fn(() => gate.promise)
+    ctx.provide('agentPresets', { compositionInventory } as never)
+    const full = inventory.list()
+    try {
+      expect(compositionInventory).toHaveBeenCalledTimes(1)
+      expect(inventory.managementAvailable()).toBe(false)
+      ctx.provide('pluginManager', {} as never)
+      expect(inventory.managementAvailable()).toBe(true)
+      expect(await readPluginInventory(ctx, { includeAgentPresets: false })).toEqual({ entries: [], managementAvailable: true })
+      expect(compositionInventory).toHaveBeenCalledTimes(1)
+    } finally {
+      gate.resolve([])
+      await full
+    }
+  })
+
+  it('publishes direct availability and list methods under the pluginInventory namespace', async () => {
     const { inventory } = await harness()
     expect(inventory.typertRemote).toMatchObject({
       serviceKey: 'pluginInventory',
       namespace: 'pluginInventory',
     })
     expect(remoteMethods(inventory)).toEqual([
+      { method: 'managementAvailable', invocation: { kind: 'direct' } },
       { method: 'list', invocation: { kind: 'direct' } },
     ])
   })

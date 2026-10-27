@@ -357,6 +357,15 @@ it('lists bundle versions and current-profile plugin targets', async () => {
   ])
 })
 
+it('lists management rows without waiting for preset composition diagnostics', async () => {
+  const { ctx, manager } = await fixture()
+  const compositionInventory = vi.fn(() => new Promise<never>(() => {}))
+  ctx.provide('agentPresets', { compositionInventory } as never)
+  const rows = await manager.listPlugins()
+  expect(rows.some(row => row.entryId === 'include:managed')).toBe(true)
+  expect(compositionInventory).not.toHaveBeenCalled()
+})
+
 it('describes a bundle by its manifest and patch: one-liner, rows without a live entry, and the built-in rows it changes', async () => {
   const { manager, dir, bundle } = await fixture()
   bundle('described', [{ id: 'described-row', name: './plugin.mjs' }])

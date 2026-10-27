@@ -76,10 +76,10 @@ async function bench(allows: ((action: string) => boolean) | 'switchable' = () =
     }
   }
   new LocaleHolder(ctx)
-  const list = vi.fn(() => Promise.resolve({ ok: true as const, value: { entries: [], managementAvailable: true } }))
+  const list = vi.fn(() => Promise.resolve({ ok: true as const, value: true }))
   const remote = new TestRemote(ctx, {
     settings: { describe: vi.fn(async () => ({ ok: true as const, value: { writable: true, hasDocument: true, namespaces: [] } })) },
-    pluginInventory: { list },
+    pluginInventory: { managementAvailable: list },
     pluginRegistryProbe: { fastest: vi.fn(async () => ({ ok: true as const, value: null })) },
     pluginManager: {
       listBundles: vi.fn(() => Promise.resolve({ ok: true as const, value: [] })),

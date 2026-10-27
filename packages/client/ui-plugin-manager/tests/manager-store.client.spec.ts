@@ -79,7 +79,10 @@ const NO_CONFIG: HostObservable<ConfigLedger> = {
 const NO_TABS: HostObservable<readonly PluginTab[]> = { getSnapshot: () => [], subscribe: () => () => {} }
 
 function bench(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}, enabled = true) {
-  const inventory = { list: overrides.inventory ?? vi.fn(() => Promise.resolve(ok({ entries: [], managementAvailable: true }))) }
+  const inventory = {
+    list: vi.fn(() => Promise.resolve(ok({ entries: [] }))),
+    managementAvailable: overrides.inventory ?? vi.fn(() => Promise.resolve(ok(true))),
+  }
   const plugins = {
     listBundles: vi.fn<() => Promise<ReturnType<typeof ok<BundleInfo[]>> | ReturnType<typeof refused>>>(
       () => Promise.resolve(ok([BUNDLE])),
@@ -113,6 +116,19 @@ function bench(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}
   }
   return { plugins, inventory, probe, controller, face, state, started, track }
 }
+
+it('opens management without waiting for the full diagnostic inventory', async () => {
+  const { inventory, face, state } = bench()
+  const diagnostic = deferred<ReturnType<typeof ok<{ entries: never[] }>>>()
+  inventory.list.mockReturnValue(diagnostic.promise)
+  try {
+    face.ensure()
+    await vi.waitFor(() => { expect(state().status).toBe('ready') })
+    expect(inventory.list).not.toHaveBeenCalled()
+  } finally {
+    diagnostic.resolve(ok({ entries: [] }))
+  }
+})
 
 it('hands a custom page the shared configuration form of its entry', () => {
   const { face } = bench()
@@ -213,7 +229,7 @@ describe('PluginManagerController', () => {
     expect(state().packages[0]!.error).toBeUndefined()
   })
 
-  it('starts idle, reads the inventory then the bundles and entries on first use, and folds concurrent loads', async () => {
+  it('starts idle, checks management before reading bundles and entries, and folds concurrent loads', async () => {
     const gate = deferred<ReturnType<typeof ok<BundleInfo[]>>>()
     const { plugins, inventory, face, state, controller } = bench({
       listBundles: vi.fn().mockReturnValueOnce(gate.promise).mockResolvedValue(ok([BUNDLE])),
@@ -228,7 +244,7 @@ describe('PluginManagerController', () => {
     await mid
     expect(state().status).toBe('ready')
     expect(state().packages).toEqual([packageView(BUNDLE, PLUGINS)])
-    expect(inventory.list).toHaveBeenCalledTimes(2)
+    expect(inventory.managementAvailable).toHaveBeenCalledTimes(2)
     expect(plugins.listBundles).toHaveBeenCalledTimes(2)
     expect(plugins.listPlugins).toHaveBeenCalledTimes(2)
     face.ensure()
@@ -258,7 +274,7 @@ describe('PluginManagerController', () => {
     expect(state().packages[0]?.version).toBe('0.17.0')
     expect(state().status).toBe('ready')
     expect(state().notice).toBeNull()
-    expect(inventory.list).toHaveBeenCalledTimes(2)
+    expect(inventory.managementAvailable).toHaveBeenCalledTimes(2)
     expect(plugins.listBundles).toHaveBeenCalledTimes(2)
     expect(plugins.listPlugins).toHaveBeenCalledTimes(2)
   })
@@ -269,8 +285,8 @@ describe('PluginManagerController', () => {
     const { inventory, plugins, face, state, controller } = bench()
     await controller.load()
     const packages = state().packages
-    if (failure === 'refused') inventory.list.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
-    else inventory.list.mockRejectedValueOnce(new Error('transport down'))
+    if (failure === 'refused') inventory.managementAvailable.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
+    else inventory.managementAvailable.mockRejectedValueOnce(new Error('transport down'))
     face.refresh()
     await vi.advanceTimersByTimeAsync(400)
     expect(state().refreshStatus).toBe('idle')
@@ -287,7 +303,7 @@ describe('PluginManagerController', () => {
     await vi.advanceTimersByTimeAsync(400)
     expect(state().refreshStatus).toBe('idle')
     expect(state()).toMatchObject({ status: 'ready', notice: null })
-    inventory.list.mockResolvedValueOnce(refused('gateway/internal', 'offline again'))
+    inventory.managementAvailable.mockResolvedValueOnce(refused('gateway/internal', 'offline again'))
     face.refresh()
     await vi.advanceTimersByTimeAsync(400)
     expect(state().notice).toEqual({ kind: 'refresh-failed', seq: 2 })
@@ -314,7 +330,7 @@ describe('PluginManagerController', () => {
     const { inventory, face, state, controller } = bench({ listBundles: vi.fn().mockResolvedValue(ok([])) })
     await controller.load()
     expect(state().packages).toEqual([])
-    inventory.list.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
+    inventory.managementAvailable.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
     face.refresh()
     await vi.advanceTimersByTimeAsync(400)
     expect(state().refreshStatus).toBe('idle')
@@ -326,10 +342,10 @@ describe('PluginManagerController', () => {
     onTestFinished(() => { vi.useRealTimers() })
     const { inventory, face, state, controller } = bench()
     await controller.load()
-    inventory.list.mockResolvedValueOnce(ok({ entries: [], managementAvailable: false }))
+    inventory.managementAvailable.mockResolvedValueOnce(ok(false))
     await controller.load()
     expect(state()).toMatchObject({ status: 'unavailable', packages: [] })
-    inventory.list.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
+    inventory.managementAvailable.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
     face.refresh()
     await vi.advanceTimersByTimeAsync(400)
     expect(state().refreshStatus).toBe('failed')
@@ -359,7 +375,7 @@ describe('PluginManagerController', () => {
     onTestFinished(() => { vi.useRealTimers() })
     const { plugins, face, state, controller } = bench({
       inventory: vi.fn().mockResolvedValueOnce(refused('gateway/internal', 'offline'))
-        .mockResolvedValue(ok({ entries: [], managementAvailable: true })),
+        .mockResolvedValue(ok(true)),
     })
     face.refresh()
     await vi.advanceTimersByTimeAsync(400)
@@ -461,10 +477,10 @@ describe('PluginManagerController', () => {
     const { inventory, plugins, face, state, controller } = bench()
     await controller.load()
     expect(state().packages).toHaveLength(1)
-    inventory.list.mockResolvedValueOnce(ok({ entries: [] }))
+    inventory.managementAvailable.mockResolvedValueOnce(ok(false))
     await controller.load()
     expect(state()).toMatchObject({ status: 'unavailable', packages: [] })
-    inventory.list.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
+    inventory.managementAvailable.mockResolvedValueOnce(refused('gateway/internal', 'offline'))
     await controller.load()
     expect(state().status).toBe('error')
     await controller.load()
@@ -1367,13 +1383,13 @@ describe('PluginManagerController', () => {
   })
 
   it('drops a read that settles after disposal', async () => {
-    const gate = deferred<ReturnType<typeof ok<{ entries: never[]; managementAvailable: boolean }>>>()
+    const gate = deferred<ReturnType<typeof ok<boolean>>>()
     const { state, controller } = bench({ inventory: vi.fn().mockReturnValueOnce(gate.promise) })
     const loading = controller.load()
     await Promise.resolve()
     const before = state()
     controller.dispose()
-    gate.resolve(ok({ entries: [], managementAvailable: true }))
+    gate.resolve(ok(true))
     await loading
     expect(state()).toBe(before)
   })

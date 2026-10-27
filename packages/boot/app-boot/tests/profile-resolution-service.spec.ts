@@ -7,7 +7,8 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getEnvironmentData } from 'node:worker_threads'
 import { Context } from '@deepseek-ai/cordis'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as metadata from '../src/package-meta.ts'
 import { PluginPackages } from '../src/profile-resolution/service.ts'
 import { createRuntimeResolution, initProfile, loadProfileDirectory, type RuntimeResolution } from '../src/profile.ts'
 
@@ -15,6 +16,7 @@ const roots: string[] = []
 const contexts: Context[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const context of contexts.splice(0).reverse()) await context.fiber.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -53,6 +55,45 @@ function resolution(
 }
 
 describe('profile package metadata service', () => {
+  it('shares display metadata reads until the runtime resolution is replaced', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-package-display-cache-'))
+    roots.push(root)
+    const packageDir = join(root, 'lib')
+    const anchor = pkg(packageDir, '1.0.0')
+    file(join(packageDir, 'feature-locale', 'en.json'), '{"meta":{"title":"First title"}}')
+    const ctx = new Context()
+    contexts.push(ctx)
+    const mapping = resolution(join(root, 'profiles'), join(root, 'profiles', 'test'), packageDir, anchor, '1.0.0')
+    await ctx.plugin(PluginPackages, { resolution: mapping })
+    const parent = pathToFileURL(join(mapping.profileDir!, 'entry.mjs')).href
+    const read = vi.spyOn(metadata, 'readPluginMeta')
+
+    expect(ctx.pluginPackages.metaOf('metadata-lib/feature', parent)).toEqual({ title: { en: 'First title' } })
+    expect(ctx.pluginPackages.metaOf('metadata-lib/feature', parent)).toEqual({ title: { en: 'First title' } })
+    expect(read).toHaveBeenCalledTimes(1)
+
+    file(join(packageDir, 'feature-locale', 'en.json'), '{"meta":{"title":"Updated title"}}')
+    ctx.pluginPackages.replace({ ...mapping })
+    expect(ctx.pluginPackages.metaOf('metadata-lib/feature', parent)).toEqual({ title: { en: 'Updated title' } })
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps display metadata caches local to the service and resolution base, including absent metadata', async () => {
+    const ctx = new Context()
+    const other = new Context()
+    contexts.push(ctx, other)
+    await ctx.plugin(PluginPackages)
+    await other.plugin(PluginPackages)
+    const read = vi.spyOn(metadata, 'readPluginMeta').mockReturnValue(undefined)
+    const parent = 'file:///fixture/first.mjs'
+    expect(ctx.pluginPackages.metaOf('absent', parent)).toBeUndefined()
+    expect(ctx.pluginPackages.metaOf('absent', parent)).toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(1)
+    other.pluginPackages.metaOf('absent', parent)
+    ctx.pluginPackages.metaOf('absent', 'file:///fixture/second.mjs')
+    expect(read).toHaveBeenCalledTimes(3)
+  })
+
   it('refreshes the installed resolution from its own profile and installation', async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-package-service-refresh-')))
     roots.push(root)

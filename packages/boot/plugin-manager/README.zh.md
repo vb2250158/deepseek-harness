@@ -118,6 +118,8 @@ CLI 提供 `dsh plugin --profile <profile> version-exemptions`、`allow-version 
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+插件行列表读取 Loader 条目，无需等待智能体预设诊断。展示资源复用 [profile 元信息缓存](../app-boot/README.zh.md#reading-plugin-display-metadata)。
+
 <details>
 <summary>实现细节——点击展开</summary>
 

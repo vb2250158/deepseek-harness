@@ -80,11 +80,14 @@ profile 导入插件前，DSH 会将其声明的 DSH 版本要求与 `getDshRunt
 
 投影器使用 Ajv 根据生成的 schema 检查字面量默认值，以保留原生省略行为，不执行原生验证器或 transform 回调。正则兼容性检查、不支持的情况及递归默认值分析会产生显式限制说明。不透明的输入转换和 lazy 元数据副作用会放宽验证，而不是重放原生修改。非 JSON 默认值或展示注释会被省略并附上限制说明，不丢弃结构 schema；无法表示的默认值使省略接受性保持未知，必填字段除外。这些依赖仅在收集运行时加载。导入、Config getter 和 lazy builder 仍会执行可信代码；收集不是沙箱。profile 解析拦截不得重叠。收集器返回前释放自己的拦截，而 Node 仍缓存导入的模块；运行时创建的插件和 Agent preset 实例不在发现范围内。
 
+<a id="reading-plugin-display-metadata"></a>
 ### 读取插件展示元信息
 
 `resolvePluginResource(specifier, parentURL)` 通过活动的 Node ESM 解析器将插件模块或导出资源解析为本地文件路径，不执行其代码。解析器不可用或资源无法解析为本地文件时会抛出错误。
 
 使用 `readPluginMeta(specifier, parentURL)` 或 `ctx.pluginPackages.metaOf(specifier, parentURL)` 读取已安装包的展示文本，无需导入或激活插件。查询使用完整包标识与调用方的解析基准，并遵循 Node exports。文件路径与文件 URL 不解析资源，直接返回无元信息。包根标识缺失的 locale 字段回退到可访问的 `package.json`；子路径标识从不读取 `package.json`。格式错误的元信息返回 `error` 诊断。结果保留翻译，由 Client 选择语言。即使 locale 文本完整，读取器也会加载图片 data URL：包根使用清单 `icon`，省略该字段时使用 `<包名>/icon`；子路径使用 `<标识>/icon`。图标出错时，保留有效文本并附上诊断。作者格式见[插件展示元信息](../../../docs/cookbook/adding-a-package.zh.md#plugin-display-metadata)。
+
+`ctx.pluginPackages.metaOf` 按模块和解析基准共享展示元信息、资源缺失结果和诊断，直到 `replace` 或 `refresh` 发布运行时解析。插件安装和更新会刷新解析。独立函数 `readPluginMeta` 始终读取当前文件。
 
 app-boot 应用的 profile 模板、安装方拥有的 profile 组合包元组和已退役组合包列表位于 [`@deepseek-ai/dsh-official-bundles`](../../util/official-bundles/README.zh.md)，安装方的默认、可选和按需组合包列表也在该包中。
 

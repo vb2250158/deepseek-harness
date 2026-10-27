@@ -119,6 +119,8 @@ Access: the Plugins entry, page, refresh notice, Host change subscriptions, and 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+The page checks `pluginInventory/managementAvailable` before loading bundles and rows. It does not wait for Settings' full inventory or preset diagnostics.
+
 Package management uses the profile's dependency records: installed bundles can be toggled and removed; installation-owned bundles remain locked. A selected bundle that neither the profile nor the installation holds also offers uninstall, which only removes it from the profile's bundle list. This distinction does not select startup failure policy.
 
 <details>

@@ -1072,14 +1072,14 @@ export class PluginManagerController {
         const generation = ++this.generation
         if (this.getSnapshot().status === 'idle') this.patch({ status: 'loading' })
         // The manager Remote is mounted whether or not the Host manages a
-        // profile; the inventory says whether it does.
-        const inventory = await this.ctx.remote.pluginInventory.list()
+        // profile; check availability without waiting for diagnostic inventory.
+        const availability = await this.ctx.remote.pluginInventory.managementAvailable()
         if (generation !== this.generation) return
-        if (!inventory.ok) {
+        if (!availability.ok) {
           this.patch({ status: 'error' })
           continue
         }
-        if (inventory.value.managementAvailable !== true) {
+        if (!availability.value) {
           this.hasCachedInventory = false
           this.patch({ status: 'unavailable', packages: [] })
           continue

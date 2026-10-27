@@ -55,6 +55,14 @@ export class PluginInventoryGateway extends TypertRemoteService {
     super(ctx, 'pluginInventory')
   }
 
+  /** Check management availability without reading plugin metadata or waiting for preset diagnostics.
+   * @returns Whether this Host currently manages a profile.
+   */
+  @Remote
+  managementAvailable(): boolean {
+    return this.ctx.get('pluginManager') !== undefined
+  }
+
   /**
    * Read the Loader directly on every call. Cordis's internal plugin/status
    * events already maintain Entry.fiber and Fiber.state, so a second cache
@@ -77,9 +85,10 @@ export default PluginInventoryGateway
 
 /** Read current Loader entries and optional preset compositions.
  * @param ctx Context with the Loader service.
+ * @param options Omit preset diagnostics when the caller only consumes Loader entries.
  * @returns Current inventory with optional display metadata and no separate runtime cache.
  */
-export async function readPluginInventory(ctx: Context): Promise<PluginInventorySnapshot> {
+export async function readPluginInventory(ctx: Context, options: { includeAgentPresets?: boolean } = {}): Promise<PluginInventorySnapshot> {
   const entries: PluginInventoryEntry[] = []
   const packages = ctx.get('pluginPackages')
   for (const entry of ctx.loader.entries()) {
@@ -96,7 +105,7 @@ export async function readPluginInventory(ctx: Context): Promise<PluginInventory
   }
   const presets = ctx.get('agentPresets')
   const management = ctx.get('pluginManager') === undefined ? {} : { managementAvailable: true }
-  if (presets === undefined) return { entries, ...management }
+  if (options.includeAgentPresets === false || presets === undefined) return { entries, ...management }
   const agentPresets: AgentPresetPluginGroup[] = (await presets.compositionInventory()).map(
     composition => ({
       ...composition,

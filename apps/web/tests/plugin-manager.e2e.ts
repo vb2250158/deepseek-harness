@@ -84,7 +84,9 @@ describe('web e2e: plugin manager', () => {
   /** Select the sidebar's Plugins entry and wait for the management page in the main column. */
   async function openPluginsPanel() {
     await closeSettings()
-    await page.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+    await page.getByRole('navigation', { name: '全局面板' })
+      // oxlint-disable-next-line typescript/no-deprecated -- The panel assertion owns readiness while inventory reads are paused.
+      .getByRole('button', { name: '插件', exact: true }).click({ noWaitAfter: true })
     const panel = page.locator('[data-plugin-panel]')
     await panel.waitFor({ timeout: 10_000 })
     while (await panel.getByRole('button', { name: /^返回/ }).count() > 0) {
@@ -429,7 +431,9 @@ describe('web e2e: plugin manager', () => {
         const consoleWatch = watchConsole(probe)
         await probe.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
         await probe.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-        await probe.getByRole('navigation', { name: '全局面板' }).getByRole('button', { name: '插件', exact: true }).click()
+        await probe.getByRole('navigation', { name: '全局面板' })
+          // oxlint-disable-next-line typescript/no-deprecated -- This test holds reads until the skeleton is inspected.
+          .getByRole('button', { name: '插件', exact: true }).click({ noWaitAfter: true })
         await expect.poll(() => spy.mock.calls.length, { timeout: 10_000 }).toBeGreaterThan(0)
         const panel = probe.locator('[data-plugin-panel]')
         const skeleton = panel.locator('[data-plugin-loading]')
@@ -760,7 +764,12 @@ describe('web e2e: plugin manager', () => {
       .toMatchObject({ enabled: true, installed: false, removable: true, error: { code: 'operation-error' }, rows: [] })
     await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'missing-bundle.expected.md'),
       await captureStableAria(page, '[data-plugin-panel]', scaffold.workspaceCwd, {
-        replacements: [[scaffold.harnessHome, '{{home}}']],
+        replacements: [
+          [join(scaffold.harnessHome, 'profiles', 'scaffold'), '{{home}}/profiles/scaffold'],
+          [JSON.stringify(join(scaffold.harnessHome, 'profiles', 'scaffold')).slice(1, -1), '{{home}}/profiles/scaffold'],
+          [scaffold.harnessHome, '{{home}}'],
+          [JSON.stringify(scaffold.harnessHome).slice(1, -1), '{{home}}'],
+        ],
       }), MODE)
     await toggle.click()
     await expect.poll(async () => (JSON.parse(await homeFile('profiles', 'scaffold', 'package.json')) as {
