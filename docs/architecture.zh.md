@@ -115,7 +115,7 @@ turn/end
 
 工厂 setup 在 Session 进入 SessionStore 并完成 `session/created` 之后、`agent/created` 之前运行；收尾事件在移除之前提交。
 
-输入通过同一个 inbox 到达驱动器；注入的上下文等待一条唤醒消息。AgentLoop 的持久 `inbox` 投影使待处理输入在没有活跃 Agent 时仍可读取。
+输入通过同一个 inbox 到达驱动器；注入的上下文等待一条唤醒消息。AgentLoop 的持久 `inbox` 投影使待处理输入在没有活跃 Agent 时仍可读取。失败轮次一旦接纳用户角色输入（包括运行时上下文快照），排队任务就等待显式唤醒输入。接纳之前发生失败时，驱动器可在空闲后继续处理待领取的 inbox 输入。
 
 循环在工具解析与组装之前，通过 `agent/resolve-model` 将捕获的原始选择解析为供 pre-step 与重试使用的实际选择；省略推理强度时使用适配器默认值。`agent/pre-step` 可改写或拒绝输入；首次领取被拒绝或为空时，关闭不含步骤的持久轮次。失败的领取不重放，相邻输入启动独立轮次。改写须保留 `startsRequestSeries`，它会记录新的 header。组装与 `step/start` 之后，`agent/request` 只调整控制参数，不改变路由。`prepareCall()` 绑定适配器，再提交提示词与已接纳用户消息；在任一异步阶段取消都不提交这两者。提示词准入依据已准备调用的能力，而非先前的请求上下文。每次尝试刷新运行时事实、协调提示词／用户消息／运行时上下文、记录 header/context，再冻结请求。重试不重复组装或 pre-step。附接后的替换和图片省略开启新请求序列，未变化的恢复延续原序列。系统头预留、空渲染文本、受支持的提示词／工具更新与序列归并规则见 [agent-loop](../packages/core/agent-loop/README.zh.md#understand-the-implementation) 和[系统提示词决策](../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.zh.md)。
 

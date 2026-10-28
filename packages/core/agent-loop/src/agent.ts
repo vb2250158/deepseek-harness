@@ -58,7 +58,7 @@ type Phase =
     lastTurn: number
     wakeRequested: boolean
   }
-  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean; continueWithoutInput: boolean }
+  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean; continueWithoutInput: boolean; admittedUserMessage: boolean }
 
 type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
 
@@ -278,6 +278,7 @@ export class ReactLoopAgent implements Agent {
       step: 0,
       wakeRequested: false,
       continueWithoutInput,
+      admittedUserMessage: false,
     })
     this.loopCtx.agents.withInitiator(this, () => this.kick()).then(driver.resolve, driver.reject)
   }
@@ -287,6 +288,15 @@ export class ReactLoopAgent implements Agent {
     do {
       await (activity = this.activityDone)
     } while (activity !== this.activityDone)
+  }
+
+  /**
+   * Log one user message and remember that this turn admitted input.
+   * @param message - the user message to append.
+   */
+  private appendUserMessage(message: UserMessage): void {
+    if (this.phase.kind === 'running') this.phase.admittedUserMessage = true
+    this.session.append('user/message', message, { surfaceOp: 'append' })
   }
 
   /** Report one failure at its live boundary, then preserve it for driver containment. */
@@ -304,15 +314,18 @@ export class ReactLoopAgent implements Agent {
       while (await this.turn()) {}
     } catch (_error: unknown) {
       // Reported failures and cancellation are contained at the driver boundary.
-      failed = this.phase.kind === 'running' && (this.phase.step === 0 || this.inbox.nextTurn.length > 0)
-        && !this.phase.abort.signal.aborted && this.phase.turn > initialTurn
+      // Replay pending inbox work only when this turn never logged a user
+      // message. Preparation can fail before admission and leave a later
+      // follow-up unsent; a failure after admission waits for an explicit wakeup.
+      failed = this.phase.kind === 'running'
+        && !this.phase.abort.signal.aborted
+        && this.phase.turn > initialTurn
+        && !this.phase.admittedUserMessage
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
-        // A non-cancelled failure can leave a waking message behind its terminal
-        // boundary. Replay it once idle instead of requiring another send.
         if ((wakeRequested || failed) && this.inbox.hasPending) this.wakeDriver()
       }
     }
@@ -374,6 +387,7 @@ export class ReactLoopAgent implements Agent {
     const phase = this.phase
     const { signal } = phase.abort
     signal.throwIfAborted()
+    phase.admittedUserMessage = false
     const turn = phase.turn + 1
     try {
       this.session.append('turn/start', { turn })
@@ -508,16 +522,16 @@ export class ReactLoopAgent implements Agent {
         for (const message of decision.messages) {
           if (message.source.kind === 'runtime-context') {
             if (context !== undefined && !contextAdmitted) {
-              this.session.append('user/message', context, { surfaceOp: 'append' })
+              this.appendUserMessage(context)
               contextAdmitted = true
             }
           } else {
-            this.session.append('user/message', message, { surfaceOp: 'append' })
+            this.appendUserMessage(message)
           }
         }
       }
       if (context !== undefined && !contextAdmitted) {
-        this.session.append('user/message', context, { surfaceOp: 'append' })
+        this.appendUserMessage(context)
       }
       firstAttempt = false
       const request = await this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal, () => {
@@ -525,7 +539,7 @@ export class ReactLoopAgent implements Agent {
           inHistory: preparedCall?.systemPromptUpdate === 'in-history', startsSeries: true,
         })) this.session.append('system/message', { turn, step, message }, intent)
         const restored = this.runtimeContext.project(joinContextSections(sections), sections)
-        if (restored !== undefined) this.session.append('user/message', restored, { surfaceOp: 'append' })
+        if (restored !== undefined) this.appendUserMessage(restored)
       })
       const live = new AssistantStreamAttempt(
         this.session.id,

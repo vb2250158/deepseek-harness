@@ -6,7 +6,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LlmRuntime, { createUserMessage, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, PreparedAdapterCall, LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { MockAdapter, textResponse } from './mock-adapter.ts'
@@ -54,7 +54,69 @@ class DelayedPreparationFailureAdapter extends LlmAdapter {
   }
 }
 
+/** Fails a live request only after its pending follow-up has been queued. */
+class DelayedRequestFailureAdapter extends LlmAdapter {
+  readonly requestStarted = Promise.withResolvers<true>()
+  readonly failRequest = Promise.withResolvers<true>()
+  readonly requests: GenerateOptions[] = []
+
+  async * stream(options: GenerateOptions) {
+    this.requests.push(options)
+    if (this.requests.length === 1) {
+      this.requestStarted.resolve(true)
+      await this.failRequest.promise
+      throw new LlmError('request failed after admission', 'SERVICE_UNAVAILABLE')
+    }
+    yield* textResponse('recovered')
+  }
+}
+
+/** Replay the complete durable log and retain the admission and turn outcome trace. */
+function admissionTrace(session: Session) {
+  const replay = Session.create(session.id, session.snapshotEvents())
+  expect(replay.deriveMessages()).toEqual(session.deriveMessages())
+  return replay.snapshotEvents().map((event) => {
+    switch (event.type) {
+      case 'turn/start': return { type: event.type, seq: event.seq, turn: event.data.turn }
+      case 'turn/end': return { type: event.type, seq: event.seq, turn: event.data.turn, reason: event.data.reason.kind }
+      case 'user/message': return { type: event.type, seq: event.seq, source: event.data.source.kind, content: event.data.content }
+      case 'assistant/message': return { type: event.type, seq: event.seq, content: event.data.message.content }
+      // Request metadata and process-local identities do not change input admission or turn outcomes.
+      default: return undefined
+    }
+  }).filter(event => event !== undefined)
+}
+
 describe('agent/request-error', () => {
+  it.each(['user', 'runtime-context'] as const)('waits for an explicit wake after admitting %s input before a request failure', async (source) => {
+    const adapter = new DelayedRequestFailureAdapter()
+    const ctx = await harness(adapter)
+    try {
+      if (source === 'runtime-context') {
+        ctx.systemPrompt.context({ name: 'test-admission', order: 0, text: 'retained runtime context' })
+        ctx.on('agent/pre-step', async ({ turn }, next) => {
+          const decision = await next()
+          if (turn !== 1 || decision.kind !== 'enter') return decision
+          return { ...decision, messages: decision.messages.filter(message => message.source.kind === 'runtime-context') }
+        })
+      }
+      const agent = await ctx.agentLoop.create(SessionId('request-error-admitted-' + source), { provider: 'mock', model: 'mock' })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'first' }], source: { kind: 'user' } }))
+      await adapter.requestStarted.promise
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'second' }], source: { kind: 'user' } }))
+      adapter.failRequest.resolve(true)
+      await agent.whenIdle()
+      expect(adapter.requests).toHaveLength(1)
+      const beforeExplicitWake = admissionTrace(agent.session)
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'explicit wake' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+      expect(adapter.requests).toHaveLength(3)
+      expect({ beforeExplicitWake, afterExplicitWake: admissionTrace(agent.session) }).toMatchSnapshot()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('replays a follow-up queued while preparation fails', async () => {
     const adapter = new DelayedPreparationFailureAdapter()
     const ctx = await harness(adapter)

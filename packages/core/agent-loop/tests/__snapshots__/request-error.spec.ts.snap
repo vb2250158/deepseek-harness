@@ -1,0 +1,239 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agent/request-error > waits for an explicit wake after admitting runtime-context input before a request failure 1`] = `
+{
+  "afterExplicitWake": [
+    {
+      "seq": 1,
+      "turn": 1,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+retained runtime context",
+          "type": "text",
+        },
+      ],
+      "seq": 5,
+      "source": "runtime-context",
+      "type": "user/message",
+    },
+    {
+      "reason": "error",
+      "seq": 11,
+      "turn": 1,
+      "type": "turn/end",
+    },
+    {
+      "seq": 13,
+      "turn": 2,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "second",
+          "type": "text",
+        },
+      ],
+      "seq": 16,
+      "source": "user",
+      "type": "user/message",
+    },
+    {
+      "content": [
+        {
+          "text": "recovered",
+          "type": "text",
+        },
+      ],
+      "seq": 17,
+      "type": "assistant/message",
+    },
+    {
+      "reason": "completed",
+      "seq": 19,
+      "turn": 2,
+      "type": "turn/end",
+    },
+    {
+      "seq": 20,
+      "turn": 3,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "explicit wake",
+          "type": "text",
+        },
+      ],
+      "seq": 23,
+      "source": "user",
+      "type": "user/message",
+    },
+    {
+      "content": [
+        {
+          "text": "recovered",
+          "type": "text",
+        },
+      ],
+      "seq": 24,
+      "type": "assistant/message",
+    },
+    {
+      "reason": "completed",
+      "seq": 26,
+      "turn": 3,
+      "type": "turn/end",
+    },
+  ],
+  "beforeExplicitWake": [
+    {
+      "seq": 1,
+      "turn": 1,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.
+
+retained runtime context",
+          "type": "text",
+        },
+      ],
+      "seq": 5,
+      "source": "runtime-context",
+      "type": "user/message",
+    },
+    {
+      "reason": "error",
+      "seq": 11,
+      "turn": 1,
+      "type": "turn/end",
+    },
+  ],
+}
+`;
+
+exports[`agent/request-error > waits for an explicit wake after admitting user input before a request failure 1`] = `
+{
+  "afterExplicitWake": [
+    {
+      "seq": 1,
+      "turn": 1,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "first",
+          "type": "text",
+        },
+      ],
+      "seq": 5,
+      "source": "user",
+      "type": "user/message",
+    },
+    {
+      "reason": "error",
+      "seq": 11,
+      "turn": 1,
+      "type": "turn/end",
+    },
+    {
+      "seq": 13,
+      "turn": 2,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "second",
+          "type": "text",
+        },
+      ],
+      "seq": 16,
+      "source": "user",
+      "type": "user/message",
+    },
+    {
+      "content": [
+        {
+          "text": "recovered",
+          "type": "text",
+        },
+      ],
+      "seq": 17,
+      "type": "assistant/message",
+    },
+    {
+      "reason": "completed",
+      "seq": 19,
+      "turn": 2,
+      "type": "turn/end",
+    },
+    {
+      "seq": 20,
+      "turn": 3,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "explicit wake",
+          "type": "text",
+        },
+      ],
+      "seq": 23,
+      "source": "user",
+      "type": "user/message",
+    },
+    {
+      "content": [
+        {
+          "text": "recovered",
+          "type": "text",
+        },
+      ],
+      "seq": 24,
+      "type": "assistant/message",
+    },
+    {
+      "reason": "completed",
+      "seq": 26,
+      "turn": 3,
+      "type": "turn/end",
+    },
+  ],
+  "beforeExplicitWake": [
+    {
+      "seq": 1,
+      "turn": 1,
+      "type": "turn/start",
+    },
+    {
+      "content": [
+        {
+          "text": "first",
+          "type": "text",
+        },
+      ],
+      "seq": 5,
+      "source": "user",
+      "type": "user/message",
+    },
+    {
+      "reason": "error",
+      "seq": 11,
+      "turn": 1,
+      "type": "turn/end",
+    },
+  ],
+}
+`;
