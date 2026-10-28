@@ -1093,6 +1093,37 @@ describe('DeepSeek e2e workflow', () => {
     expect(preflight.run).not.toMatch(/echo |printenv/)
   })
 
+  it('runs same-repository branch PRs and skips other repositories and Dependabot', () => {
+    const job = workflowJob(loadWorkflow('.github/workflows/e2e.yml'), 'e2e')
+    const expression = job.if
+    if (typeof expression !== 'string') throw new TypeError('DeepSeek e2e job must define if')
+    const repository = 'vb2250158/deepseek-harness'
+    const decide = (context: Record<string, string>): unknown => {
+      const source = expression.replace(/\b(?:github|vars)(?:\.[a-zA-Z_][a-zA-Z_0-9]*)+/g,
+        (key: string) => JSON.stringify(context[key] ?? ''))
+      return runInNewContext(source, {}, { timeout: 1000 })
+    }
+    expect(decide({ 'github.event_name': 'workflow_dispatch', 'github.repository': repository })).toBe(true)
+    expect(decide({
+      'github.event_name': 'pull_request',
+      'github.repository': repository,
+      'github.event.pull_request.head.repo.full_name': repository,
+      'github.event.pull_request.user.login': 'maintainer',
+    })).toBe(true)
+    expect(decide({
+      'github.event_name': 'pull_request',
+      'github.repository': repository,
+      'github.event.pull_request.head.repo.full_name': 'outsider/deepseek-harness',
+      'github.event.pull_request.user.login': 'maintainer',
+    })).toBe(false)
+    expect(decide({
+      'github.event_name': 'pull_request',
+      'github.repository': repository,
+      'github.event.pull_request.head.repo.full_name': repository,
+      'github.event.pull_request.user.login': 'dependabot[bot]',
+    })).toBe(false)
+  })
+
   it('bounds profile subprocess fan-out to the tested e2e default', () => {
     const workflow = loadWorkflow('.github/workflows/e2e.yml')
     const e2e = workflowJob(workflow, 'e2e')
