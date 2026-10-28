@@ -148,6 +148,7 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     expectedFinalResponse: 'MINIMAL_IMAGE_OK',
     expectedTools: { bash: ['command'], read_image: ['file_path'], working_directory: [] },
   },
+  'session-title-after-turn': { waitForProviderTitle: true },
   'session-title-stability': { waitForProviderTitle: true },
   'dynamic-tool-updates': {
     expectedFinalResponse: 'DONE',
@@ -773,6 +774,8 @@ async function runScenario(scenario: CorpusScenario): Promise<{
         })
         results.push(result)
         if (titleSubscription !== undefined) {
+          expect(result.events.some(event => event.type === 'session/title-llm-request'),
+            'automatic title requests start after the foreground turn ends').toBe(false)
           const expected = expectedTitles[results.length - 1]?.data as JsonObject | undefined
           expect(expected, 'each turn has a recorded provider title').toBeDefined()
           await waitForRootEvent(titleSubscription, sessionId, event => event.type === 'session/title'

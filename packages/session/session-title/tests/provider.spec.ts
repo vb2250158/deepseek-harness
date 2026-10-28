@@ -1,4 +1,4 @@
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import LlmRuntime, { createUserMessage, markAgentLoopRequest } from '@deepseek-ai/dsh-llm'
@@ -52,6 +52,92 @@ function appendRoute(session: ReturnType<Context['sessions']['create']>, reason:
 }
 
 describe('SessionTitleService Provider lifecycle', () => {
+  it('waits for Agent idle before automatic generation while explicit refresh stays independent', async () => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SessionTitleService, CONFIG)
+    const idle = deferred<undefined>()
+    const whenIdle = vi.fn(() => idle.promise)
+    vi.spyOn(ctx.agents, 'get').mockReturnValue({ whenIdle: () => whenIdle() } as Agent)
+    const generate = vi.fn(async (request: SessionTitleProviderRequest) => ({
+      title: 'Generated after idle',
+      messageSeqs: request.messages.map(message => message.seq),
+    }))
+    ctx.sessionTitle.register({ id: SessionTitleProviderId('idle-title'), automatic: 'first-prompt', generate })
+    const session = ctx.sessions.create(SessionId('idle-title'))
+    appendHumanPrompt(session, 'Keep the foreground responsive')
+    appendRoute(session)
+    await settle()
+    expect(whenIdle).toHaveBeenCalledOnce()
+    expect(generate).not.toHaveBeenCalled()
+    expect(ctx.sessionTitle.get(session)?.source.kind).toBe('fallback')
+
+    const explicit = await ctx.sessionTitle.refresh(session)
+    expect(explicit?.title).toBe('Generated after idle')
+    expect(generate).toHaveBeenCalledOnce()
+    idle.resolve(undefined)
+    await settle()
+    expect(generate).toHaveBeenCalledOnce()
+  })
+
+  it('starts the deferred provider once after the Agent settles without holding its activity', async () => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SessionTitleService, CONFIG)
+    const idle = deferred<undefined>()
+    vi.spyOn(ctx.agents, 'get').mockReturnValue({ whenIdle: () => idle.promise } as Agent)
+    const output = deferred<SessionTitleProviderResult>()
+    const generate = vi.fn(() => output.promise)
+    ctx.sessionTitle.register({ id: SessionTitleProviderId('after-idle'), automatic: 'first-prompt', generate })
+    const session = ctx.sessions.create(SessionId('after-idle'))
+    const prompt = appendHumanPrompt(session, 'Reply before generating the title')
+    appendRoute(session)
+    await settle()
+    expect(generate).not.toHaveBeenCalled()
+    idle.resolve(undefined)
+    await settle()
+    expect(generate).toHaveBeenCalledOnce()
+    expect(ctx.sessionTitle.get(session)?.source.kind).toBe('fallback')
+    output.resolve({ title: 'Background title', messageSeqs: [prompt.seq] })
+    await settle()
+    expect(ctx.sessionTitle.get(session)?.title).toBe('Background title')
+  })
+
+  it.each(['provider', 'service', 'session', 'rename'] as const)('cancels queued title work on %s disposal or replacement', async (kind) => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(AgentRegistry)
+    const titleFiber = ctx.plugin(SessionTitleService, CONFIG)
+    await titleFiber
+    const idle = deferred<undefined>()
+    vi.spyOn(ctx.agents, 'get').mockReturnValue({ whenIdle: () => idle.promise } as Agent)
+    const generate = vi.fn(async (request: SessionTitleProviderRequest) => ({
+      title: 'Must not appear', messageSeqs: request.messages.map(message => message.seq),
+    }))
+    const dispose = ctx.sessionTitle.register({ id: SessionTitleProviderId('cancel-queued'), automatic: 'first-prompt', generate })
+    const session = ctx.sessions.create(SessionId('cancel-queued'))
+    appendHumanPrompt(session, 'Retain the current title')
+    appendRoute(session)
+    await settle()
+    if (kind === 'provider') await dispose()
+    else if (kind === 'service') await titleFiber.dispose()
+    else if (kind === 'session') ctx.emit('session/disposed', session)
+    else ctx.sessionTitle.rename(session, 'User title')
+    idle.resolve(undefined)
+    await settle()
+    expect(generate).not.toHaveBeenCalled()
+    expect(session.snapshotEvents().filter(event => event.type === 'session/title').at(-1)?.data.source.kind)
+      .toBe(kind === 'rename' ? 'user' : 'fallback')
+  })
+
   it.each(['fork', 'subagent'] as const)('does not schedule first-prompt generation for an empty %s', async (kind) => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())

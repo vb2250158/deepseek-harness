@@ -581,12 +581,32 @@ export class SessionTitleService extends Service {
         || state.revision !== pending.revision) return
       const work = this.activate(pending, state)
       try {
+        await this.track(this.waitForAutomaticIdle(session, work), pending.registration)
         await this.startProvider(session, work, route)
       } catch (error: unknown) {
         if (work.signal.aborted || !this.serviceActive()) return
         this.ctx.logger.warn(`session "${session.id}": automatic title generation failed: ${String(error)}`)
+      } finally {
+        if (state.active === work) delete state.active
       }
     })
+  }
+
+  /** Wait outside the provider deadline without reserving or blocking the Agent. */
+  private async waitForAutomaticIdle(session: Session, work: ActiveProviderWork): Promise<void> {
+    const agent = this.ctx.agents.get(session.id)
+    if (agent === undefined) return
+    work.signal.throwIfAborted()
+    let rejectAbort!: (reason: unknown) => void
+    const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject })
+    const onAbort = (): void => { rejectAbort(work.signal.reason) }
+    work.signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      await Promise.race([agent.whenIdle(), aborted])
+      work.signal.throwIfAborted()
+    } finally {
+      work.signal.removeEventListener('abort', onAbort)
+    }
   }
 
   /** Start one tracked provider call after publishing its active revision. */

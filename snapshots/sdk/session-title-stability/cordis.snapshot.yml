@@ -60,3 +60,9 @@
         timeoutMs: 5000
         provider: title-replay
         model: title-model
+
+# Title-only replay has the same tools on every platform.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
