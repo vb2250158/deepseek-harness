@@ -1,7 +1,27 @@
 /** Prepare a symlink-free executable runtime payload with shared workspace module instances. */
-import { cp, lstat, readFile, readdir, realpath, rm, unlink } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { cp, lstat, mkdir, readFile, readdir, realpath, rm, unlink } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { load } from 'js-yaml'
+
+/**
+ * Resolve a deploy destination through its existing or newly created parent.
+ * @param staging - Generated payload directory; its leaf need not exist.
+ * @param workspace - Repository root that deployment must never replace or contain.
+ * @returns the physical destination accepted by pnpm, without creating or clearing its leaf.
+ * @throws when the physical destination is the repository root or its ancestor.
+ */
+export async function resolveDeployTarget(staging: string, workspace: string): Promise<string> {
+  const parent = dirname(staging)
+  if (parent !== dirname(parent)) await mkdir(parent, { recursive: true })
+  const target = join(await realpath(parent), basename(staging))
+  const repository = await realpath(workspace)
+  const repositoryRelative = relative(target, repository)
+  if (repositoryRelative === '' || (repositoryRelative !== '..'
+    && !repositoryRelative.startsWith(`..${sep}`) && !isAbsolute(repositoryRelative))) {
+    throw new Error('executable staging target contains the repository root')
+  }
+  return target
+}
 
 function isHoistedLocations(value: unknown): value is Record<string, string[]> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -12,12 +32,14 @@ function isHoistedLocations(value: unknown): value is Record<string, string[]> {
 /**
  * Share root workspace packages with nested consumers of the same pnpm dependency identity.
  * Different peer resolutions and third-party packages keep their installed locations.
+ * The payload root is resolved before comparing pnpm's physical hoisted locations.
  * All metadata paths are checked before deletion; the caller first materializes links.
  * @param staging - Symlink-free deployed payload root.
  * @param workspace - Workspace root relative to which pnpm records hoisted locations.
  */
 export async function deduplicateStagedWorkspacePackages(staging: string, workspace: string): Promise<void> {
-  const modules = resolve(staging, 'node_modules')
+  const modules = await realpath(resolve(staging, 'node_modules'))
+  const repository = await realpath(workspace)
   const file = join(modules, '.modules.yaml')
   const manifest: unknown = load(await readFile(file, 'utf8'))
   if (typeof manifest !== 'object' || manifest === null || !('hoistedLocations' in manifest)
@@ -27,7 +49,7 @@ export async function deduplicateStagedWorkspacePackages(staging: string, worksp
   const duplicates: string[] = []
   for (const [identity, locations] of Object.entries(manifest.hoistedLocations)) {
     const paths = locations.map((location) => {
-      const path = resolve(workspace, location)
+      const path = resolve(repository, location)
       const local = relative(modules, path)
       if (local === '' || local === '..' || local.startsWith(`..${sep}`) || isAbsolute(local)) {
         throw new Error(`${file}: hoistedLocations path is outside deployed node_modules: ${location}`)

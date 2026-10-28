@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 const root = resolve(import.meta.dirname, '..')
 const script = resolve(root, 'scripts/build-exe-for-python-sdk.ts')
 const temporaryDirectories: string[] = []
+const nodeCommand = process.execPath.includes(' ') ? JSON.stringify(process.execPath) : process.execPath
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -130,16 +131,16 @@ describe('Python runtime executable builder CLI', () => {
     )
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toContain(`${process.execPath} C:\\tools\\pnpm.cjs run verify-runtime-closure`)
+    expect(result.stdout).toContain(`${nodeCommand} C:\\tools\\pnpm.cjs run verify-runtime-closure`)
     expect(result.stdout).not.toMatch(/\[dry-run\] .* run build(?::src)?$/m)
-    expect(result.stdout).toContain(`${process.execPath} C:\\tools\\pnpm.cjs --filter dsh-python-runtime-closure deploy`)
+    expect(result.stdout).toContain(`${nodeCommand} C:\\tools\\pnpm.cjs --filter dsh-python-runtime-closure deploy`)
     const deploy = result.stdout.split('\n').find(line => line.includes(' --filter dsh-python-runtime-closure deploy'))
     expect(deploy).toContain('--prod --config.allow-unused-patches=true')
     expect(deploy).toContain('--config.hoist-workspace-packages=false')
     expect(result.stdout.split('--config.allow-unused-patches=true')).toHaveLength(2)
     expect(result.stdout).not.toContain(resolve(root, 'python/sdk-runtime/runtime-bootstrap.mjs'))
     expect(result.stdout).toContain('"bin":"runtime-bootstrap.mjs"')
-    expect(result.stdout).toContain(`${process.execPath} C:\\tools\\pnpm.cjs exec pkg`)
+    expect(result.stdout).toContain(`${nodeCommand} C:\\tools\\pnpm.cjs exec pkg`)
     expect(result.stdout).not.toMatch(/pnpm\.cmd/i)
   })
 
@@ -160,7 +161,8 @@ describe('Python runtime executable builder CLI', () => {
     )
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toContain(`${process.execPath} ${entrypoint} run verify-runtime-closure`)
+    const entrypointCommand = entrypoint.includes(' ') ? JSON.stringify(entrypoint) : entrypoint
+    expect(result.stdout).toContain(`${nodeCommand} ${entrypointCommand} run verify-runtime-closure`)
     expect(result.stdout).not.toMatch(/pnpm\.cmd/i)
   })
 

@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, parse, relative } from 'node:path'
 import { createRequire } from 'node:module'
 import { afterEach, expect, it } from 'vitest'
-import { deduplicateStagedWorkspacePackages, materializeStagedLinks } from './build-exe-for-python-sdk-staging.ts'
+import { deduplicateStagedWorkspacePackages, materializeStagedLinks, resolveDeployTarget } from './build-exe-for-python-sdk-staging.ts'
 
 const temporaryDirectories: string[] = []
 const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir'
@@ -18,6 +18,47 @@ async function fixture(prefix: string) {
   temporaryDirectories.push(workspace)
   return workspace
 }
+
+it('creates a fresh deploy parent without creating the target leaf', async () => {
+  const workspace = await fixture('dsh-python-deploy-fresh-')
+  const parent = join(workspace, 'runtime')
+  const target = join(parent, 'node')
+  await expect(resolveDeployTarget(target, workspace)).resolves.toBe(join(await realpath(workspace), 'runtime', 'node'))
+  expect(existsSync(parent)).toBe(true)
+  expect(existsSync(target)).toBe(false)
+})
+
+it('resolves a directory junction before passing the deploy destination to pnpm', async () => {
+  const workspace = await fixture('dsh-python-deploy-linked-')
+  const physical = join(workspace, 'physical')
+  const logical = join(workspace, 'logical')
+  await mkdir(physical)
+  await symlink(physical, logical, directoryLinkType)
+  await expect(resolveDeployTarget(join(logical, 'node'), workspace))
+    .resolves.toBe(join(await realpath(physical), 'node'))
+  expect(existsSync(join(physical, 'node'))).toBe(false)
+})
+
+it('rejects the filesystem root as a deploy destination before clearing anything', async () => {
+  const workspace = await fixture('dsh-python-deploy-root-')
+  await writeFile(join(workspace, 'retained'), 'keep')
+  await expect(resolveDeployTarget(parse(workspace).root, workspace))
+    .rejects.toThrow('contains the repository root')
+  await expect(readFile(join(workspace, 'retained'), 'utf8')).resolves.toBe('keep')
+})
+
+it.each(['repository', 'ancestor'] as const)('rejects a physical %s reached through a directory junction', async (target) => {
+  const workspace = await fixture('dsh-python-deploy-protected-')
+  const physical = join(workspace, 'physical')
+  const repository = join(physical, 'container', 'repo')
+  const logical = join(workspace, 'logical')
+  await mkdir(repository, { recursive: true })
+  await writeFile(join(repository, 'retained'), 'keep')
+  await symlink(physical, logical, directoryLinkType)
+  await expect(resolveDeployTarget(target === 'repository' ? join(logical, 'container', 'repo') : join(logical, 'container'), repository))
+    .rejects.toThrow('contains the repository root')
+  await expect(readFile(join(repository, 'retained'), 'utf8')).resolves.toBe('keep')
+})
 
 /** List every symbolic link below a directory. */
 async function listSymlinks(directory: string): Promise<string[]> {
@@ -97,6 +138,35 @@ it('shares an identical workspace package while retaining different peers and th
   const fromOther = createRequire(join(modules, 'other', 'entry.cjs'))
   expect(fromApp('@fixture/tools')).toBe(fromRoot('@fixture/tools'))
   expect(fromOther('@fixture/tools')).not.toBe(fromRoot('@fixture/tools'))
+})
+
+it('resolves a junction payload before comparing physical pnpm hoisted locations', async () => {
+  const workspace = await fixture('dsh-python-staging-physical-')
+  const physical = join(workspace, 'physical-runtime')
+  const logical = join(workspace, 'logical-runtime')
+  const staging = join(logical, 'node')
+  const modules = join(physical, 'node', 'node_modules')
+  const root = join(modules, 'tools')
+  const duplicate = join(modules, 'app', 'node_modules', 'tools')
+  const outside = join(workspace, 'source')
+  for (const directory of [root, duplicate, outside]) await mkdir(directory, { recursive: true })
+  await symlink(physical, logical, directoryLinkType)
+  const valid = { 'tools@file:packages/tools': [root, duplicate].map(path => relative(workspace, path)) }
+  await writeFile(join(modules, '.modules.yaml'), JSON.stringify({ hoistedLocations: {
+    ...valid,
+    'other@file:packages/other': [relative(workspace, outside)],
+  } }))
+
+  await expect(deduplicateStagedWorkspacePackages(staging, workspace)).rejects.toThrow('outside deployed node_modules')
+  expect(existsSync(duplicate)).toBe(true)
+  expect(existsSync(outside)).toBe(true)
+
+  await writeFile(join(modules, '.modules.yaml'), JSON.stringify({ hoistedLocations: valid }))
+  await deduplicateStagedWorkspacePackages(staging, workspace)
+
+  expect(existsSync(join(staging, 'node_modules', 'tools'))).toBe(true)
+  expect(existsSync(duplicate)).toBe(false)
+  expect(existsSync(outside)).toBe(true)
 })
 
 it('rejects invalid deployment metadata before removing any package', async () => {

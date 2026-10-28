@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { resolveLinuxNodePtyAddon, resolveWindowsNodePtyAddons } from './executable-native-pty.ts'
 import { officeSidecarArchives, runtimeNpmArchive, OFFICE_ASSET_IGNORES } from './build-exe-for-python-sdk-office.ts'
 import { syncPythonRuntimeProduct } from './build-exe-for-python-sdk-resources.ts'
-import { deduplicateStagedWorkspacePackages, materializeStagedLinks } from './build-exe-for-python-sdk-staging.ts'
+import { deduplicateStagedWorkspacePackages, materializeStagedLinks, resolveDeployTarget } from './build-exe-for-python-sdk-staging.ts'
 import { prepareOfficeSkillAssets } from './primary-runtime/prepare.ts'
 import primaryLock from './primary-runtime/lock.json' with { type: 'json' }
 
@@ -302,8 +302,12 @@ class SingleExeBuild {
     if (this.staging === root || root.startsWith(this.staging + sep)) {
       throw new Error(`build-exe-for-python-sdk: refusing to clear staging dir ${this.staging}: it contains the repo root.`)
     }
+    let deployTarget = this.staging
     if (this.cli.dryRun) console.log(`build-exe-for-python-sdk: [dry-run] rm -rf ${this.staging}`)
-    else await rm(this.staging, { recursive: true, force: true })
+    else {
+      deployTarget = await resolveDeployTarget(this.staging, root)
+      await rm(this.staging, { recursive: true, force: true })
+    }
     try { await this.runPnpm('deploy', [
       '--filter',
       DEPLOY_ROOT_PACKAGE,
@@ -316,7 +320,7 @@ class SingleExeBuild {
       '--config.auto-install-peers=false',
       '--config.link-workspace-packages=true',
       '--config.hoist-workspace-packages=false',
-      this.staging,
+      deployTarget,
     ]) } finally {
       // Legacy deploy records production-only workspace state; restore the development installation before exec.
       await this.runPnpm('restore development dependencies', ['install', '--offline', '--frozen-lockfile', '--prod=false', '--ignore-scripts'])
