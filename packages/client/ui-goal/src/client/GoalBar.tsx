@@ -1,7 +1,7 @@
 /**
  * GoalBar: the goal indicator docked above the message composer (input dock
  * strip). A present goal shows a goal glyph, a phase label, the truncated
- * objective, and icon actions — resume when active-disarmed or paused, edit
+ * objective, and icon actions — resume when active-disarmed, paused, or blocked, edit
  * (which opens the Session's goal-edit dialog), and clear. Goal creation lives
  * on the `/goal` command, not here: loading (undefined), no goal (null), and
  * complete goals render nothing. Durable state arrives as the projected whole
@@ -79,8 +79,7 @@ export function GoalBar({ goal, activation, onEdit, onPause, onResume, onClear, 
 
   const title = goal.phase === 'blocked' ? goal.blockedReason?.message : undefined
   const label = goal.phase === 'active' ? activeLabel(activation, t) : t(PHASE_LABELS[goal.phase])
-  const showResume = goal.phase === 'paused'
-    || (goal.phase === 'active' && activation === 'disarmed')
+  const showResume = goal.phase !== 'active' || activation === 'disarmed'
   return (
     <div className={css.dock} data-goal-bar>
       <div className={css.bar} title={title}>

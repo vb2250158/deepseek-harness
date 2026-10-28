@@ -25,7 +25,7 @@ The Web GUI goal surface shows both the durable goal state and its current proce
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin alongside `ui-conversation` and the goal domain package; the strip then appears as the second card in the composer-context stack (after Todo, before Queue) whenever the session has a goal. Todo and Goal use the same panel elevation above the composer. An armed active goal offers pause; an active-but-disarmed or paused goal offers resume; edit opens a ui-primitives Modal with the current objective as a multi-line draft. Saving reads the current goal revision; success closes the dialog, while failure keeps the draft and displays the error code. Clear removes the goal and suppresses the strip until the projection catches up.
+Mount this plugin alongside `ui-conversation` and the goal domain package; the strip then appears as the second card in the composer-context stack (after Todo, before Queue) whenever the session has a goal. Todo and Goal use the same panel elevation above the composer. An armed active goal offers pause; an active-but-disarmed, paused, or blocked goal offers resume; edit opens a ui-primitives Modal with the current objective as a multi-line draft. Saving reads the current goal revision; success closes the dialog, while failure keeps the draft and displays the error code. Clear removes the goal and suppresses the strip until the projection catches up.
 
 ### The command-input bubble
 
@@ -79,6 +79,7 @@ None unless the queued goal context is admitted. An admitted context extends the
 These limits define the current goal surface. They are current package constraints, not a goal-domain comparison or a task backlog.
 
 - **Preset-independent host state** — switching an active session to `minimal` leaves its host-owned goal intact. `/goal` and goal tools disappear, while this strip can still edit, pause, resume, or clear the goal.
+- **No round-budget control** — the strip cannot raise `maxGoalRounds`. Resuming a goal that used every round, such as one blocked by its round limit, fails with an inline error; ask the agent to raise the goal's round limit first.
 
 <a id="dev-note"></a>
 ### Dev Note
