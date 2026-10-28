@@ -5,8 +5,35 @@ import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionSeq, type Sessi
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it, vi } from 'vitest'
 import { createSessionTestController, testSessionPersistence } from './test-remote.ts'
+import { ApiSessionNotFound, inspectApiSession } from '../src/agent.ts'
 
 describe('Session inspection', () => {
+  it('reports a missing cold Session when persistence is absent', async () => {
+    const ctx = new Context()
+    try {
+      await expect(inspectApiSession(ctx, SessionId('absent-provider'))).rejects.toBeInstanceOf(ApiSessionNotFound)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('maps missing persisted identities while preserving provider failures', async () => {
+    const ctx = new Context()
+    const failure = new Error('fixture persistence unavailable')
+    try {
+      ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+        inspect: async (id) => {
+          if (id === SessionId('failed-provider')) throw failure
+          return undefined
+        },
+      }) as never)
+      await expect(inspectApiSession(ctx, SessionId('missing-stored'))).rejects.toBeInstanceOf(ApiSessionNotFound)
+      await expect(inspectApiSession(ctx, SessionId('failed-provider'))).rejects.toBe(failure)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it.each(['attached', 'stored'] as const)('reads the %s prefix without activating or repairing an Agent', async (mode) => {
     const ctx = new Context()
     try {

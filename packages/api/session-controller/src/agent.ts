@@ -9,7 +9,7 @@ import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { SessionPersistenceNotFoundError, type SessionInspection } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-typert-registry'
@@ -125,7 +125,7 @@ export function apiSessionSubagentOwnershipError(sessionId: SessionId): ApiSessi
 
 /**
  * Inspect one cold Session without repairing, resuming, or publishing it.
- * @param ctx - Host context carrying Session persistence.
+ * @param ctx - Host context with optional Session persistence; absence reports not found.
  * @param sessionId - durable Session identity.
  * @param signal - optional cancellation for persistence reads.
  * @returns the persisted header and complete event prefix.
@@ -137,6 +137,7 @@ export async function inspectApiSession(
 ): Promise<SessionInspection> {
   const persistence = ctx.get('sessionPersistence')
   if (persistence === undefined) throw new ApiSessionNotFound(`session "${sessionId}" not found`)
+  const { SessionPersistenceNotFoundError } = await import('@deepseek-ai/dsh-session-persistence')
   try {
     await using handle = await persistence.open(sessionId, 'read', signal === undefined ? undefined : { signal })
     if (handle.header.cwd === undefined) {

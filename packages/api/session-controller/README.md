@@ -27,7 +27,7 @@ Desktop analytics follows the [product collection policy](../../client/product-a
 <a id="use-this-package"></a>
 ## Use this package
 
-Host `ctx.sessionController.inspect()` reads attached or persisted history without activating an Agent, repairing storage, or publishing a migration. Cold inspection rejects missing Sessions and Sessions without a working directory.
+Host `ctx.sessionController.inspect()` reads attached or persisted history without activating an Agent, repairing storage, or publishing a migration. Attached inspection needs no persistence provider. Cold inspection requires a configured persistence provider and rejects missing Sessions and Sessions without a working directory.
 
 The controller reads a Session's recorded preset through the optional `agentPresets.presetForSession(session)` service method. A null result means no preset was recorded; an absent service means preset identity is unavailable to the controller.
 

@@ -27,7 +27,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-Host `ctx.sessionController.inspect()` 读取已附接或已持久化的历史，不激活 Agent、修复存储或发布迁移。冷态检查拒绝不存在或没有工作目录的 Session。
+Host `ctx.sessionController.inspect()` 读取已附接或已持久化的历史，不激活 Agent、修复存储或发布迁移。已附接的检查不需要持久化提供方。冷态检查需要已配置的持久化提供方，并拒绝不存在或没有工作目录的 Session。
 
 控制器通过可选服务方法 `agentPresets.presetForSession(session)` 读取 Session 已记录的预设。null 结果表示未记录预设；服务缺席表示控制器无法获知预设身份。
 
