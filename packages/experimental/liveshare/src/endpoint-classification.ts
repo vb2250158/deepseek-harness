@@ -206,6 +206,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'goals/pause': 'owner-only', // owner pauses a goal
   'goals/resume': 'owner-only', // owner resumes a goal
   'pluginInventory/list': 'owner-only', // owner plugin inventory
+  'pluginInventory/managementAvailable': 'owner-only', // owner profile-management availability
   'commands/execute': 'owner-only', // owner executes a slash command
   'permissionPresets/catalog': 'owner-only', // owner permission presets
   'userQuestions/answer': 'owner-only', // owner answers a pending question
