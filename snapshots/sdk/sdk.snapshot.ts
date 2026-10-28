@@ -136,6 +136,9 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
     patches: [fileURLToPath(new URL('./approval/runtime.cordis.yml', import.meta.url))],
   },
 
+  'multi-turn': { patches: [fileURLToPath(new URL('./no-shell.patch.yml', import.meta.url))] },
+  'session-resume': { patches: [fileURLToPath(new URL('./no-shell.patch.yml', import.meta.url))] },
+
   'desktop-context': {
     expectedFinalResponse: 'SDK snapshot OK',
     runtimeContext: {
@@ -914,7 +917,12 @@ async function verifyHeaders(
   dshSdkChildConfig?: Readonly<Record<string, unknown>>,
 ): Promise<void> {
   const pin = headerPin(scenario)
-  const [pinFixturePath] = await fixtureFiles(pin)
+  const [replayPinFixturePath] = await fixtureFiles(pin)
+  // Historical replay headers stay frozen; retained cases pin emitted headers
+  // against the committed current-writer oracle, never the new runtime output.
+  const pinFixturePath = pin.manifest.sessionFormat === undefined
+    ? replayPinFixturePath
+    : join(pin.dir, writerSnapshotName(0))
   const pinFixture = await readFile(pinFixturePath as string, 'utf8')
   const firstLine = pinFixture.split('\n').find(line => line.trim() !== '') ?? '{}'
   const pinHeader = JSON.parse(firstLine) as JsonObject

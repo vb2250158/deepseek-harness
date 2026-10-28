@@ -1,0 +1,5 @@
+# Multi-turn and resume fixtures exercise conversation state, not platform shells.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
