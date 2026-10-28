@@ -1072,6 +1072,27 @@ describe('DeepSeek e2e workflow', () => {
     expect(JSON.stringify(steps)).not.toContain('apt-get')
   })
 
+  it('probes spendable balance before the build and does not echo the key', () => {
+    const workflow = loadWorkflow('.github/workflows/e2e.yml')
+    const e2e = workflowJob(workflow, 'e2e')
+    if (!Array.isArray(e2e.steps)) throw new TypeError('DeepSeek e2e workflow must define steps')
+    const steps = e2e.steps.filter(isRecord)
+    const preflight = steps.find(step => step.name === 'Preflight (require spendable DEEPSEEK_API_KEY)')
+    const build = steps.find(step => step.name === 'Build (lib for the e2e example bins)')
+    if (preflight === undefined || build === undefined || typeof preflight.run !== 'string') {
+      throw new TypeError('DeepSeek e2e preflight must run before the build')
+    }
+    expect(preflight).toMatchObject({
+      run: 'pnpm exec tsx scripts/e2e-api-preflight.ts',
+      env: {
+        DEEPSEEK_API_KEY: '${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}',
+        DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+      },
+    })
+    expect(steps.indexOf(preflight)).toBeLessThan(steps.indexOf(build))
+    expect(preflight.run).not.toMatch(/echo |printenv/)
+  })
+
   it('bounds profile subprocess fan-out to the tested e2e default', () => {
     const workflow = loadWorkflow('.github/workflows/e2e.yml')
     const e2e = workflowJob(workflow, 'e2e')

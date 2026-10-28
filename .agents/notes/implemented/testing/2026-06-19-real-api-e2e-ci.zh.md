@@ -12,7 +12,7 @@ Status: implemented
 
 ## 决策
 
-一个与 ci.yml 分离的专用工作流 [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml) 使用 repo secret 对外部 API 运行且仅运行 `pnpm run test:e2e`，仅在可信事件上触发，并带有一个 preflight 检查：将缺失的 secret 转化为明确的失败而非虚假的绿色。无密钥工作流保持独立，使可 fork 的质量门禁与消费 secret 的真实 API 门禁各自拥有不同的触发和凭证策略。
+一个与 ci.yml 分离的专用工作流 [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml) 使用 repo secret 对外部 API 运行且仅运行 `pnpm run test:e2e`，仅在可信事件上触发，并带有一个 preflight 检查：将缺失的 secret，或无法消费额度的账号，转化为明确的失败，而不是虚假的绿色或一串无关断言失败。无密钥工作流保持独立，使可 fork 的质量门禁与消费 secret 的真实 API 门禁各自拥有不同的触发和凭证策略。
 
 ### 独立工作流，而非 ci.yml 中的一个 job
 
@@ -41,7 +41,7 @@ Dependabot 子句基于 PR **作者**（`pull_request.user.login`）而非 `gith
 
 ### Preflight：明确失败，绝不虚假报绿
 
-由于 job 仅在 secret 应当存在的可信事件上运行，preflight 是一个无条件的存在性检查：密钥为空→`exit 1` 并附带 `::error::` 注解指明需要配置的 secret 名称。这是让自跳过套件可以安全地作为门禁的关键。没有它，被删除/重命名/错误配置的 secret 会让 `test:e2e` 跳过所有真实套件并报告全绿——整个安全网的静默退化。该守卫将「secret 缺失」从不可见的虚假通过转化为可见的失败。（其正确性已在实际中验证：secret 存在之前的运行恰好在此步骤失败。）
+由于 job 仅在 secret 应当存在的可信事件上运行，[scripts/e2e-api-preflight.ts](../../../../scripts/e2e-api-preflight.ts) 在构建之前失败：`DEEPSEEK_API_KEY` 为空，或对固定 base URL 的一次 Messages 请求未被接受。空密钥以 `exit 1` 结束，并用 `::error::` 注解点名 `DEEPSEEK_API_KEY_EXTERNAL`；没有这项检查时，缺失的 secret 会让 `test:e2e` 跳过所有真实套件并报告全绿。非 2xx 响应同样以 `exit 1` 结束。HTTP 402、类型或代码为 `insufficient_balance` 或 `insufficient_balance_error` 的载荷，或写明 insufficient balance 的消息，会点名该账号并要求充值。此时 job 不跳过套件：跳过会在没有模型调用的情况下报告绿色。同一密钥的 `GET /models` 仍可能成功，而每次补全返回 402，因此模型列表不是可消费额度。探测对目录中的第一个官方模型发送 `max_tokens: 1` 和 `stream: true`，并带上 `x-api-key`、`anthropic-version: 2023-06-01` 和 `redirect: error`。它打印 `DEEPSEEK_API_KEY present.`、HTTP 状态和模型 id，从不打印密钥、密钥长度、请求头或响应体。
 
 ### Secret 映射与卫生
 
@@ -49,8 +49,8 @@ repo secret 命名为 `DEEPSEEK_API_KEY_EXTERNAL`；映射到适配器和测试�
 
 - **步骤级 secret。** `DEEPSEEK_API_KEY` 仅在 preflight 和 e2e 步骤的 `env:` 中设置，从不在 job 级设置——因此 checkout/setup-node/install 永远看不到它。依赖中被入侵的安装时生命周期脚本无法读取不在其环境中的 secret。
 - **`permissions: contents: read`。** job 仅读取仓库以运行测试；不需要写权限（无 PR 评论、无 status 写入），因此 `GITHUB_TOKEN` 降至最小权限。
-- **`DEEPSEEK_BASE_URL` 固定**为 e2e 步骤上的 `https://api.deepseek.com/anthropic`。适配器在未设置时会默认使用此值（[packages/llm/llm-deepseek/src/index.ts](../../../../packages/llm/llm-deepseek/src/index.ts) `PUBLIC_BASE_URL`），但显式固定具有自文档性和密封性——仓库根目录的 `.env`（如果存在，`vitest.e2e.config.ts` 会加载它）无法静默地将运行重定向到其他端点。
-- **不回显 secret。** preflight 仅打印 `DEEPSEEK_API_KEY present.`——不打印值或长度。
+- **`DEEPSEEK_BASE_URL` 固定**为 preflight 与 e2e 步骤上的 `https://api.deepseek.com/anthropic`。适配器在未设置时会默认使用此值（[packages/llm/llm-deepseek/src/index.ts](../../../../packages/llm/llm-deepseek/src/index.ts) `PUBLIC_BASE_URL`），但显式固定具有自文档性和密封性——仓库根目录的 `.env`（如果存在，`vitest.e2e.config.ts` 会加载它）无法静默地将运行重定向到其他端点。
+- **不回显 secret。** preflight 打印 `DEEPSEEK_API_KEY present.` 以及探测的 HTTP 状态和模型 id。它不打印密钥、密钥长度、请求头或响应体。
 
 ### 范围与运行时形态
 
@@ -90,10 +90,11 @@ DeepSeek 原生 `web_search` 探测已注册但会跳过。线上 Anthropic 兼�
 
 - **在 ci.yml 中添加消费 secret 的 job**：否决。会将无密钥、可 fork、始终为绿的门禁耦合到凭证可用性和不同的触发/并发策略上；不同的生命周期，不同的文件。
 - **省略 `pull_request` 触发器**（更小的密钥暴露面）：为获得合并前信号而否决；安全性章节承载了已接受的暴露分析。
+- **账号返回 insufficient balance 时跳过 `test:e2e`**：否决。套件会在没有模型调用的情况下报告绿色，与缺失 secret 造成的虚假绿色相同。preflight 让 job 失败并点名额度。
 
 ## 后果
 
-新增一个 CI 工作流和仓库的首个需要维护的 secret。真实 API 套件现在作为合并门禁（可信 PR 上的合并前门禁、主分支上的合并后门禁）并每夜运行，因此 agent 与外部 API 交互中的真实故障会在 CI 中浮现，而非仅在开发者的本地运行中出现——代价是每个可信 PR 和合并都会产生真实的（但内部免费的）API 调用。preflight 使 secret 配置错误变为自我通告而非静默禁用安全网。
+新增一个 CI 工作流和仓库的首个需要维护的 secret。真实 API 套件现在作为合并门禁（可信 PR 上的合并前门禁、主分支上的合并后门禁）并每夜运行，因此 agent 与外部 API 交互中的真实故障会在 CI 中浮现，而非仅在开发者的本地运行中出现——代价是每个可信 PR 和合并都会产生真实的（但内部免费的）API 调用。preflight 把缺失的 secret，或无法消费额度的密钥，变成构建前的失败，而不是静默跳过或一串无关断言失败。
 
 该设计带有已记录的约束表面：`pull_request` 触发器在密钥暴露方面的取舍（删除它可加强防护）、`if:` 门禁对基于作者的 Dependabot 检查的依赖，以及对 `pull_request_target` 的严格禁止。上方公开仓库检查清单是操作配套——未来维护者在更改触发器集合或切换仓库可见性之前，应重新阅读本 Agent Note，而不是从头推导 fork/secret 模型。
 
