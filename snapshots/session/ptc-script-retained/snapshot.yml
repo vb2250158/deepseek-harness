@@ -3,6 +3,7 @@ scenario: ptc-script-retained
 profile: headless
 composition: ptc
 recording: authored
+platform: posix
 header:
   class: ptc-script-retained
   pin: true
