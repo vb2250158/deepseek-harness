@@ -161,10 +161,12 @@ export interface EscalationRequest {
 
 /**
  * Resolve a sandbox permission request before execution. Repeating the call's
- * effective mode returns it without approval. A strictly wider mode requires
- * approval and applies only to this call. Narrower or unsupported targets,
- * missing approval services or agents for widening, and non-grant outcomes
- * throw before execution.
+ * effective mode returns it without approval. A request while the effective
+ * mode is already `danger-full-access` returns that mode without approval,
+ * because no wider file policy exists. A strictly wider mode requires approval
+ * and applies only to this call. Narrower or unsupported targets from any
+ * other effective mode, missing approval services or agents for widening, and
+ * non-grant outcomes throw before execution.
  * @param request - the escalation to judge (see {@link EscalationRequest}).
  * @param approval - the approval ingredients the tool holds (see {@link EscalationApproval}).
  * @returns the granted mode, consumed by the one call that asked.
