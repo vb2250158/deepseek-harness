@@ -29,7 +29,7 @@ kind: "package-reference"
 
 控制器通过可选服务方法 `agentPresets.presetForSession(session)` 读取 Session 已记录的预设。null 结果表示未记录预设；服务缺席表示控制器无法获知预设身份。
 
-Host 的 `inspect(sessionId)` 读取已附着或已持久化的事件前缀，不激活 Agent、不补充中断轮次的结束事件，也不发布迁移后的代际文件。
+Host 的 `inspect(sessionId)` 读取已附着或已持久化的事件前缀，不激活 Agent、不补充中断轮次的结束事件，也不发布迁移后的代际文件。未组合可选的持久化服务时，冷态检查返回 Session 不存在。
 
 历史页与 follow opening 快照为每个持久 Session 事件携带一条 `{ type: 'event', event: SessionWireEvent }` record。Client 把每条已接受 record 保留为一个持久 `SessionEventLikeEntry`；Assistant token 边界保留在 `assistant/message` 或 `assistant/attempt` 的紧凑流内。工具参数、结果内容、失败信息和 `tool/result.data.meta` 原样通过；控制器不解析工具定义、不运行展示转换器，也不附加 UI 数据。
 

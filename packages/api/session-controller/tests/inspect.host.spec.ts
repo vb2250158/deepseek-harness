@@ -5,8 +5,18 @@ import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionSeq, type Sessi
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it, vi } from 'vitest'
 import { createSessionTestController, testSessionPersistence } from './test-remote.ts'
+import { ApiSessionNotFound, inspectApiSession } from '../src/agent.ts'
 
 describe('Session inspection', () => {
+  it('reports a cold Session as missing without a persistence service', async () => {
+    const ctx = new Context()
+    try {
+      await expect(inspectApiSession(ctx, SessionId('memory-only'))).rejects.toBeInstanceOf(ApiSessionNotFound)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it.each(['attached', 'stored'] as const)('reads the %s prefix without activating or repairing an Agent', async (mode) => {
     const ctx = new Context()
     try {
