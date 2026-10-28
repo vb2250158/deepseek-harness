@@ -103,7 +103,7 @@ The caller's token is duplicated into a `WRITE_RESTRICTED` token whose restricti
 
 NUL writes are ambient, not granted: the device DACL grants Everyone read+write+execute (`0x1201BF`), so openers whose mask fits it (cmd `> NUL`, node `\\.\NUL`) can write it in both modes. `Set-Content NUL` fails in both modes (a PowerShell/.NET-layer effect, not the device DACL), while PowerShell's `> $null` redirection keeps working.
 
-Authenticated Users is absent from both lists — the WMI namespace security check fails (`0x80041003`), so CIM cmdlets and `Get-ComputerInfo` are unavailable in every confined mode, and the C:\-root tree-creation escape is closed. INTERACTIVE/LOCAL are absent too: the host's Public tree grants write to INTERACTIVE, so Public writes are denied.
+Authenticated Users is absent from both restricting lists. For standard and UAC-filtered callers, the WMI namespace security check fails (`0x80041003`), so CIM cmdlets and `Get-ComputerInfo` are unavailable. Elevated Administrators may retain WMI access; this sandbox does not isolate an administrator's system capabilities. The write-restricted ACL check still denies direct C:\-root tree creation. INTERACTIVE/LOCAL are absent too: the host's Public tree grants write to INTERACTIVE, so Public writes are denied.
 
 ### The confinement runner
 

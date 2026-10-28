@@ -19,9 +19,11 @@
  *    except for the documented Everyone and hard-link boundaries.
  *  - read-only: no capability-SID grants; the restricting list carries no
  *    capability SID, so a standing grant ACE from an earlier
- *    workspace-write period stays inert. BOTH modes drop Authenticated Users
- *    (CIM unavailable — documented in README) and INTERACTIVE/LOCAL (the
- *    Public tree writes are denied); the two lists share the keep-alive group
+ *    workspace-write period stays inert. Both modes omit Authenticated Users
+ *    and INTERACTIVE/LOCAL from their restricting lists. Standard or UAC-filtered
+ *    callers are denied CIM/WMI; elevated Administrators may retain WMI access.
+ *    This runner does not isolate an administrator's system capabilities.
+ *    Public-tree writes remain denied. Both lists share the keep-alive group
  *    (logon SID, EVERYONE) and differ only by the capabilities.
  *
  * `--write-sid` + `--temp-write-sid`: the seam's grant contract — the
