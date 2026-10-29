@@ -48,6 +48,21 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
     return { root, ctx, parent, header, descriptor, write, read }
   }
 
+  // The open reader keeps the prepared log reachable. The cold-log handoff
+  // stores it only in a WeakRef; collection rebuilds from the current files
+  // and publishes where these cases must refuse.
+  async function withLivePreparation<T>(
+    f: Awaited<ReturnType<typeof fixture>>,
+    body: (events: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['read']>>) => Promise<T>,
+  ): Promise<T> {
+    const reader = await f.ctx.sessionPersistence.open(f.parent, 'read')
+    try {
+      return await body((await reader.read()).events)
+    } finally {
+      await reader.close()
+    }
+  }
+
   it.each(['read', 'write'] as const)('refuses foreign native V4 delivery through %s access', async (access) => {
     const f = await fixture()
     await f.write(f.parent, [
@@ -293,9 +308,11 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
 
   it('detects children added after preparation instead of publishing incomplete membership', async () => {
     const f = await fixture()
-    expect(await f.read()).toEqual([])
-    await f.write('child', [f.descriptor], true)
-    await expect(f.ctx.sessionPersistence.open(f.parent, 'write')).rejects.toThrow(generationLogPath(f.root, undefined, SessionId('child'), 3, compression))
+    await withLivePreparation(f, async (events) => {
+      expect(events).toEqual([])
+      await f.write('child', [f.descriptor], true)
+      await expect(f.ctx.sessionPersistence.open(f.parent, 'write')).rejects.toThrow(generationLogPath(f.root, undefined, SessionId('child'), 3, compression))
+    })
     expect(await f.read()).toHaveLength(1)
     const writer = await f.ctx.sessionPersistence.open(f.parent, 'write')
     await writer.close()
@@ -304,9 +321,11 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
   it('recollects newly available discovery fields before publishing a prepared parent', async () => {
     const f = await fixture()
     const childPath = await f.write('child', [], true)
-    expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', mode: 'unknown' } }])
-    await f.write('child', [f.descriptor], true)
-    await expect(f.ctx.sessionPersistence.open(f.parent, 'write')).rejects.toThrow(childPath)
+    await withLivePreparation(f, async (events) => {
+      expect(events).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child', mode: 'unknown' } }])
+      await f.write('child', [f.descriptor], true)
+      await expect(f.ctx.sessionPersistence.open(f.parent, 'write')).rejects.toThrow(childPath)
+    })
     const parentPath = generationLogPath(f.root, undefined, f.parent, 3, compression)
     expect((await readdir(dirname(parentPath))).filter(name => name !== 'session.lock'))
       .toEqual([compression === 'none' ? 'session.v3.jsonl' : 'session.v3.jsonl.zstd'])
