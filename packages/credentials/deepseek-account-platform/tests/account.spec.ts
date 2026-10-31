@@ -1,3 +1,4 @@
+import { listenForFetch } from '../../../../scripts/test-http-listener.ts'
 import { createHash } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -140,7 +141,7 @@ async function fixture(
     res.end(JSON.stringify({ code: 0, data: { biz_code: businessCode, biz_msg: 'sensitive diagnostic', biz_data: value } }))
   }
   const server = createServer((req, res) => { void handle(req, res).catch(() => { res.writeHead(500).end() }) })
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenForFetch(server)
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('missing listener')
   origin = `http://127.0.0.1:${address.port}`
@@ -640,7 +641,7 @@ it('completes login through a local TCP forward using the browser port rather th
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => forward.close(() => { resolve() }))
   })
-  await new Promise<void>(resolve => forward.listen(0, '127.0.0.1', resolve))
+  await listenForFetch(forward)
   const address = forward.address()
   if (address === null || typeof address === 'string') throw new Error('missing forward listener')
   const forwardedOrigin = `http://127.0.0.1:${address.port}`

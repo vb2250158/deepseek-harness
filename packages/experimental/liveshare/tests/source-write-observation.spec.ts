@@ -259,7 +259,7 @@ describe('bounded write under the observation policy', () => {
     mkdirSync(outside)
     writeFileSync(join(outside, 'theirs.txt'), 'theirs\n')
     renameSync(parent, held)
-    symlinkSync(outside, parent)
+    symlinkSync(outside, parent, process.platform === 'win32' ? 'junction' : 'dir')
 
     const read = await call('read', { file_path: join(parent, 'theirs.txt') })
     expect(read.isError).toBe(true)

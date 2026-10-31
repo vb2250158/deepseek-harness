@@ -1,3 +1,4 @@
+import type { TestContext } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -159,7 +160,7 @@ describe('session facts from the agent', () => {
 })
 
 describe('files through the filesystem seam', () => {
-  it('resolves against the session cwd or the filesystem cwd, enforces the size limits, and reports links', async () => {
+  it.for([false, true])('resolves against cwd and enforces size limits (file symlinks: %s)', async (withLinks, context) => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-cc-mods-fs-'))
     dirs.push(root)
     const ctx = new Context()
@@ -168,15 +169,19 @@ describe('files through the filesystem seam', () => {
     provideWorkingDirectoryFixture(ctx)
     writeFileSync(join(root, 'small.txt'), 'small')
     writeFileSync(join(root, 'big.txt'), Buffer.alloc(FS_MAX_BYTES + 1, 97))
-    symlinkSync(join(root, 'small.txt'), join(root, 'link.txt'))
-    symlinkSync(join(root, 'gone.txt'), join(root, 'dangling.txt'))
+    if (withLinks) {
+      fileLink(join(root, 'small.txt'), join(root, 'link.txt'), context)
+      fileLink(join(root, 'gone.txt'), join(root, 'dangling.txt'), context)
+    }
     expect(await call('fs.read', { path: 'small.txt' })).toBe('small')
     expect(await call('fs.read', { path: 'small.txt' }, fakeAgent(ctx, { cwd: root }))).toBe('small')
     await expect(call('fs.read', { path: 'big.txt' })).rejects.toThrow(/larger than/)
     await expect(call('fs.write', { path: 'out.txt', text: 'x'.repeat(FS_MAX_BYTES + 1) })).rejects.toThrow(/larger than/)
     await expect(call('fs.write', { path: 1, text: 'x' })).rejects.toThrow('$.fs.write path must be a string')
-    expect(await call('fs.stat', { path: 'link.txt' })).toEqual({ kind: 'file', size: 5, mtimeMs: 0, isLink: true })
-    expect(await call('fs.stat', { path: 'dangling.txt' })).toEqual({ kind: 'other', size: 0, mtimeMs: 0, isLink: true })
+    if (withLinks) {
+      expect(await call('fs.stat', { path: 'link.txt' })).toEqual({ kind: 'file', size: 5, mtimeMs: 0, isLink: true })
+      expect(await call('fs.stat', { path: 'dangling.txt' })).toEqual({ kind: 'other', size: 0, mtimeMs: 0, isLink: true })
+    }
     expect(await call('fs.stat', { path: 'small.txt' }, fakeAgent(ctx, { cwd: root }))).toMatchObject({ kind: 'file', isLink: false })
     expect(await call('fs.stat', { path: '.' })).toMatchObject({ kind: 'dir', isLink: false })
     const listed = await call('fs.list', { path: '.' }) as { name: string; kind: string }[]
@@ -285,7 +290,7 @@ describe('ui.log sinks', () => {
 
 
 describe('the committed directory owner', () => {
-  it('moves session cwd, relative files and new processes while retaining the project root', async () => {
+  it.for([false, true])('moves cwd, relative files and new processes while retaining the root (file symlinks: %s)', async (withLinks, context) => {
     const allocated = mkdtempSync(join(tmpdir(), 'dsh-mods-directory-'))
     dirs.push(allocated)
     // Native realpath expands Windows short-name temp paths before exact cwd comparisons.
@@ -313,15 +318,17 @@ describe('the committed directory owner', () => {
     await call('fs.write', { path: 'created.txt', text: 'selected output' }, agent)
     expect(await call('fs.exists', { path: join(origin, 'created.txt') }, agent)).toBe(false)
     expect(await call('fs.read', { path: join(current, 'created.txt') }, agent)).toBe('selected output')
-    symlinkSync(join(current, 'witness.txt'), join(current, 'link.txt'))
-    const lstat = ctx.fs.lstat.bind(ctx.fs)
-    vi.spyOn(ctx.fs, 'lstat').mockImplementationOnce(async (path, options, signal) => {
-      const info = await lstat(path, options, signal)
-      await ctx.workingDirectory.set(agent, origin)
-      return info
-    })
-    expect(await call('fs.stat', { path: 'link.txt' }, agent)).toMatchObject({ kind: 'file', size: 7, isLink: true })
-    await ctx.workingDirectory.set(agent, current)
+    if (withLinks) {
+      fileLink(join(current, 'witness.txt'), join(current, 'link.txt'), context)
+      const lstat = ctx.fs.lstat.bind(ctx.fs)
+      vi.spyOn(ctx.fs, 'lstat').mockImplementationOnce(async (path, options, signal) => {
+        const info = await lstat(path, options, signal)
+        await ctx.workingDirectory.set(agent, origin)
+        return info
+      })
+      expect(await call('fs.stat', { path: 'link.txt' }, agent)).toMatchObject({ kind: 'file', size: 7, isLink: true })
+      await ctx.workingDirectory.set(agent, current)
+    }
     expect(await call('process.run', { argv: [process.execPath, '-e', 'process.stdout.write(process.cwd())'] }, agent)).toEqual({ exitCode: 0, stdout: current, stderr: '' })
     expect(await call('process.run', { argv: [process.execPath, '-e', 'process.stdout.write(process.cwd())'], init: { cwd: origin } }, agent)).toEqual({ exitCode: 0, stdout: origin, stderr: '' })
     expect(ctx.workingDirectory.get(agent.session)).toBe(current)
@@ -338,3 +345,15 @@ describe('the committed directory owner', () => {
     }
   })
 })
+
+/** Create a real file link, skipping only a Windows privilege denial. */
+function fileLink(source: string, target: string, context: TestContext): void {
+  try {
+    symlinkSync(source, target, 'file')
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return context.skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+    }
+    throw error
+  }
+}

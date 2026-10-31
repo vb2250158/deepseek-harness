@@ -6,7 +6,7 @@ import { expect, it, onTestFinished } from 'vitest'
 import { validateGeneratedBundle } from '../src/generated-bundle.ts'
 import { writeBundle } from './fixture.ts'
 
-it('admits new package rows and its exports, rejecting edits, duplicates, foreign rows and escaping files', async () => {
+it.for([false, true])('admits new package rows and its exports, rejecting edits, duplicates, foreign rows and escaping files (file links: %s)', async (withLinks, { skip }) => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-created-bundle-'))
   const outside = await mkdtemp(join(tmpdir(), 'dsh-outside-bundle-'))
   onTestFinished(async () => { await rm(directory, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) })
@@ -31,8 +31,15 @@ it('admits new package rows and its exports, rejecting edits, duplicates, foreig
   await writeBundle(directory, name)
   await writeBundle(outside, name)
   await rm(patch)
-  await symlink(join(outside, 'cordis.patch.yml'), patch)
-  await expect(validateGeneratedBundle(directory, name)).rejects.toThrow('remain inside')
+  if (withLinks) {
+    try {
+      await symlink(join(outside, 'cordis.patch.yml'), patch)
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+      throw error
+    }
+  }
+  if (withLinks) await expect(validateGeneratedBundle(directory, name)).rejects.toThrow('remain inside')
 })
 
 it('accepts ordinary YAML but rejects custom tags, aliases, missing exports and unbuilt entries', async () => {
@@ -57,7 +64,7 @@ it('accepts ordinary YAML but rejects custom tags, aliases, missing exports and 
   await expect(validateGeneratedBundle(directory, name)).rejects.toThrow()
 })
 
-it('keeps an internal relative runtime link usable after copying and deleting the workspace source', async () => {
+it('keeps an internal relative runtime link usable after copying and deleting the workspace source', async ({ skip }) => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-created-link-'))
   onTestFinished(() => rm(root, { recursive: true, force: true }))
   const source = join(root, 'source'), installed = join(root, 'installed')
@@ -68,7 +75,12 @@ it('keeps an internal relative runtime link usable after copying and deleting th
   await writeFile(join(source, 'assets', 'note.txt'), 'local asset')
   await writeFile(join(source, 'runtime.mjs'), 'export const value = 42')
   await rm(join(source, 'index.js'))
-  await symlink('./runtime.mjs', join(source, 'index.js'))
+  try {
+    await symlink('./runtime.mjs', join(source, 'index.js'))
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+    throw error
+  }
   await validateGeneratedBundle(source, name)
   await cp(source, installed, { recursive: true, verbatimSymlinks: true })
   await rm(source, { recursive: true })

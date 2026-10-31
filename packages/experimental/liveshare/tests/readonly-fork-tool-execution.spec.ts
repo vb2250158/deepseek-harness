@@ -1,3 +1,4 @@
+import type { TestContext } from 'vitest'
 /**
  * A fork child's limit driven through the real tool runtime, the real local filesystem, and the
  * shipped `read`/`write` tools.
@@ -131,8 +132,6 @@ beforeEach(async () => {
   outside = mkdtempSync(join(tmpdir(), 'liveshare-child-outside-'))
   writeFileSync(join(root, 'inside.ts'), 'export const inside = 1\n')
   writeFileSync(join(outside, 'secret.txt'), 'owner-only\n')
-  // A link the child can name from inside its workspace, whose target is not inside it.
-  symlinkSync(join(outside, 'secret.txt'), join(root, 'link.txt'))
 
   ctx = new Context()
   provideWorkingDirectoryFixture(ctx, root)
@@ -252,14 +251,18 @@ describe('fork child tool execution', () => {
     expect((await call('read', { file_path: path })).isError).toBe(true)
   })
 
-  it('refuses an outside path and a symlink escape without running the tool body', async () => {
+  it('refuses an outside path without running the tool body', async () => {
     installLimit()
 
     const outsideResult = await call('read', { file_path: join(outside, 'secret.txt') })
     expect(outsideResult.isError).toBe(true)
     expect(text(outsideResult)).toMatch(/workspace it was granted/u)
     expect(text(outsideResult)).not.toContain('owner-only')
+  })
 
+  it('refuses a symlink escape without running the tool body', async (context) => {
+    fileLink(join(outside, 'secret.txt'), join(root, 'link.txt'), context)
+    installLimit()
     // The path is inside the workspace; the file it resolves to is not.
     const escaped = await call('read', { file_path: join(root, 'link.txt') })
     expect(escaped.isError).toBe(true)
@@ -410,7 +413,7 @@ describe('fork child tool execution', () => {
 
   it('refuses a search root that is a link out of the grant', async () => {
     const linked = join(root, 'linked-out')
-    symlinkSync(outside, linked)
+    symlinkSync(outside, linked, process.platform === 'win32' ? 'junction' : 'dir')
     const calls: unknown[] = []
     ctx.tools.register(defineTool({
       name: 'glob',
@@ -880,7 +883,7 @@ describe('fork child tool execution', () => {
     mkdirSync(join(other, 'leaf'), { recursive: true })
     writeFileSync(join(other, 'leaf', 'inside.ts'), 'OUTSIDE-ROOT\n')
     rmSync(join(tree, 'granted'), { recursive: true, force: true })
-    symlinkSync(other, join(tree, 'granted'))
+    symlinkSync(other, join(tree, 'granted'), process.platform === 'win32' ? 'junction' : 'dir')
 
     const result = await call('read', { file_path: join(root, 'inside.ts') })
 
@@ -888,11 +891,11 @@ describe('fork child tool execution', () => {
     expect(result.isError).toBe(true)
   })
 
-  it('keeps the authorized target when a link inside the grant is repointed before dispatch', async () => {
+  it('keeps the authorized target when a link inside the grant is repointed before dispatch', async (context) => {
     installLimit()
     // A name that resolves inside the grant when the pre-execute check runs.
     const link = join(root, 'link-inside.txt')
-    symlinkSync(join(root, 'inside.ts'), link)
+    fileLink(join(root, 'inside.ts'), link, context)
     const swap = ctx.on('tools/pre-execute', (_exec, next) => {
       // Registered after the limit, so it runs after the grant check and before dispatch: the escape a
       // path-only check cannot see.
@@ -926,7 +929,9 @@ describe('fork child tool execution', () => {
     expect(text(afterRelease)).toMatch(/limits are not installed/u)
   })
 
-  it('would read the repointed file if nothing confined what the tool opens', async () => {
+  it('would read the repointed file if nothing confined what the tool opens', async (context) => {
+    const link = join(root, 'link-control.txt')
+    fileLink(join(root, 'inside.ts'), link, context)
     // Control for the repointed-path test above: the same swap under the same guard, but with the
     // deployment's read tool still holding the name and no check inside the tool itself. The escape is
     // real, so the refusal above is the fork-scoped read's doing rather than the pipeline's.
@@ -951,8 +956,6 @@ describe('fork child tool execution', () => {
       releaseEnforcement: (id) => { forks.releaseEnforcement(id) },
     })
     expect(dispose).toBeDefined()
-    const link = join(root, 'link-control.txt')
-    symlinkSync(join(root, 'inside.ts'), link)
     const swap = ctx.on('tools/pre-execute', (_exec, next) => {
       rmSync(link, { force: true })
       symlinkSync(join(outside, 'secret.txt'), link)
@@ -967,3 +970,15 @@ describe('fork child tool execution', () => {
     }
   })
 })
+
+/** Create a real file link, skipping only a Windows privilege denial. */
+function fileLink(source: string, target: string, context: TestContext): void {
+  try {
+    symlinkSync(source, target, 'file')
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return context.skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+    }
+    throw error
+  }
+}

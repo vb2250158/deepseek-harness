@@ -61,12 +61,19 @@ describe('workspaceFiles.stat', () => {
     expect(result).toEqual({ absolutePath: result.absolutePath, version: 'v-sizeless' })
   })
 
-  it('accepts outside files and refuses symlinks, directories, missing and empty paths', async () => {
+  it.for([false, true])('accepts outside files and refuses symlinks, directories, missing and empty paths (file links: %s)', async (withLinks, { skip }) => {
     await writeFile(join(harness.outside, 'secret.txt'), 'no', 'utf8')
-    await symlink(join(harness.outside, 'secret.txt'), join(harness.workspace, 'link.txt'))
+    if (withLinks) {
+      try {
+        await symlink(join(harness.outside, 'secret.txt'), join(harness.workspace, 'link.txt'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
+    }
     await mkdir(join(harness.workspace, 'src'))
     const endpoint = harness.endpoint()
-    expect(await failureOf(endpoint.stat(harness.scope, 'link.txt', signal()))).toMatchObject({
+    if (withLinks) expect(await failureOf(endpoint.stat(harness.scope, 'link.txt', signal()))).toMatchObject({
       code: 'workspace-file/not-regular-file',
       details: { kind: 'symlink' },
     })

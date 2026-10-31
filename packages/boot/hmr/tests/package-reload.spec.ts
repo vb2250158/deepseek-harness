@@ -538,7 +538,7 @@ export default class Addon {
   expect(f.trace).toEqual(['start:service'])
 })
 
-it.each(['link', 'missing'] as const)('finds the host module graph through a process entry given as a %s path', async (kind) => {
+it.for(['link', 'missing'] as const)('finds the host module graph through a process entry given as a %s path', async (kind, { skip }) => {
   const argv = process.argv
   onTestFinished(() => { process.argv = argv })
   const f = await fixture(undefined, async (home, dir) => {
@@ -546,7 +546,18 @@ it.each(['link', 'missing'] as const)('finds the host module graph through a pro
     file(main, "import './node_modules/shared-lib/index.mjs'\n")
     await ModuleLoader.fromInternal()!.import(pathToFileURL(main).href, import.meta.url, {})
     const entry = join(home, 'bin-dsh')
-    if (kind === 'link') symlinkSync(main, entry)
+    if (kind === 'link') {
+      try {
+        symlinkSync(main, entry)
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+          // The fixture has not booted or registered its ordinary teardown yet.
+          onTestFinished(() => { rmSync(home, { recursive: true, force: true }) })
+          return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+        }
+        throw error
+      }
+    }
     process.argv = [argv[0]!, entry]
   })
   shared(f.dir, 2)

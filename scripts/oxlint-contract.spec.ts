@@ -1,5 +1,5 @@
 /**
- * Process-spawning cases set Vitest's case timeout to 90 seconds, including
+ * Process-spawning cases allow Windows aggregate type loading up to 180 seconds (90 elsewhere), including
  * plain local runs without a CI override. Configuration-only cases keep the default.
  */
 import { spawnSync } from 'node:child_process'
@@ -10,6 +10,8 @@ import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { flattenDiagnosticMessageText, parseConfigFileTextToJson } from 'typescript'
 import { describe, expect, it } from 'vitest'
+
+const PROCESS_TEST_TIMEOUT = process.platform === 'win32' ? 180_000 : 90_000
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url))
 const oxlintCli = fileURLToPath(new URL('../node_modules/oxlint/bin/oxlint', import.meta.url))
@@ -27,15 +29,15 @@ function runRepositoryOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {
   return spawnSync(process.execPath, [tsxCli, 'scripts/run-oxlint.ts', ...args], {
     cwd: repositoryRoot,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1', ...env },
+    env: { ...process.env, NO_COLOR: '1', DSH_OXLINT_THREADS: '2', ...env },
   })
 }
 
 function runOxlint(args: readonly string[], env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [oxlintCli, ...args], {
+  return spawnSync(process.execPath, [oxlintCli, '--threads=2', ...args], {
     cwd: repositoryRoot,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1', ...env },
+    env: { ...process.env, NO_COLOR: '1', GOMAXPROCS: '2', ...env },
   })
 }
 
@@ -109,7 +111,7 @@ probePromise()
         rm(configPath, { force: true }),
       ])
     }
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('runs JavaScript compatibility and nursery rules', async () => {
     const suffix = randomUUID()
@@ -156,7 +158,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
         rm(configPath, { force: true }),
       ])
     }
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('keeps the complete stylistic contract in Oxlint', async () => {
     const oxlintPath = join(repositoryRoot, '.oxlintrc.json')
@@ -209,7 +211,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
 
     expect(result.error).toBeUndefined()
     expect(result.status, normalizedOutput(result)).toBe(0)
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('keeps repository lint workflows Oxlint-only', async () => {
     const packageJson: unknown = JSON.parse(await readFile(join(repositoryRoot, 'package.json'), 'utf8'))
@@ -256,7 +258,7 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
         rm(configPath, { force: true }),
       ])
     }
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('allows Session history reads only in tests or with existing-call waivers', async () => {
     const suffix = randomUUID()
@@ -349,7 +351,7 @@ export function unrelatedRead(): void {
         rm(configPath, { force: true }),
       ])
     }
-  }, 90_000)
+  }, process.platform === 'win32' ? PROCESS_TEST_TIMEOUT * 2 : PROCESS_TEST_TIMEOUT)
 
   it('accepts an ignored-only staged selection', () => {
     const result = runOxlint([
@@ -360,7 +362,7 @@ export function unrelatedRead(): void {
 
     expect(result.error).toBeUndefined()
     expect(result.status, normalizedOutput(result)).toBe(0)
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('keeps staged validation project-free while preserving source rules', async () => {
     const configPath = join(repositoryRoot, '.oxlintrc.staged.json')
@@ -396,7 +398,7 @@ export function unrelatedRead(): void {
     } finally {
       await rm(path, { force: true })
     }
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('preserves successful fix output channels', async () => {
     const suffix = randomUUID()
@@ -420,7 +422,7 @@ export function unrelatedRead(): void {
     } finally {
       await rm(path, { force: true })
     }
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it('prints only the final diagnostics when a fix retry still fails', async () => {
     const suffix = randomUUID()
@@ -444,7 +446,7 @@ export function unrelatedRead(): void {
     } finally {
       await rm(path, { force: true })
     }
-  }, 90_000)
+  }, PROCESS_TEST_TIMEOUT)
 
   it.each(['--fix', '--fix-suggestions', '--fix-dangerously'])(
     'converges overlapping staged stylistic fixes through Oxlint under %s',

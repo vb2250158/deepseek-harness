@@ -1,7 +1,8 @@
 /** Command discovery and complete output preservation for the CLI reference. */
 
 import { describe, expect, it } from 'vitest'
-import { collectCliHelp, parseCliHelp, prefetchHelp, topLevelHelpArgs } from './gen-cli-help.ts'
+import { cliHelpConcurrency, cliHelpTimeout, collectCliHelp, parseCliHelp, prefetchHelp, topLevelHelpArgs } from './gen-cli-help.ts'
+import { defaultParallelism } from './parallelism.ts'
 
 interface PendingRead {
   args: string
@@ -84,6 +85,23 @@ describe('CLI help discovery', () => {
 })
 
 describe('CLI help prefetch', () => {
+  it('uses the Windows process-test budget without widening POSIX deadlines', () => {
+    expect(cliHelpTimeout('win32')).toBe(90_000)
+    expect(cliHelpTimeout('linux')).toBe(30_000)
+    expect(cliHelpTimeout('darwin')).toBe(30_000)
+  })
+
+  it('uses the explicit gate budget for nested profile boots', () => {
+    expect(cliHelpConcurrency({ DSH_GATE_CONCURRENCY: '1' })).toBe(1)
+    expect(cliHelpConcurrency({ DSH_GATE_CONCURRENCY: '2' })).toBe(2)
+    expect(cliHelpConcurrency({})).toBe(defaultParallelism({}))
+    expect(cliHelpConcurrency({ DSH_GATE_CONCURRENCY: '' })).toBe(defaultParallelism({}))
+  })
+
+  it.each(['0', '-1', '1.5', 'invalid'])('rejects an invalid gate budget %j', (raw) => {
+    expect(() => cliHelpConcurrency({ DSH_GATE_CONCURRENCY: raw })).toThrow('DSH_GATE_CONCURRENCY must be a positive integer')
+  })
+
   it('starts prefetched reads within the limit and serves them in request order', async () => {
     const { reads, read } = controlledReads()
     const reader = prefetchHelp(read, [['a'], ['b'], ['c']], 2)

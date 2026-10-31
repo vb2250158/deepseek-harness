@@ -171,9 +171,9 @@ it('reports a repository Git cannot fetch as denied', async () => {
 })
 
 it('stops a fetch once the repository grows past its limit, and deletes the repository', async () => {
-  const source = repository('e', { 'README.md': 'x' })
-  // The empty repository already exceeds one byte, so the first size check stops Git.
-  const repositories = cache({ maxRepositoryBytes: 1 })
+  const source = repository('e', { 'README.md': 'x', ...Object.fromEntries(Array.from({ length: 256 }, (_value, index) => [`dir${String(index)}/f.txt`, String(index)])) })
+  // Leave room for Git diagnostics while the tree objects (not filtered blobs) exceed the repository budget.
+  const repositories = cache({ maxRepositoryBytes: 4096 })
   await expect(repositories.read(source.url, source.commit, 'README.md', 100, signal)).rejects.toMatchObject({ reason: 'too-large' })
   expect(readdirSync(join(root, 'cache'))).toEqual([])
 })
@@ -200,7 +200,7 @@ it('deletes least recently used repositories beyond the cache size and stale sta
   mkdirSync(join(root, 'cache', '.init-running'))
   writeFileSync(join(root, 'cache', 'stray.txt'), 'not a repository')
   // An entry that disappears while it is measured no longer counts.
-  symlinkSync(join(root, 'gone'), join(root, 'cache', 'vanished'))
+  symlinkSync(join(root, 'gone'), join(root, 'cache', 'vanished'), process.platform === 'win32' ? 'junction' : 'dir')
   await repositories.read(first.url, first.commit, 'README.md', 100, signal)
   expect(readdirSync(join(root, 'cache')).filter(name => name.startsWith('.init-'))).toEqual(['.init-running'])
   rmSync(join(root, 'cache', '.init-running'), { recursive: true })

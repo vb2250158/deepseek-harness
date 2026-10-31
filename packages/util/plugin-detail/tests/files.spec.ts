@@ -42,14 +42,28 @@ function serve(routes: Record<string, Error | (() => Response)>) {
   return fetch
 }
 
-it('reads package files and README names, and refuses paths whose real location leaves the package', async () => {
+it.for([false, true])('reads package files and README names, and refuses paths whose real location leaves the package (file links: %s)', async (withLinks, { skip }) => {
   file('pkg/README.md', '# Pkg')
   file('pkg/docs/readme', 'docs')
   file('pkg/big.md', 'x'.repeat(20))
   file('outside.md', 'secret')
-  symlinkSync(join(root, 'outside.md'), join(root, 'pkg', 'link.md'))
+  if (withLinks) {
+    try {
+      symlinkSync(join(root, 'outside.md'), join(root, 'pkg', 'link.md'))
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+      throw error
+    }
+  }
   file('escaping/x', '')
-  symlinkSync(join(root, 'outside.md'), join(root, 'escaping', 'README.md'))
+  if (withLinks) {
+    try {
+      symlinkSync(join(root, 'outside.md'), join(root, 'escaping', 'README.md'))
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+      throw error
+    }
+  }
   const files = localFiles(join(root, 'pkg'), '1.0.0')
   expect(files.key).toBe(`local:${join(root, 'pkg')}@1.0.0`)
   expect(text(await files.read('README.md', 100, signal))).toBe('# Pkg')

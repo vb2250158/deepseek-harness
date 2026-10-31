@@ -53,19 +53,33 @@ describe('workspaceFiles.list — the happy path', () => {
     expect(listing.entries.map(entry => entry.name)).toEqual(['a.ts'])
   })
 
-  it('reports a symlink child as what it points to, and a dangling one as other', async () => {
+  it.for([false, true])('reports a symlink child as what it points to, and a dangling one as other (file links: %s)', async (withLinks, { skip }) => {
     await writeFile(join(workspace, 'real.txt'), 'x', 'utf8')
     await mkdir(join(workspace, 'dir'))
-    await symlink(join(workspace, 'real.txt'), join(workspace, 'to-file'))
-    await symlink(join(workspace, 'dir'), join(workspace, 'to-dir'))
-    await symlink(join(workspace, 'missing'), join(workspace, 'dangling'))
+    if (withLinks) {
+      try {
+        await symlink(join(workspace, 'real.txt'), join(workspace, 'to-file'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
+    }
+    await symlink(join(workspace, 'dir'), join(workspace, 'to-dir'), process.platform === 'win32' ? 'junction' : 'dir')
+    if (withLinks) {
+      try {
+        await symlink(join(workspace, 'missing'), join(workspace, 'dangling'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
+    }
     const listing = await endpoint().list(harness.scope, '.', signal())
     expect(listing.entries).toEqual([
-      { name: 'dangling', type: 'other' },
+      ...withLinks ? [{ name: 'dangling', type: 'other' }] : [],
       { name: 'dir', type: 'directory' },
       { name: 'real.txt', type: 'file', size: 1 },
       { name: 'to-dir', type: 'directory' },
-      { name: 'to-file', type: 'file', size: 1 },
+      ...withLinks ? [{ name: 'to-file', type: 'file', size: 1 }] : [],
     ])
   })
 

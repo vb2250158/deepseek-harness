@@ -27,10 +27,17 @@ import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent
 import * as Recommendations from '../src/index.ts'
 import { RESULT_TEXT, writeBundle } from './fixture.ts'
 
-it.each(['portable-bundle', 'foreign-nested-row'] as const)('validates and installs through pnpm/HMR: %s', async (scenario) => {
+for (const scenario of ['portable-bundle', 'portable-linked-bundle', 'foreign-nested-row'] as const) it(`validates and installs through pnpm/HMR: ${scenario}`, async (context) => {
   const home = await mkdtemp(join(tmpdir(), 'dsh-creation-loader-'))
   let owner: Context | undefined
   onTestFinished(async () => { await owner?.fiber.dispose(); await rm(home, { recursive: true, force: true }) })
+  if (scenario === 'portable-linked-bundle') {
+    await writeFile(join(home, 'probe.mjs'), '')
+    try { await symlink('./probe.mjs', join(home, 'probe-link.mjs'), 'file') } catch (error) {
+      if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') { context.skip('Windows file symlink privilege unavailable'); return }
+      throw error
+    }
+  }
   const dir = join(home, 'profiles', 'test')
   const base = join(home, 'fixture-base')
   const anchor = join(home, 'package.json')
@@ -69,7 +76,7 @@ it.each(['portable-bundle', 'foreign-nested-row'] as const)('validates and insta
           id: instructions.packageName + ':group', name: instructions.packageName, group: true,
           config: [{ id: 'access', name: instructions.packageName }],
         }] }]))
-      } else {
+      } else if (scenario === 'portable-linked-bundle') {
         await rename(join(spec.request.cwd!, 'index.js'), join(spec.request.cwd!, 'runtime.mjs'))
         await symlink('./runtime.mjs', join(spec.request.cwd!, 'index.js'))
       }

@@ -145,10 +145,17 @@ describe('workspaceFiles.readBytes — base file', () => {
       .toBe('workspace-file/not-regular-file')
   })
 
-  it('rejects a related symlink rather than following it', async () => {
+  it('rejects a related symlink rather than following it', async ({ skip }) => {
     await writeFile(join(harness.workspace, 'base'), 'base')
     await writeFile(join(harness.workspace, 'target'), 'target')
-    await symlink('target', join(harness.workspace, 'link'))
+    try {
+      await symlink('target', join(harness.workspace, 'link'))
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip('Windows denied file symlink creation')
+      }
+      throw error
+    }
     expect((await failureOf(harness.endpoint().readBytes(harness.scope, 'link', { baseFile: 'base' }, signal()))).code).toBe('workspace-file/not-regular-file')
   })
 })

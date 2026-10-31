@@ -56,7 +56,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Electron console signals'
       "writeFileSync(ready, 'ready')",
       'setInterval(() => {}, 1000)', '',
     ].join('\n'))
-  })
+  }, 90_000) // Starting MSVC and compiling the native console probe can exceed the normal hook budget.
 
   afterAll(async () => {
     if (root === undefined) return

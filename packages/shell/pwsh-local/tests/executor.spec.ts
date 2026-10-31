@@ -1,3 +1,4 @@
+import type { TestContext } from 'vitest'
 /**
  * Real-process tests for `@deepseek-ai/dsh-pwsh-local`: the LOCAL subprocess
  * service plus a REAL pwsh executable, exercised through the executor seam
@@ -170,7 +171,7 @@ describe('resolvePwshPath and candidatePwshPaths (pure, every platform)', () => 
       .toBe('pwsh')
   })
 
-  it('accepts a link-shaped PATH candidate whose target cannot be stat-ed', () => {
+  it('accepts a link-shaped PATH candidate whose target cannot be stat-ed', (context) => {
     // Store app execution aliases stat as EACCES but lstat as a link; a
     // dangling symlink reproduces that split on every platform.
     const dir = mkdtempSync(join(tmpdir(), 'dsh-pwsh-resolve-link-'))
@@ -178,7 +179,7 @@ describe('resolvePwshPath and candidatePwshPaths (pure, every platform)', () => 
     const store = join(dir, 'store')
     mkdirSync(store, { recursive: true })
     const link = join(store, 'pwsh.exe')
-    symlinkSync(join(dir, 'no-such-target.exe'), link)
+    fileLink(join(dir, 'no-such-target.exe'), link, context)
     expect(resolvePwshPath(undefined, { ProgramFiles: join(dir, 'missing'), PATH: store }, 'win32'))
       .toBe(link)
   })
@@ -797,3 +798,15 @@ describe.skipIf(!hasPwsh)('process lifecycle ownership (the subprocess service, 
     expect(['killed', 'completed']).toContain(running.status)
   })
 })
+
+/** Create a real file link, skipping only a Windows privilege denial. */
+function fileLink(source: string, target: string, context: TestContext): void {
+  try {
+    symlinkSync(source, target, 'file')
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return context.skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+    }
+    throw error
+  }
+}

@@ -1,3 +1,4 @@
+import { listenForFetch } from '../../../../scripts/test-http-listener.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
@@ -33,7 +34,7 @@ let handler: Handler
 beforeEach(async () => {
   handler = (_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('default') }
   server = createServer((req, res) => { handler(req, res) })
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenForFetch(server)
   const { port } = server.address() as AddressInfo
   base = `http://127.0.0.1:${port}`
 })

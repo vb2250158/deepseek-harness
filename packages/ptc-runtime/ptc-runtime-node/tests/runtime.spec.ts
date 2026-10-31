@@ -169,7 +169,8 @@ describe('Node program process', () => {
   })
 
   it('retains console output emitted immediately before a non-yielding program', async () => {
-    const { run } = await setup({ timeoutMs: 1000, graceMs: 50 })
+    // The elapsed deadline includes Windows process startup; reach the log before exercising hot-loop termination.
+    const { run } = await setup({ timeoutMs: process.platform === 'win32' ? 5000 : 1000, graceMs: 50 })
     const result = await run({ program: 'console.log("before hot loop"); for (;;) {}', bindings: [] })
     expect(result.error?.kind).toBe('timeout')
     expect(result.logs).toEqual(['before hot loop'])

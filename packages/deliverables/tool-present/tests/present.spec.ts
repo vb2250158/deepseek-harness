@@ -139,7 +139,7 @@ describe('present', () => {
   it('rejects missing, non-file, empty, and excessive inputs', async () => {
     const { root, owner, execute } = await setup()
     await writeFile(join(root, 'large'), 'four')
-    await symlink(tmpdir(), join(root, 'outside'))
+    await symlink(tmpdir(), join(root, 'outside'), process.platform === 'win32' ? 'junction' : 'dir')
     for (const files of [[], [{ path: '' }], [{ path: 'missing' }], [{ path: '.' }], [{ path: 'outside' }], [{ path: 'large' }, { path: 'large' }, { path: 'large' }]]) {
       const result = await execute(files)
       expect(result.isError, JSON.stringify(files)).toBe(true)
@@ -184,10 +184,17 @@ it('declares readable files outside the Session directory using absolute and rel
   expect(owner.session.snapshotEvents().find(event => event.type === 'deliverables/presented')?.data.files).toEqual([{ path: await realpath(file) }, { path: await realpath(file) }])
 })
 
-it('refuses a final symlink to an ordinary file', async () => {
+it('refuses a final symlink to an ordinary file', async ({ skip }) => {
   const { root, execute } = await setup()
   await writeFile(join(root, 'source'), 'source')
-  await symlink(join(root, 'source'), join(root, 'link'))
+  try {
+    await symlink(join(root, 'source'), join(root, 'link'))
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return skip('Windows denied file symlink creation')
+    }
+    throw error
+  }
   expect((await execute([{ path: 'link' }])).isError).toBe(true)
 })
 

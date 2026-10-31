@@ -193,6 +193,14 @@ public static class DshFileAssociations {
       }
     } finally { Marshal.FinalReleaseComObject(handlers); }
   }
+  // A handler without a resolvable name cannot be offered or invoked.
+  static bool TryGetName(IHandler handler, out string name) {
+    try { handler.GetName(out name); return true; }
+    catch (COMException error) {
+      if (error.ErrorCode != unchecked((int)0x80004005)) throw;
+      name = null; return false;
+    }
+  }
   public static Application[] List(string path) {
     var extension = Path.GetExtension(path);
     var executable = extension.Length == 0 ? null : Associated(extension, 2);
@@ -201,7 +209,8 @@ public static class DshFileAssociations {
     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     Visit(path, delegate(IHandler handler) {
       string id, name;
-      handler.GetName(out id); handler.GetUIName(out name);
+      if (!TryGetName(handler, out id)) return;
+      handler.GetUIName(out name);
       if (!seen.Add(id)) return;
       apps.Add(new Application { id = id, name = name, icon = IconData(handler, id),
         @default = String.Equals(id, executable, StringComparison.OrdinalIgnoreCase) || String.Equals(id, appId, StringComparison.OrdinalIgnoreCase) });
@@ -214,8 +223,9 @@ public static class DshFileAssociations {
   static void OpenRegistered(string path, string application) {
     bool opened = false;
     Visit(path, delegate(IHandler handler) {
-      string id; handler.GetName(out id);
-      if (opened || !String.Equals(id, application, StringComparison.OrdinalIgnoreCase)) return;
+      if (opened) return;
+      string id;
+      if (!TryGetName(handler, out id) || !String.Equals(id, application, StringComparison.OrdinalIgnoreCase)) return;
       var iid = typeof(IShellItem).GUID;
       IShellItem item;
       SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out item);

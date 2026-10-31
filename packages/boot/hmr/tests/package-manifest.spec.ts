@@ -378,7 +378,7 @@ describe('package manifest reader parity', { concurrent: false }, () => {
     rmSync(f.manifest)
     f.manifests.invalidate(f.manifest)
     expect(reader.getPackageScopeConfig(pathToFileURL(source).href)).toMatchObject({
-      exists: true, type: 'commonjs', pjsonPath: toNamespacedPath(enclosing),
+      exists: true, type: 'commonjs', pjsonPath: enclosing,
     })
     expect(formats.defaultGetFormatWithoutErrors(pathToFileURL(join(f.dir, 'bin', 'tool')))).toBe(
       formats.defaultGetFormatWithoutErrors(pathToFileURL(join(f.root, 'packages', 'tool'))),

@@ -68,7 +68,7 @@ function options(cacheDir: string, warnings: string[]): GenerateOptions {
   }
 }
 
-it('lists Git versions from release tags and the default branch by reading objects', GIT_TEST, async () => {
+for (const linked of [false, true]) it(`lists Git versions from release tags and the default branch by reading objects (linked manifest: ${String(linked)})`, GIT_TEST, async (context) => {
   const repo = repository()
   repo.write({
     'package.json': JSON.stringify({ name: 'mono', private: true }),
@@ -90,7 +90,12 @@ it('lists Git versions from release tags and the default branch by reading objec
   repo.git(['tag', '@s/missing@1.0.0'])
   repo.git(['tag', 'broken@'])
   mkdirSync(join(repo.dir, 'packages/c'), { recursive: true })
-  symlinkSync('../a/package.json', join(repo.dir, 'packages/c/package.json'))
+  if (linked) {
+    try { symlinkSync('../a/package.json', join(repo.dir, 'packages/c/package.json'), 'file') } catch (error) {
+      if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') { context.skip('Windows file symlink privilege unavailable'); return }
+      throw error
+    }
+  }
   repo.write({
     'packages/a/package.json': JSON.stringify({ ...JSON.parse(bundle('@s/a', '1.1.0')), author: 'Ann', icon: 'icon.svg', keywords: ['alpha'] }),
     'packages/a/locale/en.json': JSON.stringify({ meta: { title: 'Alpha', description: 'Does A' } }),

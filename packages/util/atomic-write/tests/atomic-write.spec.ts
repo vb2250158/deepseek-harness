@@ -149,12 +149,19 @@ describe('writeFileAtomic', () => {
     if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600)
   })
 
-  it('replaces a symlinked target itself without writing through to the referent', async () => {
+  it('replaces a symlinked target itself without writing through to the referent', async ({ skip }) => {
     const dir = await scratch()
     const victim = join(dir, 'victim')
     await writeFile(victim, 'victim-content')
     const target = join(dir, 'doc.yaml')
-    await symlink(victim, target)
+    try {
+      await symlink(victim, target, 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+      }
+      throw error
+    }
     await writeFileAtomic(target, 'replaced', { mode: 0o600 })
     expect((await lstat(target)).isSymbolicLink()).toBe(false)
     expect(await readFile(target, 'utf8')).toBe('replaced')

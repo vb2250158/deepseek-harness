@@ -66,6 +66,32 @@ export function topLevelHelpArgs(profiles: readonly string[]): string[][] {
   return [[], ['plugin'], ...[...profiles].sort().flatMap(profile => [[profile], ['--profile', profile]])]
 }
 
+/**
+ * Keep profile boots within the gate runner's explicit worker budget.
+ * @param env - Environment supplying `DSH_GATE_CONCURRENCY`, or the default CPU budget.
+ * @returns A positive integer limiting concurrent help subprocesses.
+ */
+export function cliHelpConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.DSH_GATE_CONCURRENCY
+  if (raw === undefined || raw === '') return defaultParallelism(env)
+  const concurrency = Number(raw)
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new Error(`gen-cli-help: DSH_GATE_CONCURRENCY must be a positive integer, got ${JSON.stringify(raw)}`)
+  }
+  return concurrency
+}
+
+/**
+ * Budget a source profile boot and its complete teardown for the CI platform.
+ * Windows cold module loading and teardown can exceed 30 seconds, so use its
+ * 90-second process-test lane budget; keep the existing POSIX deadline.
+ * @param platform - Operating system that runs the help child.
+ * @returns The child deadline in milliseconds.
+ */
+export function cliHelpTimeout(platform: NodeJS.Platform = process.platform): number {
+  return platform === 'win32' ? 90_000 : 30_000
+}
+
 /** Help reads started ahead of an in-order consumer. */
 export interface PrefetchedHelpReader {
   /**
@@ -177,6 +203,7 @@ export async function collectCliHelp(
 }
 
 async function collectHelp(): Promise<HelpPage[]> {
+  const concurrency = cliHelpConcurrency()
   const directory = mkdtempSync(join(tmpdir(), 'dsh-cli-help-'))
   const profiles = Object.keys(PROFILE_TEMPLATES)
   // Concurrent profile boots share the repository worker budget.
@@ -194,7 +221,7 @@ async function collectHelp(): Promise<HelpPage[]> {
     const help = execFileAsync(process.execPath, [
       '--import', 'tsx/esm', 'apps/cli/src/bin.ts', ...args, '--help',
     ], {
-      cwd: root, env: environment, encoding: 'utf8', timeout: 30_000,
+      cwd: root, env: environment, encoding: 'utf8', timeout: cliHelpTimeout(),
       killSignal: 'SIGKILL', maxBuffer: 2 * 1024 * 1024,
     })
     // Killing directly, not through execFile's signal option, settles the read only after the child closes.
@@ -207,7 +234,7 @@ async function collectHelp(): Promise<HelpPage[]> {
     } finally {
       signal.removeEventListener('abort', abort)
     }
-  }, topLevelHelpArgs(profiles), defaultParallelism())
+  }, topLevelHelpArgs(profiles), concurrency)
   try {
     return await collectCliHelp(reader.readHelp, profiles)
   } finally {

@@ -1,3 +1,4 @@
+import { listenForFetch } from '../../../../scripts/test-http-listener.ts'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 
@@ -145,7 +146,7 @@ export async function mockServer(script: Behavior[]): Promise<MockServer> {
     })
   })
   servers.push(server)
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenForFetch(server)
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('no port')
   return {

@@ -244,7 +244,7 @@ describe('plugin locale display metadata', () => {
     })
   })
 
-  it.each(['manifest', 'export'])('reads a package-owned %s icon when the archive cannot realpath regular files', (source) => {
+  it.for(['manifest', 'export'])('reads a package-owned %s icon when the archive cannot realpath regular files', (source) => {
     manifest({ './package.json': './package.json', './icon': './icon.svg' }, source === 'manifest' ? { icon: './icon.svg' } : {})
     const icon = join(dir, 'icon.svg')
     file(icon, '<svg/>')
@@ -273,12 +273,19 @@ describe('plugin locale display metadata', () => {
     }
   })
 
-  it.each(['manifest', 'export'])('refuses a %s icon file symlink owned by another package', (source) => {
+  it.for(['manifest', 'export'])('refuses a %s icon file symlink owned by another package', (source, { skip }) => {
     manifest({ './package.json': './package.json', './icon': './icon.svg' }, source === 'manifest' ? { icon: './icon.svg' } : {})
     const foreign = join(root, 'foreign-package', 'icon.svg')
     file(foreign, '<svg/>')
     file(join(root, 'foreign-package', 'package.json'), '{"name":"foreign-package"}')
-    symlinkSync(foreign, join(dir, 'icon.svg'), 'file')
+    try {
+      symlinkSync(foreign, join(dir, 'icon.svg'), 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip('Windows denied file symlink creation')
+      }
+      throw error
+    }
     const meta = readPluginMeta('localized', parentURL)
     expect(meta?.icon).toBeUndefined()
     expect(meta?.error).toContain(source === 'manifest' ? 'icon must remain inside its manifest directory' : 'icon must remain inside its package directory')

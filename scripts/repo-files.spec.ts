@@ -37,20 +37,24 @@ function makeTree(): Tree {
   mkdirSync(join(root, 'a'), { recursive: true })
   writeFileSync(join(root, 'a', 'snap.md'), 'real\n')
   mkdirSync(join(root, 'd'), { recursive: true })
-  symlinkSync(join(root, 'a', 'snap.md'), join(root, 'd', 'snap.md'))
   mkdirSync(outside, { recursive: true })
   writeFileSync(join(outside, 'snap.md'), 'behind a symlinked dir\n')
-  symlinkSync(outside, join(root, 'linked-dir'))
+  symlinkSync(outside, join(root, 'linked-dir'), process.platform === 'win32' ? 'junction' : 'dir')
   mkdirSync(join(root, '.hidden'), { recursive: true })
   writeFileSync(join(root, '.hidden', 'snap.md'), 'hidden by dot\n')
   return { root, clean: () => { rmSync(parent, { recursive: true, force: true }) } }
 }
 
 describe('uniqueRepoFiles', () => {
-  it('enumerates ** matches without probing a symlinked file as a directory', () => {
+  it('enumerates ** matches without probing a symlinked file as a directory', ({ skip }) => {
     const tree = makeTree()
     try {
-      // Node's internal glob (from some 24.x releases) lstat-probes
+      try {
+        symlinkSync(join(tree.root, 'a', 'snap.md'), join(tree.root, 'd', 'snap.md'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
       // <symlink>/snap.md while expanding `**/snap.md` and throws ENOTDIR.
       // The walker must return the real files, deduplicated by canonical
       // target, without throwing on any node version.
@@ -100,7 +104,7 @@ describe('uniqueRepoFiles', () => {
       const root = join(parent, 'root')
       mkdirSync(join(root, 'a'), { recursive: true })
       writeFileSync(join(root, 'a', 'snap.md'), 'x\n')
-      symlinkSync(root, join(root, 'cyc'))
+      symlinkSync(root, join(root, 'cyc'), process.platform === 'win32' ? 'junction' : 'dir')
       // Each literal `cyc` segment resolves through stat and enters the
       // symlinked directory again, exactly as node glob does for a repeated
       // literal; recursion stays bounded because each literal consumes one
@@ -146,9 +150,15 @@ describe('uniqueRepoFiles', () => {
     }
   })
 
-  it('canonicalizes symlinked matches through realpath and dedupes them onto regular files', () => {
+  it('canonicalizes symlinked matches through realpath and dedupes them onto regular files', ({ skip }) => {
     const tree = makeTree()
     try {
+      try {
+        symlinkSync(join(tree.root, 'a', 'snap.md'), join(tree.root, 'd', 'snap.md'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
       const rootReal = realpathSync(tree.root)
       filesystem.canonicalized.length = 0
       const linkFirst = uniqueRepoFiles(tree.root, ['d/*.md', 'a/*.md'])
@@ -162,7 +172,7 @@ describe('uniqueRepoFiles', () => {
       expect(linked[0]!.real).not.toBe(join(rootReal, 'linked-dir', 'snap.md'))
       // A symlinked root canonicalizes through its target.
       const rootLink = join(tree.root, '..', 'root-link')
-      symlinkSync(tree.root, rootLink)
+      symlinkSync(tree.root, rootLink, process.platform === 'win32' ? 'junction' : 'dir')
       expect(uniqueRepoFiles(rootLink, ['a/*.md']).map(file => file.real)).toEqual([join(rootReal, 'a', 'snap.md')])
     } finally {
       tree.clean()
@@ -188,7 +198,7 @@ describe('uniqueRepoFiles', () => {
     }
   })
 
-  it('fails loudly on a broken symlink instead of shrinking the corpus', () => {
+  it('fails loudly on a broken symlink instead of shrinking the corpus', ({ skip }) => {
     const tree = makeTree()
     try {
       // A healthy tree with symlinked files must not throw.
@@ -201,7 +211,12 @@ describe('uniqueRepoFiles', () => {
       const root = join(parent, 'root')
       mkdirSync(root, { recursive: true })
       writeFileSync(join(root, 'gone.md'), 'x\n')
-      symlinkSync(join(root, 'gone.md'), join(root, 'broken-link.md'))
+      try {
+        symlinkSync(join(root, 'gone.md'), join(root, 'broken-link.md'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
       rmSync(join(root, 'gone.md'))
       // realpathSync on the matched broken link must throw, exactly as it did
       // under the node-glob implementation, instead of silently shrinking the
@@ -210,13 +225,28 @@ describe('uniqueRepoFiles', () => {
       // The same holds under `**` and for a cyclic symlink.
       expect(() => uniqueRepoFiles(root, ['**/*.md'])).toThrow()
       rmSync(join(root, 'broken-link.md'))
-      symlinkSync(join(root, 'loop-b.md'), join(root, 'loop-a.md'))
-      symlinkSync(join(root, 'loop-a.md'), join(root, 'loop-b.md'))
+      try {
+        symlinkSync(join(root, 'loop-b.md'), join(root, 'loop-a.md'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
+      try {
+        symlinkSync(join(root, 'loop-a.md'), join(root, 'loop-b.md'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
       expect(() => uniqueRepoFiles(root, ['*.md'])).toThrow()
       expect(() => uniqueRepoFiles(root, ['**/loop-a.md'])).toThrow()
       // A broken symlink under a literal non-final segment matches nothing,
       // again as node glob silently returns no match for it.
-      symlinkSync(join(root, 'gone-dir'), join(root, 'broken-dir'))
+      try {
+        symlinkSync(join(root, 'gone-dir'), join(root, 'broken-dir'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
       expect(uniqueRepoFiles(root, ['broken-dir/*.md'])).toEqual([])
     } finally {
       rmSync(parent, { recursive: true, force: true })

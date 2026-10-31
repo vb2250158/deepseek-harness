@@ -1,10 +1,11 @@
+import { FsError } from '@deepseek-ai/dsh-fs'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { chmod, mkdtemp, mkdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi, type TestContext } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Config as AgentInstructionsConfig } from '@deepseek-ai/dsh-agent-instructions'
@@ -71,6 +72,18 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 type CheckpointSource = Extract<MessageSource, { readonly kind: 'compact-checkpoint' }>
+
+/** Create a real file symlink when the Windows process has that capability. */
+async function instructionFileSymlink(target: string, file: string, test: TestContext): Promise<void> {
+  try {
+    await symlink(target, file, 'file')
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      test.skip('Windows file symlinks require Developer Mode or the symbolic-link privilege')
+    }
+    throw error
+  }
+}
 
 /** Build a typed checkpoint source for an instruction projection fixture. */
 function checkpointSource(compactionId: string): CheckpointSource {
@@ -164,6 +177,10 @@ function pinAgentsHome(home: string): void {
 }
 
 class RecordingFileSystem extends FileSystem {
+  override async patchText(): Promise<never> { throw new FsError('patch unsupported by test provider', 'FS_IO_ERROR') }
+  override async deleteFile(): Promise<never> { throw new FsError('delete unsupported by test provider', 'FS_IO_ERROR') }
+  override async moveFile(): Promise<never> { throw new FsError('move unsupported by test provider', 'FS_IO_ERROR') }
+
   override watch(): never { throw new Error('Fixture does not support watching') }
   entries = new Map<string, { type: FsInfo['type']; content?: string; version?: FsVersion }>()
   missingOnResolve = new Set<string>()
@@ -596,14 +613,14 @@ describe('workspace context instruction discovery', () => {
     }
   })
 
-  it('follows a symlinked instruction file to its target content', async () => {
+  it('follows a symlinked instruction file to its target content', async (test) => {
     const root = await tempRepo()
     const home = await tempRepo()
     const outside = await tempRepo()
     try {
       await mkdir(join(root, '.git'), { recursive: true })
       await write(join(outside, 'shared.md'), 'shared instruction body')
-      await symlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'))
+      await instructionFileSymlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'), test)
 
       pinHarnessHome(home)
       const files = await discoverBaselineInstructionFiles({ cwd: root })
@@ -620,14 +637,14 @@ describe('workspace context instruction discovery', () => {
     }
   })
 
-  it('follows a symlinked instruction file through ctx.fs to its target content', async () => {
+  it('follows a symlinked instruction file through ctx.fs to its target content', async (test) => {
     const root = await tempRepo()
     const home = await tempRepo()
     const outside = await tempRepo()
     try {
       await mkdir(join(root, '.git'), { recursive: true })
       await write(join(outside, 'shared.md'), 'shared provider instruction body')
-      await symlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'))
+      await instructionFileSymlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'), test)
       const ctx = new Context()
       provideWorkingDirectoryFixture(ctx)
       pinHarnessHome(home)
@@ -5242,7 +5259,7 @@ describe('dynamic nested workspace context injection', () => {
       // removed; an unavailable classification would emit no change at all.
       await rm(join(root, 'pkg/AGENTS.md'))
       await mkdir(join(root, 'pkg/elsewhere'), { recursive: true })
-      await symlink(join(root, 'pkg/elsewhere'), join(root, 'pkg/AGENTS.md'))
+      await symlink(join(root, 'pkg/elsewhere'), join(root, 'pkg/AGENTS.md'), process.platform === 'win32' ? 'junction' : 'dir')
       await executeToolFixture(ctx, {
         signal: testToolSignal,
         callId: ToolCallId('read-after-symlink-dir'), name: 'read', arguments: { file_path: join('pkg', 'file.txt') }, agent,

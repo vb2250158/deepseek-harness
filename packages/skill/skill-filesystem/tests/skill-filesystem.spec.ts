@@ -1,3 +1,4 @@
+import type { TestContext } from 'vitest'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -31,6 +32,10 @@ async function writeFlatSkill(root: string, name: string, description: string, b
 }
 
 class TestFileSystem extends FileSystem {
+  override async patchText(): Promise<never> { throw new FsError('patch unsupported by test provider', 'FS_IO_ERROR') }
+  override async deleteFile(): Promise<never> { throw new FsError('delete unsupported by test provider', 'FS_IO_ERROR') }
+  override async moveFile(): Promise<never> { throw new FsError('move unsupported by test provider', 'FS_IO_ERROR') }
+
   override watch(): never { throw new Error('Fixture does not support watching') }
   listDirCalls = 0
   failResolvePaths = new Set<string>()
@@ -419,16 +424,16 @@ describe('FileSystemSkillProvider', () => {
     expect((await ctx.skills.list()).map(skill => skill.name)).toEqual(['good-skill'])
   })
 
-  it.each([false, true])('publishes regular-file paths for linked skills while retaining their resource roots (filesystem service: %s)', async (withFileSystem) => {
+  it.for([false, true])('publishes regular-file paths for linked skills while retaining their resource roots (filesystem service: %s)', async (withFileSystem, context) => {
     const home = await tempDir('skill-symlink-home')
     const external = await tempDir('skill-symlink-external')
     await writeSkill(external, 'linked-dir', 'Linked directory')
     await writeFlatSkill(external, 'linked-flat', 'Linked flat')
     await mkdir(join(home, '.dsh/skills'), { recursive: true })
-    await symlink(join(external, 'linked-dir'), join(home, '.dsh/skills/linked-dir'))
-    await symlink(join(external, 'linked-flat.md'), join(home, '.dsh/skills/linked-flat.md'))
-    await symlink(join(external, 'missing'), join(home, '.dsh/skills/broken-link'))
-    await symlink('/dev/null', join(home, '.dsh/skills/device-link'))
+    await symlink(join(external, 'linked-dir'), join(home, '.dsh/skills/linked-dir'), process.platform === 'win32' ? 'junction' : 'dir')
+    await fileLink(join(external, 'linked-flat.md'), join(home, '.dsh/skills/linked-flat.md'), context)
+    await fileLink(join(external, 'missing'), join(home, '.dsh/skills/broken-link'), context)
+    await fileLink('/dev/null', join(home, '.dsh/skills/device-link'), context)
 
     const ctx = new Context()
     await ctx.plugin(SkillRegistry)
@@ -455,7 +460,7 @@ describe('FileSystemSkillProvider', () => {
       }
       await writeFile(join(external, 'replacement.md'), '---\nname: linked-flat\ndescription: Replacement\n---\n\nReplacement body.\n')
       await rm(join(home, '.dsh/skills/linked-flat.md'))
-      await symlink(join(external, 'replacement.md'), join(home, '.dsh/skills/linked-flat.md'))
+      await fileLink(join(external, 'replacement.md'), join(home, '.dsh/skills/linked-flat.md'), context)
       expect((await ctx.skills.get('linked-flat'))?.content).toBe('Replacement body.')
     } finally {
       await fiber.dispose()
@@ -923,7 +928,7 @@ describe('FileSystemSkillProvider', () => {
     const root = join(home, '.dsh/skills')
     await writeSkill(external, 'linked-skill', 'First linked description')
     await mkdir(root, { recursive: true })
-    await symlink(join(external, 'linked-skill'), join(root, 'linked-skill'))
+    await symlink(join(external, 'linked-skill'), join(root, 'linked-skill'), process.platform === 'win32' ? 'junction' : 'dir')
     const ctx = new Context()
     await ctx.plugin(SkillRegistry)
     const fiber = await ctx.plugin(SkillFileSystem, {
@@ -1021,3 +1026,15 @@ describe('FileSystemSkillProvider', () => {
     }
   })
 })
+
+/** Create a real file link, skipping only a Windows privilege denial. */
+async function fileLink(source: string, target: string, context: TestContext): Promise<void> {
+  try {
+    await symlink(source, target, 'file')
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return context.skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+    }
+    throw error
+  }
+}

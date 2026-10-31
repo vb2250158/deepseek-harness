@@ -233,7 +233,7 @@ describe('closed runner protocol', () => {
     const link = join(tmpdir(), `dsh-runner-cleanup-link-${String(process.pid)}`)
     scratch.push(target, link)
     mkdirSync(target, { recursive: true })
-    symlinkSync(target, link)
+    symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
     cleanupLinuxLaunchFiles({
       directory: link,
       requestPath: join(link, 'launch-request.json'),
@@ -450,15 +450,27 @@ describe('runner launch inputs', () => {
     const executable = join(directory, 'direct.exe')
     const directoryCandidate = join(directory, 'directory')
     const missingExecutable = join(directory, 'missing.exe')
-    const danglingAlias = join(directory, 'alias.exe')
     writeFileSync(executable, '')
     mkdirSync(`${directoryCandidate}.com`)
     writeFileSync(`${directoryCandidate}.exe`, '')
-    symlinkSync(missingExecutable, danglingAlias, 'file')
     expect(resolveWindowsExecutable(executable, '', {})).toBe(executable)
     expect(resolveWindowsExecutable(directoryCandidate, '', {})).toBe(`${directoryCandidate}.exe`)
-    expect(resolveWindowsExecutable(danglingAlias, '', {})).toBe(danglingAlias)
     expect(resolveWindowsExecutable(missingExecutable, '', {})).toBeUndefined()
+  })
+
+  it('accepts a dangling Windows executable alias', ({ skip }) => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-windows-alias-'))
+    scratch.push(directory)
+    const alias = join(directory, 'alias.exe')
+    try {
+      symlinkSync(join(directory, 'missing.exe'), alias, 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+      }
+      throw error
+    }
+    expect(resolveWindowsExecutable(alias, '', {})).toBe(alias)
   })
 })
 

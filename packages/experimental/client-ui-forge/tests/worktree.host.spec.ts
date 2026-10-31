@@ -245,7 +245,8 @@ async function creating(cwd: string, options: { readonly prefix?: string; readon
 const GENERATED_BRANCH: unknown = expect.stringMatching(/^dsh-[0-9a-f]{8}$/)
 
 /** Matches the failure of an attempt whose base branch does not exist. */
-const MISSING_BASE: unknown = expect.stringMatching(/^worktree command failed \(128\): fatal: /)
+// Git may print configuration warnings before the fatal missing-revision diagnostic.
+const MISSING_BASE: unknown = expect.stringMatching(/^worktree command failed \(128\): (?:warning:[^\r\n]*\r?\n)*fatal: /)
 
 function request(opened: Runtime, from: string | null): void {
   appendPluginRecord(opened.session, WORKTREE_RECORD, { action: 'request', from })

@@ -148,19 +148,33 @@ describe('workspaceFiles.read — read access and file kinds', () => {
     await expect(endpoint().read(harness.scope, join(outside, 'notes.txt'), {}, signal())).rejects.toBe(refusal)
   })
 
-  it('rejects a symlink that points out of the workspace — the case a prefix test cannot see', async () => {
+  it('rejects a symlink that points out of the workspace — the case a prefix test cannot see', async ({ skip }) => {
     await writeFile(join(outside, 'secret.txt'), 'no', 'utf8')
     // The path itself is inside the workspace and would pass any string
     // comparison; only lstat (before the follow) or realpath containment catches it.
-    await symlink(join(outside, 'secret.txt'), join(workspace, 'link.txt'))
+    try {
+      await symlink(join(outside, 'secret.txt'), join(workspace, 'link.txt'), 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+      }
+      throw error
+    }
     const failure = await failureOf(endpoint().read(harness.scope, 'link.txt', {}, signal()))
     expect(failure.code).toBe('workspace-file/not-regular-file')
     expect(failure.details).toMatchObject({ kind: 'symlink' })
   })
 
-  it('rejects a symlink even when it points back inside the workspace', async () => {
+  it('rejects a symlink even when it points back inside the workspace', async ({ skip }) => {
     await writeFile(join(workspace, 'real.txt'), 'fine', 'utf8')
-    await symlink(join(workspace, 'real.txt'), join(workspace, 'alias.txt'))
+    try {
+      await symlink(join(workspace, 'real.txt'), join(workspace, 'alias.txt'), 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+      }
+      throw error
+    }
     const failure = await failureOf(endpoint().read(harness.scope, 'alias.txt', {}, signal()))
     expect(failure.code).toBe('workspace-file/not-regular-file')
   })

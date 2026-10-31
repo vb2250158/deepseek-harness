@@ -270,25 +270,30 @@ describe('manifest resolution', () => {
     expect(warn.mock.calls.flat().map(String).join(' ')).toContain('absent')
   })
 
-  it.each([
-    ['an unreadable manifest', (f: ReturnType<typeof fixture>) => {
+  it.for(['an unreadable manifest', 'a module path that loops'])(
+    'refuses a row whose %s cannot be read', (_label, { skip }) => {
+      const f = fixture()
       f.plugin('denied-plugin')
-      rmSync(join(f.dir, 'node_modules', 'denied-plugin', 'package.json'))
-      mkdirSync(join(f.dir, 'node_modules', 'denied-plugin', 'package.json'))
-    }],
-    ['a module path that loops', (f: ReturnType<typeof fixture>) => {
-      f.plugin('denied-plugin')
-      symlinkSync('loop.mjs', join(f.dir, 'node_modules', 'denied-plugin', 'loop.mjs'))
-    }],
-  ])('refuses a row whose %s cannot be read', (_label, prepare) => {
-    const f = fixture()
-    prepare(f)
-    const name = _label === 'a module path that loops'
-      ? './node_modules/denied-plugin/loop.mjs' : './node_modules/denied-plugin/index.mjs'
-    const rows = prepareProfileEntries(context(f), [{ id: 'row', name }], pathToFileURL(f.dir).href + '/')
-    expect(rows[0]?.disabled).toBe(true)
-    expect(f.warnings.join('\n')).toContain('cannot be validated')
-  })
+      if (_label === 'an unreadable manifest') {
+        rmSync(join(f.dir, 'node_modules', 'denied-plugin', 'package.json'))
+        mkdirSync(join(f.dir, 'node_modules', 'denied-plugin', 'package.json'))
+      } else {
+        try {
+          symlinkSync('loop.mjs', join(f.dir, 'node_modules', 'denied-plugin', 'loop.mjs'), 'file')
+        } catch (error) {
+          if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+            return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+          }
+          throw error
+        }
+      }
+      const name = _label === 'a module path that loops'
+        ? './node_modules/denied-plugin/loop.mjs' : './node_modules/denied-plugin/index.mjs'
+      const rows = prepareProfileEntries(context(f), [{ id: 'row', name }], pathToFileURL(f.dir).href + '/')
+      expect(rows[0]?.disabled).toBe(true)
+      expect(f.warnings.join('\n')).toContain('cannot be validated')
+    },
+  )
 
   it('labels a denied row by its id, or by its module when a preset row omits the id', () => {
     const f = fixture()

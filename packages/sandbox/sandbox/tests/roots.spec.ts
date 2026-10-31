@@ -40,7 +40,7 @@ describe('workspaceWritableRoots', () => {
     const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
     const extra = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-extra-')))
     const alias = join(ws, 'alias')
-    symlinkSync(extra, alias, 'dir')
+    symlinkSync(extra, alias, process.platform === 'win32' ? 'junction' : 'dir')
     roots.push(ws, extra)
     const grants = workspaceWritableRoots({
       mode: 'workspace-write',

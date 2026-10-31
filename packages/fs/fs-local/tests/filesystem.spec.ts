@@ -1,3 +1,4 @@
+import type { TestContext } from 'vitest'
 /**
  * Tests for the local backend through the `ctx.fs` Service Definition: stat, whole-
  * file/streamed text reads, atomic guarded writes (createIfAbsent /
@@ -224,9 +225,9 @@ describe('lstat', () => {
     }
   })
 
-  it('reports path metadata without following the final symlink component', async () => {
+  it('reports path metadata without following the final symlink component', async (context) => {
     await writeFile(join(dir, 'real.txt'), 'hello')
-    await symlink(join(dir, 'real.txt'), join(dir, 'link.txt'))
+    await fileLink(join(dir, 'real.txt'), join(dir, 'link.txt'), context)
 
     expect((await fs.lstat('real.txt'))?.type).toBe('file')
     expect((await fs.lstat('link.txt'))?.type).toBe('symlink')
@@ -405,11 +406,11 @@ describe('readByteRange', () => {
 })
 
 describe('listDir', () => {
-  it('lists files and directories in stable name order with resolved child targets', async () => {
+  it('lists files and directories in stable name order with resolved child targets', async (context) => {
     await mkdir(join(dir, 'skills', 'dir-skill'), { recursive: true })
     await writeFile(join(dir, 'skills', 'zeta.md'), 'zeta')
     await writeFile(join(dir, 'skills', 'alpha.md'), 'alpha')
-    await symlink(join(dir, 'skills', 'missing-target'), join(dir, 'skills', 'broken-link'))
+    await fileLink(join(dir, 'skills', 'missing-target'), join(dir, 'skills', 'broken-link'), context)
 
     const entries = await fs.listDir(await fs.resolve('skills'))
     expect(entries.map(entry => [entry.name, entry.type])).toEqual([
@@ -499,9 +500,9 @@ describe('writeText', () => {
     expect((await stat(path)).isDirectory()).toBe(true)
   })
 
-  it('createIfAbsent rejects and preserves a dangling symbolic link', async () => {
+  it('createIfAbsent rejects and preserves a dangling symbolic link', async (context) => {
     const path = join(dir, 'dangling')
-    await symlink(join(dir, 'missing-target'), path)
+    await fileLink(join(dir, 'missing-target'), path, context)
     const target = await fs.resolve('dangling')
 
     await expect(fs.writeText(target, 'ours', { kind: 'createIfAbsent' }))
@@ -848,9 +849,9 @@ describe('editText', () => {
 })
 
 describe('symlink targetKey identity', () => {
-  it('two paths to the same file via a symlink share one version and write the real target', async () => {
+  it('two paths to the same file via a symlink share one version and write the real target', async (context) => {
     await writeFile(join(dir, 'real.txt'), 'hello')
-    await symlink(join(dir, 'real.txt'), join(dir, 'link.txt'))
+    await fileLink(join(dir, 'real.txt'), join(dir, 'link.txt'), context)
     const viaReal = await fs.resolve('real.txt')
     const viaLink = await fs.resolve('link.txt')
     expect(viaLink.targetKey).toBe(viaReal.targetKey)
@@ -860,9 +861,9 @@ describe('symlink targetKey identity', () => {
     expect(await readFile(join(dir, 'real.txt'), 'utf8')).toBe('bye') // link preserved
   })
 
-  it('a stale change is detected across both paths', async () => {
+  it('a stale change is detected across both paths', async (context) => {
     await writeFile(join(dir, 'real.txt'), 'hello')
-    await symlink(join(dir, 'real.txt'), join(dir, 'link.txt'))
+    await fileLink(join(dir, 'real.txt'), join(dir, 'link.txt'), context)
     const viaReal = await fs.resolve('real.txt')
     const stale = await versionOf(viaReal)
     await writeFile(join(dir, 'real.txt'), 'changed')
@@ -881,3 +882,15 @@ describe('HMR / disposal', () => {
     expect(local.fs).toBeUndefined()
   })
 })
+
+/** Create a real file link, skipping only a Windows privilege denial. */
+async function fileLink(source: string, target: string, context: TestContext): Promise<void> {
+  try {
+    await symlink(source, target, 'file')
+  } catch (error) {
+    if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return context.skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+    }
+    throw error
+  }
+}

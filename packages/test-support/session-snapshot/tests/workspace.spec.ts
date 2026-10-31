@@ -21,18 +21,25 @@ describe('workspace snapshots', () => {
     await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })))
   })
 
-  it('captures readable text, binary bytes, links, and empty directories in path order', async () => {
+  it.for([false, true])('captures readable text, binary bytes, links, and empty directories in path order (file links: %s)', async (withLinks, { skip }) => {
     const directory = await root()
     await writeFile(join(directory, 'a.txt'), 'hello\n')
     await writeFile(join(directory, 'b.bin'), Buffer.from([0xff, 0x01]))
     await mkdir(join(directory, 'empty'))
-    await symlink('a.txt', join(directory, 'link'))
+    if (withLinks) {
+      try {
+        await symlink('a.txt', join(directory, 'link'))
+      } catch (error) {
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') return skip('Windows denied file symlink creation')
+        throw error
+      }
+    }
 
     expect(await captureWorkspaceSnapshot(directory)).toEqual([
       { path: 'a.txt', kind: 'text', content: 'hello\n' },
       { path: 'b.bin', kind: 'binary', base64: '/wE=' },
       { path: 'empty', kind: 'empty-directory' },
-      { path: 'link', kind: 'symlink', target: 'a.txt' },
+      ...withLinks ? [{ path: 'link', kind: 'symlink', target: 'a.txt' }] : [],
     ])
   })
 
@@ -50,6 +57,19 @@ describe('workspace snapshots', () => {
     expect(await captureExpectedWorkspaceSnapshot(directory)).toEqual([
       { path: '.dsh/runtime.json', kind: 'text', content: '{}' },
       { path: 'visible.txt', kind: 'text', content: 'visible' },
+    ])
+  })
+
+  it('uses nested expected markers for empty directories without hiding actual workspace files', async () => {
+    const directory = await root()
+    await mkdir(join(directory, 'locked'))
+    await writeFile(join(directory, 'locked', EMPTY_WORKSPACE_MARKER), '')
+
+    expect(await captureExpectedWorkspaceSnapshot(directory)).toEqual([
+      { path: 'locked', kind: 'empty-directory' },
+    ])
+    expect(await captureWorkspaceSnapshot(directory)).toEqual([
+      { path: 'locked/.empty', kind: 'text', content: '' },
     ])
   })
 

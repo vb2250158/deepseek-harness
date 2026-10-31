@@ -1240,16 +1240,25 @@ describe('JSONL immutable generation publication', () => {
     expect(await readFile(expected, 'utf8')).toBe(line(header(SESSION_FORMAT_VERSION)) + line(event0))
   })
 
-  it.each(['different', 'malformed', 'symlink', 'directory'] as const)(
+  it.for(['different', 'malformed', 'symlink', 'directory'] as const)(
     'fails loud without altering a colliding %s target',
-    async (kind) => {
+    async (kind, { skip }) => {
       const root = await tempRoot()
       const request = options(root)
       const source = Buffer.from(line(header(0)) + line(event0))
       await writeFile(request.sourcePath, source)
       if (kind === 'different') await writeFile(request.currentPath, line(header(SESSION_FORMAT_VERSION)) + line(event1))
       if (kind === 'malformed') await writeFile(request.currentPath, '{not-json}\n')
-      if (kind === 'symlink') await symlink(request.sourcePath, request.currentPath)
+      if (kind === 'symlink') {
+        try {
+          await symlink(request.sourcePath, request.currentPath)
+        } catch (error) {
+          if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+            return skip('Windows denied file symlink creation; enable Developer Mode or the symlink privilege')
+          }
+          throw error
+        }
+      }
       if (kind === 'directory') await mkdir(request.currentPath)
 
       await expect(ensureJsonlGenerationCurrent(request)).rejects.toBeInstanceOf(
