@@ -111,6 +111,7 @@ interface BenchOptions {
   addFiles?: (files: readonly File[], directories?: ReadonlySet<File>) => string | null
   commandMenuOpen?: boolean
   busyEnter?: 'queue' | 'steer'
+  busyEnterOverride?: 'queue' | 'steer'
   toggleCommandMenu?: (selection: { start: number; end: number }) => void
 }
 
@@ -224,6 +225,7 @@ function bench(over?: BenchOptions) {
     t: over?.t ?? makeTranslate(zh, commonZh),
     renderSlot,
     variant: over?.variant ?? 'composer',
+    ...(over?.busyEnterOverride !== undefined ? { busyEnterOverride: over.busyEnterOverride } : {}),
     ...(over?.inert === true ? { disabled: true } : {}),
     ...(over?.blocked !== undefined ? { blocked: over.blocked } : {}),
     ...(over?.workspacePickerOpen !== undefined ? { workspacePickerOpen: over.workspacePickerOpen } : {}),
@@ -253,7 +255,7 @@ function bench(over?: BenchOptions) {
   const primaryLabel = primaryStops
     ? '停止生成'
     : over?.running === true && steeringAvailable && !composerLocked && plainMessageDraft
-      ? (over.busyEnter === 'steer' ? '插话发送' : '排队发送')
+      ? ((over.busyEnterOverride ?? over.busyEnter) === 'steer' ? '插话发送' : '排队发送')
       : '发送消息'
   const button = view.container.querySelector<HTMLButtonElement>(`button[aria-label="${primaryLabel}"]`)!
   const interruptButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="停止生成"]')
@@ -1130,7 +1132,20 @@ describe('running and lock semantics', () => {
     expect(sink).toHaveBeenCalledWith('按钮插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
   })
 
+  it('the occurrence override sends Enter without changing the saved preference', () => {
+    const { textarea, busyEnter, sink } = bench({ running: true, busyEnter: 'queue', busyEnterOverride: 'steer', draft: '直接插话' })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(sink).toHaveBeenCalledWith('直接插话', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(busyEnter.getSnapshot()).toBe('queue')
+  })
+
   it('running Send relabels when the busy-state preference changes live', () => {
+    const temporary = bench({ running: true, busyEnter: 'queue', busyEnterOverride: 'steer', draft: '直接发送' })
+    fireEvent.click(temporary.button)
+    expect(temporary.sink).toHaveBeenCalledWith('直接发送', [], 'steer', expect.any(AbortSignal), expect.any(Function))
+    expect(temporary.busyEnter.getSnapshot()).toBe('queue')
+    temporary.view.unmount()
+
     const { button, busyEnter, sink } = bench({ running: true, draft: '跟随设置' })
     expect(button.getAttribute('aria-label')).toBe('排队发送')
     act(() => { busyEnter.set('steer') })

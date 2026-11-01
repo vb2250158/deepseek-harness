@@ -502,6 +502,8 @@ export interface ConversationSessionHeaderInjected {
 export interface ComposerBarOwnerProps {
   /** Hero uses centered placement; composer uses the active bottom placement. */
   variant: 'hero' | 'composer'
+  /** Optional delivery preference for this composer occurrence, without changing settings. */
+  busyEnterOverride?: BusyEnterBehavior
   /** A feature-owned reason that makes message input inert while leaving model selection live. */
   blocked?: { readonly reason: string }
   /** Lock all message actions while preserving the resident composer surface. */
@@ -603,6 +605,8 @@ export interface ConversationContentInputProps {
   variant: 'main' | 'embedded'
   phase: 'settling' | 'hero' | 'active'
   hero: boolean
+  /** Delivery preference for this occurrence while the session is running. */
+  busyEnterOverride?: BusyEnterBehavior
 }
 
 /** Values passed from shared content to its occurrence-selected width controls. */

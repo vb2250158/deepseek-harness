@@ -21,7 +21,7 @@ function NoConversationWidthControls() {
  */
 export function ConversationContent(props: ConversationContentProps) {
   const {
-    sessionId, phase, hero, useSession, useSessions, useSessionStatus,
+    sessionId, phase, hero, busyEnterOverride, useSession, useSessions, useSessionStatus,
     useWorkspaces, useInput, useComposerBlock, renderSlot, renderSlotChain,
     selectWorkspace, t, useFactorySlot,
   } = props
@@ -146,6 +146,7 @@ export function ConversationContent(props: ConversationContentProps) {
   const blocked = !inert && composerBlock !== undefined
   const inputBar = renderSlot('conversation.composer.bar', {
     variant: hero ? 'hero' : 'composer',
+    ...(busyEnterOverride === undefined ? {} : { busyEnterOverride }),
     ...(inert
       ? {
         disabled: true,

@@ -50,13 +50,14 @@ export const InputBar = memo(function InputBar({
   toggleCommandMenu, stop, t,
   renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut,
   useAccess,
-  useProjection, sessionId, variant, disabled: inert = false, blocked,
+  useProjection, sessionId, variant, busyEnterOverride, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
   placeholder, accessory,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
-  const busyEnter = useBusyEnter(s => s)
+  const configuredBusyEnter = useBusyEnter(s => s)
+  const busyEnter = busyEnterOverride ?? configuredBusyEnter
   const stopKeys = useStopShortcut(keys => keys)
   // A page whose access snapshot excludes prompting, stopping, or uploading to this Session is offered
   // no Send, no Stop, or no file intake rather than a disabled control. `useAccess` is undefined only
