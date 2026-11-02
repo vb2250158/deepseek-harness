@@ -464,7 +464,7 @@ export class PluginManager extends TypertRemoteService {
   @Remote
   async listPlugins(): Promise<PluginInfo[]> {
     const rows = flatten(composeEntries([readProfilePatches('dsh', this.profile)]))
-    const snapshot = await readPluginInventory(this.ctx)
+    const snapshot = await readPluginInventory(this.ctx, { includeAgentPresets: false })
     return snapshot.entries.map((entry) => {
       const actual = [...this.ctx.loader.entries()].find(row => row.id === entry.entryId)
       const candidates = rows.filter(row => row.id === actual?.options.id)
@@ -502,6 +502,7 @@ export class PluginManager extends TypertRemoteService {
     const names = [...new Set([...selected, ...dependencies, ...Object.keys(installation.dependencies ?? {}), ...catalog.keys()])]
     const bundles: Omit<BundleInfo, 'updatable'>[] = []
     const runtimeVersion = getDshRuntimeVersion()
+    const packages = this.ctx.get('pluginPackages')
     for (const name of names) {
       const installed = dependencies.includes(name)
       const optional = OPTIONAL_BUNDLES.includes(name)
@@ -554,7 +555,10 @@ export class PluginManager extends TypertRemoteService {
         const compatibility = evaluatePluginCompatibility(info, exemptions)
         if (compatibility !== undefined && !compatibility.exempted) throw new ManagementFailure('incompatible-version', [incompatiblePlugin(compatibility)])
         const dir = resolveBundleDir('dsh', name, this.profile.installAnchor, this.profile.dir)
-        const meta = offered?.meta ?? readPluginMeta(info.name ?? name, pathToFileURL(join(dir, 'package.json')).href)
+        const base = pathToFileURL(join(dir, 'package.json')).href
+        const meta = offered?.meta ?? (packages === undefined
+          ? readPluginMeta(info.name ?? name, base)
+          : packages.metaOf(info.name ?? name, base))
         let platformError: ManagementError | undefined
         try { assertBundlePlatform(info.dsh?.bundle?.platforms, process.platform) }
         catch (error) { platformError = managementError(error) }

@@ -28,6 +28,9 @@ import * as gitTransport from '../src/git-transport.ts'
 import { parse, parseDocument } from 'yaml'
 import { isolateGitCommandLineConfig } from './git-environment.ts'
 
+// These three fixtures run two real package-manager processes; Windows Git prepare alone takes over 7 seconds.
+const REAL_PACKAGE_PROCESS_TIMEOUT_MS = process.platform === 'win32' ? 30000 : 5000
+
 // These cases install through real Git and pnpm, so the host's command-line configuration group must not reach their children.
 let restoreGitCommandLineConfig: () => void
 beforeAll(() => { restoreGitCommandLineConfig = isolateGitCommandLineConfig() })
@@ -391,6 +394,15 @@ it('lists bundle versions and current-profile plugin targets', async () => {
       rows: [{ rowId: 'managed', moduleName: pathToFileURL(join(dir, 'node_modules', 'extra', 'plugin.mjs')).href, entryId: 'include:managed' }], overrides: [],
     },
   ])
+})
+
+it('lists management rows without waiting for preset composition diagnostics', async () => {
+  const { ctx, manager } = await fixture()
+  const compositionInventory = vi.fn(() => new Promise<never>(() => {}))
+  ctx.provide('agentPresets', { compositionInventory } as never)
+  const rows = await manager.listPlugins()
+  expect(rows.some(row => row.entryId === 'include:managed')).toBe(true)
+  expect(compositionInventory).not.toHaveBeenCalled()
 })
 
 it('describes a bundle by its manifest and patch: one-liner, rows without a live entry, and the built-in rows it changes', async () => {
@@ -806,7 +818,7 @@ it('runs a real pnpm dependency script only after approval and retry', async () 
   const allowed = await manager.installBundle('file:./addon', { enabled: false, approvedBuilds: blocked.pendingBuilds! })
   expect(allowed, JSON.stringify(allowed)).toMatchObject({ application: 'restart-required', packageResult: { exitCode: 0 } })
   expect(readFileSync(built, 'utf8')).toBe('built')
-})
+}, REAL_PACKAGE_PROCESS_TIMEOUT_MS)
 
 it('offers approval for a real git-hosted package pnpm refused to prepare', async () => {
   // Both the fixture's Git and the manager's pnpm child read only this empty configuration.
@@ -838,7 +850,7 @@ it('offers approval for a real git-hosted package pnpm refused to prepare', asyn
   const allowed = await manager.installBundle(spec, { enabled: false, approvedBuilds: blocked.pendingBuilds! })
   expect(allowed, JSON.stringify(allowed)).toMatchObject({ application: 'restart-required', packageResult: { exitCode: 0 } })
   expect(readFileSync(built, 'utf8')).toBe('built')
-})
+}, REAL_PACKAGE_PROCESS_TIMEOUT_MS)
 
 it.each(['[', 'allowBuilds: false\n'])('preserves pnpm diagnostics when pending approvals cannot be read: %s', async (policy) => {
   const { manager, dir } = await fixture()
@@ -1480,7 +1492,7 @@ it('installs and removes with the bundled pnpm when PATH contains no pnpm', asyn
   expect(removed.error).toBeUndefined()
   expect(removed.packageResult?.exitCode).toBe(0)
   expect(readProfileManifest('test', dir).dependencies ?? {}).not.toHaveProperty('@test/desktop-manager')
-})
+}, REAL_PACKAGE_PROCESS_TIMEOUT_MS)
 
 const MIRROR = 'https://registry.npmmirror.com/'
 const OFFICIAL = 'https://registry.npmjs.org/'
