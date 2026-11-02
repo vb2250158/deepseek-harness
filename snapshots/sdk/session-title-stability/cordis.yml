@@ -10,3 +10,9 @@
         timeoutMs: 5000
         provider: deepseek-official
         model: deepseek-v4-flash
+
+# Title-only replay has the same tools on every platform.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
