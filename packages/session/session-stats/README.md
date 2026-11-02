@@ -43,6 +43,8 @@ Mount the plugin beside the session store and the projection registry when clien
 | `otherMs` | Closed-turn time outside recorded model, tool and compaction activity; overlapping activity intervals count once |
 | `turns` | Distinct turns with at least one closed step; rejected or empty turns are uncounted |
 | `steps` | Closed steps — completed, failed, cancelled, and max-tokens steps all count |
+| `turnMs` | Summed matched `turn/start` → `turn/end` wall time, including failed, cancelled and empty turns; time between turns is excluded |
+| `otherMs` | Closed-turn time outside recorded model, matched tool and compaction intervals; overlapping intervals count once for coverage |
 | `llmMs` | Summed model wall time over message-assembling steps, excluding overlapping compaction |
 | `compactionMs` | Matched compaction start-to-end wall time, including failed attempts; unfinished attempts are not yet counted |
 | `toolMs` | Summed matched `tool/call` → `tool/result` wall time |
@@ -50,6 +52,8 @@ Mount the plugin beside the session store and the projection registry when clien
 | `decodeMs` / `decodeTokens` | Summed decode wall time and provider output tokens over usage-reporting steps |
 
 Every field is 0 until its first contributing event; the composed registry always serves the key, so clients read the value rather than key presence. Clients render whole-log figures through the projection seam's snapshot and change feed; the reference consumer is the web chat stats strip, whose window fold mirrors these field names as its no-unit fallback.
+
+Other time includes preparation before steps, stopping after steps, waits and incomplete steps without assembled messages. Parallel tools can make summed tool time exceed their covered wall time. Compaction outside a turn contributes to `compactionMs` only. Open turns contribute only after their matching end. Older providers and paged-node fallback omit these values. Cache state version 3 rebuilds them from the existing log.
 
 ### Failures and recovery
 
@@ -121,7 +125,7 @@ None; the package never assembles or sends provider requests.
 These limits define what the figures describe and when the unit is absent. They are current package constraints.
 
 - **Steps count work attempted, not visible output** — a step that failed before producing visible content still closes with `step/end` and counts; a step interrupted by a crash counts after the session reloads, when crash recovery appends its synthetic `step/end`.
-- **A cancelled step is counted but untimed** — no assistant message assembles, so its partial stream time enters no wall-time figure; a max-tokens usage-host message conversely contributes model time the surface does not show.
+- **Cancelled steps contribute to other closed-turn time** — without an assembled message they add no model or decode time; max-tokens usage-host messages contribute model time invisible on the surface.
 - **Counts are log-scoped, not surface-scoped** — steps whose messages were later compacted away stay counted; the figures describe the whole session, not the current model-visible surface.
 - **Mounted only where the projection registry is composed** — other assemblies serve no `sessionStats` key, and their consumers fall back to window-scoped counting.
 

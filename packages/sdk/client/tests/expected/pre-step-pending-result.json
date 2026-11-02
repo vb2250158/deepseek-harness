@@ -1,0 +1,10 @@
+{
+  "finalResponse": "",
+  "runEventTypes": ["agent/inbox/spliced", "turn/start", "turn/end"],
+  "runReasons": [{"kind": "error", "error": {"message": "prompt hook broke", "code": "UNKNOWN"}}],
+  "statuses": ["running", "idle", "running", "idle"],
+  "turns": [1, 2],
+  "reasons": [{"kind": "error", "error": {"message": "prompt hook broke", "code": "UNKNOWN"}}, {"kind": "completed"}],
+  "userTexts": ["second"],
+  "assistantTexts": ["after"]
+}

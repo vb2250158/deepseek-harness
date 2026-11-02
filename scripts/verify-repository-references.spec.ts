@@ -80,6 +80,17 @@ describe('maintained repository reference policy', () => {
     expect(findRepositoryReferences('python/sdk/uv.lock', '{ size = 1234567abc }', new Set(['1234567abc']))).toHaveLength(1)
   })
 
+  it('accepts uv archive byte counts while rejecting commit links on the same line', () => {
+    const size = ['634', '4383'].join('')
+    const commits = new Set([size])
+    const archive = `sdist = { url = "https://example.invalid/archive.tar.gz", size = ${size} }`
+    expect(findRepositoryReferences('python/sdk/uv.lock', archive, commits)).toEqual([])
+    expect(findRepositoryReferences('python/sdk/uv.lock', `${archive} # https://github.com/example/project/commit/${size}`, commits))
+      .toEqual([{ file: 'python/sdk/uv.lock', line: 1, kind: 'commit-hash' }])
+    expect(findRepositoryReferences('docs/example.md', `size = ${size}`, commits))
+      .toEqual([{ file: 'docs/example.md', line: 1, kind: 'commit-hash' }])
+  })
+
   it('permits only the independent kit repository and its source URLs', () => {
     for (const suffix of ['', '.git', '/tree/main/packages/entry']) {
       expect(findRepositoryReferences('package.json', `${organizationUrl}/libreoffice-kit${suffix}`, new Set())).toEqual([])

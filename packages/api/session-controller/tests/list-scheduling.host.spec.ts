@@ -9,6 +9,7 @@ import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
 import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
+
 import SessionController from '../src/index.ts'
 import { createSessionTestController, TEST_IMAGE_LIMITS } from './test-remote.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -238,6 +239,7 @@ describe('Session-list pages', () => {
     expect(first.items.map(row => row.sessionId)).toEqual(['row-5', 'row-4'])
     expect(cache).toHaveBeenCalledTimes(8)
     expect(cache.mock.calls.slice(-2).map(([header]) => header.id)).toEqual(['row-5', 'row-4'])
+    expect(cache.mock.calls.filter(([, keys]) => keys === h.ctx.sessionProjections.summaryKeys())).toHaveLength(2)
     const second = await h.list.page({ cursor: first.nextCursor! }, pagePolicy)
     const last = await h.list.page({ cursor: second.nextCursor! }, pagePolicy)
     expect([...first.items, ...second.items, ...last.items].map(row => row.sessionId))

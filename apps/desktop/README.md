@@ -72,8 +72,7 @@ Shared mode forwards the entry document, assets, plugins, HTTP and WebSocket tra
 The forwarded entry declares its local transport before Web's injection scripts run. Settings forms therefore load the Host's durable values instead of selecting page-local defaults while native boot IPC is pending.
 
 The native process reads the existing browser-session grant through the standard credential parser and signs short-lived authority-bound cookies. Secrets and cookies stay in native memory, outside renderer storage, logs and configuration. Shared mode has no private Host IPC supplying embedded Platform account credentials; embedded Platform sign-in remains separate. Native account RPC uses the shared Web account. This attachment does not independently qualify arbitrary combinations of Desktop and Web versions.
-
-Native file dragging is unavailable in shared mode because the attachment has no private Host IPC to authorize a local file path.
+In shared mode, dragging an original file out of the app is unavailable because the native carrier cannot obtain the owned Host's file authorization. Dragging byte-backed content remains available.
 
 <a id="terminal-command"></a>
 

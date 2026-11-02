@@ -60,7 +60,7 @@ At capacity, creation or cold resume rejects with `ACTIVATION_LIMIT_REACHED` (br
 
 ### Local and external children
 
-`startActivation({ provider, label, request, signal, delivery })` returns `{ childId, messageId?, result, dispose }`. Supplying `childId` selects a local backend and guarantees `messageId`. Local children accept later messages and can cold-resume; external children expose one execution and reject continuation. `request.agentOptions` overrides supported child model settings. `delivery: 'parent'` supplies the model-facing completion notice; `delivery: 'caller'` lets workflows await the result without a parent notice or initial return guidance. Local parent delivery requires persistence; caller delivery can use an ephemeral local session. Cold resume requires persistence and Session query.
+`startActivation({ provider, label, request, signal, delivery })` returns `{ childId, messageId?, result, dispose }`. Supplying `childId` selects a local backend and guarantees `messageId`. Local children accept later messages and can cold-resume; external children expose one execution and reject continuation. `request.agentOptions` overrides supported child model settings. `delivery: 'parent'` supplies the model-facing completion notice; `delivery: 'caller'` lets workflows await the result without a parent notice or initial return guidance. Local parent delivery requires persistence; caller delivery can use an ephemeral local session. Cold resume requires persistence and Session query. A structured child that is submitting or has committed its result rejects prompt-free `continueInterrupted()` with `INPUT_CLOSED` until that activation closes, just as it rejects new input.
 
 ### Child presets
 
@@ -165,6 +165,10 @@ Read these pages when the package-level contract is not enough. They move from t
 `ctx.subagents.continueInterrupted(parent, childId, startSeq, signal)` resumes the last interrupted turn under the original parent Agent's authority and the child Session lock, without delivering a message. Cold loading reuses the descriptor, model, and identity. One-shot children, incorrect parent relations, stale turns, and cancelled requests are rejected. On failure or a stale turn, a newly mounted Activation releases its handles and concurrency slot.
 
 <a id="model-experience"></a>
+## Original-session recovery
+
+`ctx.subagents.continueInterrupted(parent, childId, startSeq, signal)` continues the last interrupted turn under the original parent's authority and the child Session lock, without delivering a message. Cold activation reuses the descriptor, model and identity. One-shot children, wrong parents, stale turns and cancellation are refused. Failure or expired eligibility releases any newly mounted Activation and its concurrency slot.
+
 ## Model Experience
 
 ### Settlement notice

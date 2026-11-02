@@ -72,8 +72,7 @@ Desktop Host 的 Platform API 请求与更新策略请求用相同的 Platform �
 转发入口在 Web 注入脚本运行前声明本地连接参数，因此设置表单会加载 Host 持久值，不会在原生启动 IPC 等待期间选择页面内存默认值。
 
 原生进程通过标准凭据解析器读取已有浏览器会话 grant，签发短期、绑定 authority 的 cookie。密钥和 cookie 仅保留在原生内存，不进入 renderer 存储、日志或配置。共享模式没有私有 Host IPC 提供嵌入 Platform 的账号凭据，因此嵌入 Platform 登录仍独立处理。原生账号 RPC 使用共享 Web 账号。此连接模式不代表任意 Desktop 与 Web 版本组合已通过独立验收。
-
-共享模式无法进行原生文件拖拽，因为此连接没有用于授权本机文件路径的私有 Host IPC。
+共享模式下，原文件无法从应用拖出，因为原生载体无法取得独占 Host 的文件授权；以字节内容准备的文件仍可拖出。
 
 <a id="terminal-command"></a>
 

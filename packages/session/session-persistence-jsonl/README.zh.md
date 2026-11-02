@@ -7,6 +7,7 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
+
 ## 概述
 
 `dsh-session-persistence-jsonl` 把每个会话存为当前的仅追加 JSONL 日志，并保留不可变的历史格式 generation——默认以带校验和的 Zstandard 帧存储，禁用压缩时以换行分隔的原始文本行存储。它通过持久化句柄提供当前逻辑 `SessionEvent` 流，因此格式迁移、压缩、历史解码与崩溃恢复仍是存储内部细节。当消费方需要按会话的磁盘文件时选择它；选择 `compression: 'none'` 后日志可作为纯文本按行读取。根目录是唯一必填配置；持久性、延迟实体化、[受支持的历史格式迁移](../session-format-catalog/README.zh.md)与撕裂尾部崩溃恢复都随后端提供。
@@ -94,7 +95,7 @@ kind: "package-reference"
 
 历史正文准备通过 [V3→V4](../session-format-v3-to-v4/README.zh.md) 补齐父目录：从 header 找到候选直属子 Session，通过历史编解码器逐个读取其自身 descriptor，保留紧凑证据与来源修订。此过程不准备子目录，也不发布子后继。不可读或不支持的 header（包括损坏的 Zstandard header 帧）不参与发现，也不出现在 `list()` 中。直接访问损坏的压缩 header 仍会失败；header 的 I/O 错误与取消错误继续传播。子日志解码或 descriptor 字段失败会产生带子路径的警告；父目录没有完整条目时，通过 `subagent/catalog` 保留 header 身份信息。健康子项和已有父目录项仍可使用。打开损坏子 Session 时仍报告该子会话的错误。缺失、不支持或多个 descriptor 同样生成模式未知的目录项，不编造标签。已发布的未知条目仍可浏览；读取子历史时会重试实际日志，并从有效 descriptor 确定模式。准备返回、复用与发布前会重新检查成员集合及已检查来源的修订，也包括读取失败的子日志，使修复后的子日志能够使旧准备缓存失效。来源变化时只读打开重试一次，写打开拒绝发布。取消仍会中止操作。当前 V4 打开跳过发现，并在暴露事件前校验目录字段、唯一性及当前投递归属。
 
-Header 扫描仅在所选文件修订不变时复用已验证的 header。每轮仍重新枚举目录、选择最高 generation；缓存比较设备、inode、大小、修改时间和变更时间，命中后仍复查存储身份，并返回独立的元数据对象。变更、删除、损坏或被新 generation 取代的文件不能复用旧 header。历史子成员校验因此减少重复首帧读取；目录枚举和修订检查仍与会话总数成正比。
+Header 扫描仅在所选文件修订不变时复用已验证的 header。目录的设备、inode、大小、修改时间和变更时间均一致时复用 generation 选择；目录变化时重新枚举，目录消失后淘汰其选择缓存。每次命中 header 缓存仍检查文件修订和存储身份，并返回独立的元数据对象。变更、删除、损坏或被新 generation 取代的文件不能复用旧 header。历史子成员校验因此减少重复首帧读取和未变目录的枚举；修订检查仍与会话总数成正比。
 
 历史格式的 `stat` 与 `list` 修订号需要与根目录 Session 数量成正比的元数据工作。首次正文准备扫描所有所选 header 并解码直属子正文；复用准备缓存仍扫描成员集合并检查修订。只读访问从不发布升级，因此冷进程与被淘汰的准备缓存会重复这些工作。当前 V4 正文读取和修订号避开历史全库扫描。见[实测成本与诊断命令](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md#catalog-scan-measurements)。
 
@@ -110,7 +111,7 @@ Header 扫描仅在所选文件修订不变时复用已验证的 header。每轮
 
 ### 设计理念
 
-该后端拥有自己完整的存储运行时（`src/storage.ts`）：`JsonlSessionHandle` 承载逐句柄修改链、带固定批处理窗口与 single-flight 排空的已路由实时事件缓冲、单调读取与幂等 close；一个 tracker 持有进程内单写者认领、teardown 清扫所遍历的打开句柄集合，以及后端自己的会话监听器所路由进的已创建但未实体化待定会话。历史正文读取共享每个 Session 唯一的一次 Decode/Migrate preparation，按 revision 为键的有界 memo 让紧接的观察到恢复交接复用该解析；backend 在 memo 化前只对每个 event graph 深度冻结一次，因此后续 handle read 无需复制或再次冻结。只有写 open 才发布准备好的后继。本包暴露插件导出与配置类型——具体类是私有的，因此消费方只耦合 `ctx.sessionPersistence`，其可观察行为由共享 seam 测试套件（`runPersistenceContract`/`runLiveWritePathContract`）钉住。物理修订号组合 device、inode、size 与纳秒时间戳，供准备缓存、稳定读取重试及发布检查使用。历史格式的公开修订号还加入所选路径排序后及其物理修订号的 SHA-256 指纹；锁文件与保留但未被选中的代际不参与计算。
+该后端拥有自己完整的存储运行时（`src/storage.ts`）：`JsonlSessionHandle` 承载逐句柄修改链、带固定批处理窗口与 single-flight 排空的已路由实时事件缓冲、单调读取与幂等 close；一个 tracker 持有进程内单写者认领、teardown 清扫所遍历的打开句柄集合，以及后端自己的会话监听器所路由进的已创建但未实体化待定会话。解码日志仅由弱引用保留；同一有界 memo 在日志被回收后仍保留成员路径与物理来源校验，淘汰时一并释放这些校验，后续打开会重新准备。历史正文读取共享每个 Session 唯一的一次 Decode/Migrate preparation，按 revision 为键的有界 memo 让紧接的观察到恢复交接复用该解析；backend 在 memo 化前只对每个 event graph 深度冻结一次，因此后续 handle read 无需复制或再次冻结。只有写 open 才发布准备好的后继。本包暴露插件导出与配置类型——具体类是私有的，因此消费方只耦合 `ctx.sessionPersistence`，其可观察行为由共享 seam 测试套件（`runPersistenceContract`/`runLiveWritePathContract`）钉住。物理修订号组合 device、inode、size 与纳秒时间戳，供准备缓存、稳定读取重试及发布检查使用。历史格式的公开修订号还加入所选路径排序后及其物理修订号的 SHA-256 指纹；锁文件与保留但未被选中的代际不参与计算。
 
 ### 物理编码
 
@@ -143,7 +144,7 @@ Header 扫描仅在所选文件修订不变时复用已验证的 header。每轮
 
 -----
 
-会话列表通过 `listConcurrency` 限制目录、header 与元数据读取的并发数，默认 16，范围 1–64。一次 list 的历史修订计算复用已发现的 generation；header 缓存依据实际文件修订校验，已消失路径的缓存会淘汰。失败或取消后停止发起新读取，等待已开始的读取结束后拒绝请求；条目顺序与重复身份拒绝保持一致。
+会话列表通过 `listConcurrency` 限制目录、header 与元数据读取的并发数，默认 3，接受正整数。元数据请求优先于排队中的历史正文发现，共用同一并发上限，不中断已开始的读取。Header 和目录选择缓存依据实际修订校验，已消失路径的缓存会淘汰。失败或取消后停止发起新读取，等待已开始的读取结束后拒绝请求；条目顺序与重复身份拒绝保持一致。
 
 <a id="model-experience"></a>
 

@@ -21,8 +21,8 @@
   en: 26d49c76bce41e30
   zh: 9710f54e24b190d1
 /deepseek-ai-dsh-agent/use-this-package/select-a-model:
-  en: 85b0ff72a187110f
-  zh: 3f61c1568d27b8bc
+  en: ff4719cc0fc0ffca
+  zh: c6bd16c525d77ca2
 /deepseek-ai-dsh-agent/use-this-package/drive-an-agent-s-conversation:
   en: 71e258897e2e7d73
   zh: abf0991012faa17e
@@ -65,6 +65,9 @@
 /deepseek-ai-dsh-agent/original-session-recovery:
   en: 3b197d5894ed38d5
   zh: 527cf4ceb9f62ece
+/deepseek-ai-dsh-agent/original-session-recovery~2:
+  en: 5e264b99cac9129b
+  zh: a8f312d7d9537c63
 /deepseek-ai-dsh-agent/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90

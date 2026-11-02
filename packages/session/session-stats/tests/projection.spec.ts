@@ -11,6 +11,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import Include from '@deepseek-ai/cordis-plugin-include'
 import { Context } from '@deepseek-ai/cordis'
 import { createMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -179,6 +185,40 @@ function fold(events: readonly SessionEvent[]): SessionStatsProjection {
   )
   return sessionStatsProjectionDefinition.wire.view(state)
 }
+
+describe('sessionStats Loader composition', () => {
+  it('publishes whole-turn coverage from the composed providers and durable lifecycle', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-stats-coverage-'))
+    const config = join(dir, 'cordis.yml')
+    writeFileSync(config, '- name: cordis:session-store\n- name: cordis:projection-registry\n- name: cordis:session-stats\n')
+    const ctx = new Context()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    try {
+      await ctx.plugin(Loader)
+      ctx.loader.builtins.include = Include
+      ctx.loader.builtins['session-store'] = SessionStore
+      ctx.loader.builtins['projection-registry'] = SessionProjectionRegistry
+      ctx.loader.builtins['session-stats'] = SessionStatsPlugin
+      await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(config).href } })
+      await ctx.loader.await()
+      const session = ctx.sessions.create(SessionId('composed-coverage'))
+      session.append('turn/start', { turn: 1 })
+      clock.mockReturnValue(4_000)
+      session.append('step/start', { turn: 1, step: 1 })
+      clock.mockReturnValue(5_000)
+      appendEmptyAssistantMessage(session, 1, 1)
+      session.append('step/end', { turn: 1, step: 1 })
+      clock.mockReturnValue(9_000)
+      session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      expect(ctx.sessionProjections.snapshot(session).values.sessionStats)
+        .toEqual(totals({ turns: 1, steps: 1, turnMs: 8_000, otherMs: 7_000, llmMs: 1_000 }))
+    } finally {
+      clock.mockRestore()
+      await ctx.fiber.dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('sessionStats wall-time fold (controlled timestamps)', () => {
   const message = createMessage({

@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-24-step-model-resolution.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-24-step-model-resolution.md
+/agent-note-resolve-deployment-routing-before-preparing-a-step:
+  en: ae85630aaddcc237
+  zh: 1d00d81c9870b4f9
+/agent-note-resolve-deployment-routing-before-preparing-a-step/problem:
+  en: ba8dac53f5406b20
+  zh: 7f12b5918fcd4eae
+/agent-note-resolve-deployment-routing-before-preparing-a-step/decision:
+  en: 9473164f2c5c0dc0
+  zh: 105a6c992d954853
+/agent-note-resolve-deployment-routing-before-preparing-a-step/alternatives-considered:
+  en: 929a1c928e08fa39
+  zh: e7670d7ac2cde08a
+/agent-note-resolve-deployment-routing-before-preparing-a-step/consequences:
+  en: 3eac5d8e2f87c2e8
+  zh: e1ac8d9e49404be4

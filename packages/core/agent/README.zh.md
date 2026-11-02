@@ -51,6 +51,10 @@ await handle.dispose()   // stops the loop, unregisters, removes the session, un
 
 普通恢复保留持久化选择。明确覆盖模型的入口先形成完整选择：仅在配置未指定强度且路由不变时保留旧的显式强度，然后调用 `select()`。Web 与 ACP 用户选择直接调用 `select()`，因此省略强度表示 Auto。选择 Session 模型不会改变部署默认值。
 
+部署路由通过 `agent/resolve-model` waterfall 在条件工具与提示词组装之前解析。`sourceSelection` 是当前选择的捕获副本；`await next()` 返回后续监听器解析的有效选择。监听器返回经过校验的完整选择。循环复制并冻结该结果，供工具、组装、请求 header 与重试使用，不将它保存为持久选择。解析失败或取消时，这些消费方均不会执行。
+
+若重定向后的 header 不能改变后续步骤的原始来源选择，在返回其他路由前，通过 `agent.model.select(sourceSelection)` 记录相同的原始来源。异步校验后，先确认当前选择仍与捕获来源相等，避免覆盖用户后来作出的选择。临时目标不能记录为用户选择。[步骤路由决策](../../../.agents/notes/implemented/architecture/2026-10-24-step-model-resolution.zh.md)说明了这一区别。
+
 要启用作用域内的切换提示，在 Agent setup 中调用 `dsh-agent` 的 `installModelSelection(agentCtx)`。作用域拥有监听器，并在释放时移除它。
 
 ### 驱动 agent 的对话
@@ -158,6 +162,10 @@ await handle.agent.whenIdle()
 `Agent.continueInterrupted?(startSeq)` 和 `continueQuotaFailure?(startSeq)` 是可选驱动能力：不添加恢复消息，在原会话中开启新轮次，保留待处理队列。调用前须确认驱动支持；忙碌、主动停止、过期轮次及不匹配的失败均拒绝。
 
 <a id="model-experience"></a>
+## 原会话恢复
+
+`Agent.continueInterrupted?(startSeq)` 和 `continueQuotaFailure?(startSeq)` 是可选驱动能力：不添加恢复消息，在原会话中开启新轮次，保留待处理队列。调用前须确认驱动支持；忙碌、主动停止、过期轮次及不匹配的失败均拒绝。
+
 ## 模型体验
 
 ### 用户、steering 与注入消息

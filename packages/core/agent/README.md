@@ -51,6 +51,10 @@ await handle.dispose()   // stops the loop, unregisters, removes the session, un
 
 Ordinary resume keeps the recorded choice. An entry point explicitly overriding the model first builds a complete selection, retaining the previous explicit effort only when the configured route is unchanged and omits effort, then calls `select()`. Web and ACP user selections call `select()` directly, so omitted effort means Auto. Selecting a Session model does not change deployment defaults.
 
+Deployment routing uses the `agent/resolve-model` waterfall before conditional tools and prompt assembly. Its `sourceSelection` is the captured current choice; `await next()` yields the effective choice from the remaining listeners. Return a complete validated selection. The loop detaches and freezes that result for tools, assembly, the request header, and retries without selecting it persistently. A failure or cancellation prevents those consumers from running.
+
+To preserve a fallback source across redirected headers, record that same source through `agent.model.select(sourceSelection)` before returning another route. After asynchronous validation, first confirm the current choice still equals the captured source so a later user choice is not overwritten. Never record the temporary target as the user's choice. The [step-routing decision](../../../.agents/notes/implemented/architecture/2026-10-24-step-model-resolution.md) records this distinction.
+
 For scoped switch notices, call `installModelSelection(agentCtx)` from `dsh-agent` during Agent setup. The scope owns the listener and removes it on disposal.
 
 ### Drive an agent's conversation
@@ -158,6 +162,10 @@ The package-level contract is enough for most consumers; read these when you nee
 `Agent.continueInterrupted?(startSeq)` and `continueQuotaFailure?(startSeq)` are optional driver capabilities that start a new turn in the original Session without adding a recovery message and retain pending input. Callers must check driver support. Busy agents, explicit stops, stale turns, and mismatched failures are rejected.
 
 <a id="model-experience"></a>
+## Original-session recovery
+
+`Agent.continueInterrupted?(startSeq)` and `continueQuotaFailure?(startSeq)` are optional driver capabilities. They begin a new turn in the original Session without adding a recovery message and preserve queued input. Callers check driver support; busy Agents, explicit stops, stale turn identities and ineligible failures are refused.
+
 ## Model Experience
 
 ### User, steering, and injected messages

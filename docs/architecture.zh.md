@@ -115,7 +115,7 @@ turn/end
 
 输入通过同一个 inbox 到达驱动器；注入的上下文等待一条唤醒消息。AgentLoop 的持久 `inbox` 投影使待处理输入在没有活跃 Agent 时仍可读取。
 
-循环在组装前通过 `agent/resolve-model` 解析捕获的 Session 模型选择，并将有效选择提供给 `AssembleContext.modelSelection` 与 `agent/pre-step.modelSelection`；重试保留该选择，省略推理强度时使用适配器默认值。`agent/pre-step` 监听器接纳、改写或拒绝已领取消息；首次领取被拒绝或为空时，关闭不含步骤的持久轮次。enter 决策可设置 `startsRequestSeries`：循环记录新的 `request/header`（原因为 `series`，或在封装同时变化时为携带 `startsSeries: true` 的 `change`）。包装监听器通过 `{ ...decision, messages }` 保留该声明。组装与 `step/start` 之后，已弃用的 `agent/request` hook 在不改变提供方、模型或推理强度选择的前提下调整控制参数，`prepareCall()` 绑定适配器，再提交系统提示词与已接纳用户消息；在任一异步阶段取消都不会提交这两者。提示词准入依据已准备调用的能力，而非先前的 `request/context`。每次尝试刷新已注册运行时事实、协调绑定的提示词、仅接纳一次用户消息、在已接纳上下文的压缩后恢复必需的系统与运行时消息、按需记录 header/context，再冻结请求并通过绑定调用发起流式请求。重试不重复组装或 `agent/pre-step`。附接后的 surface 替换和图片省略决定开启新请求序列，包括恢复后的首次 pre-step 中发生的替换；未变化的恢复延续序列。系统提示词通过 `system/message` 历史传递：空文本清除提示词，具备能力的路由追加更新，其他路由将其归并到首个系统节点。[Agent-loop](../packages/core/agent-loop/README.zh.md#understand-the-implementation) 说明提示词准入与替换的细节。
+循环在工具解析与组装之前，通过 `agent/resolve-model` 将捕获的原始选择解析为供 pre-step 与重试使用的实际选择；省略推理强度时使用适配器默认值。`agent/pre-step` 可改写或拒绝输入；首次领取被拒绝或为空时，关闭不含步骤的持久轮次。失败的领取不重放，相邻输入启动独立轮次。改写须保留 `startsRequestSeries`，它会记录新的 header。组装与 `step/start` 之后，`agent/request` 只调整控制参数，不改变路由。`prepareCall()` 绑定适配器，再提交提示词与已接纳用户消息；在任一异步阶段取消都不提交这两者。提示词准入依据已准备调用的能力，而非先前的请求上下文。每次尝试刷新运行时事实、协调提示词／用户消息／运行时上下文、记录 header/context，再冻结请求。重试不重复组装或 pre-step。附接后的替换和图片省略开启新请求序列，未变化的恢复延续原序列。系统头预留、空渲染文本、受支持的提示词／工具更新与序列归并规则见 [agent-loop](../packages/core/agent-loop/README.zh.md#understand-the-implementation) 和[系统提示词决策](../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.zh.md)。
 
 循环发送不可变请求，同时保持取消有效，仅对完全冻结的对象复用冻结证据；[agent-loop](../packages/core/agent-loop/README.zh.md) 负责请求构建与取消原因。
 
@@ -129,7 +129,7 @@ turn/end
 
 会话日志是模型所见上下文的来源。`deriveMessages()` 从中投影出模型历史。每个 `assistant/message` 都嵌入产生其组装内容的精确紧凑带时间 stream；`assistant/attempt` 保留已到达 settlement 的失败、重试、取消与 stream error attempt，且不添加模型历史。fork、恢复、transcript（文本记录）、遥测与持久化都从这些持久 settlement 派生，实时 UI 增量则来自 `agent/assistant-stream`；如果进程在 settlement 前硬中断，则不会留下持久 attempt stream（见[决策](../.agents/notes/implemented/architecture/2026-09-01-v2-embedded-assistant-streams.zh.md)）。
 
-Session 消费方只了解当前逻辑格式。仅 header 的 `stat` 与 `list` 会重新扫描每个 Session 目录，选择数值最高的规范 generation，并在不加载事件或发布后继的情况下转换受支持的历史 header。已存储 Session 的 `open` 选择同一 generation，拒绝未来版本，或只 Decode 并组合一次构建时静态确定的相邻迁移链，再返回经过校验的当前逻辑事件。只读 open 直接使用这份内存结果，不发布后继；写 open 则先编码、校验并在未改变源的旁边排他发布最终版本命名的后继。未被后续事件封住的普通中断尾部仍由句柄消费方修复；只有在后续 `turn/start` 已经封住一种有限的已发布 restart 时，migration 才会插入缺失的 interrupted `turn/end`。JSONL v0 使用 `session.jsonl[.zstd]`，v1 及后续版本使用小写 `session.vN.jsonl[.zstd]`；已提交 generation 路径绝不重命名、替换或删除。JSONL provider 负责物理 framing、压缩、generation 选择与排他发布，每个相邻迁移包只负责一个 `vN -> vN+1` 步骤（[决策](../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md)）。
+消费方只读取当前逻辑事件。仅 header 的 `stat`/`list` 重新扫描目录，选择最高的规范 generation，并在不加载事件或发布后继的情况下还原受支持的历史 header。`open` 选择同一 generation，拒绝未来版本，并只组合一次静态相邻迁移链。只读句柄将经过校验的结果保留在内存中；写句柄先编码、校验，再于未改变的源旁排他发布最终后继。句柄负责普通未封闭尾部的修复；迁移只闭合已被后续 `turn/start` 封住的有限已发布中断轮次。JSONL v0 使用 `session.jsonl[.zstd]`，后续版本使用小写 `session.vN.jsonl[.zstd]`。已提交 generation 不可变。JSONL 负责 framing、压缩、选择与发布，每个迁移包只负责一个相邻步骤（[格式迁移](../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md)）。
 
 **模型可见即已记录。** 每个模型请求都必须能从日志重建。新增模型可见输入需要会话事件。修改现有消息内容的插件注册[纯消息投影](subsystems/session.zh.md#plugin-owned-message-projections)，独立读取器显式传入相同的处理器。 工具变更不依赖能力；[Session 工具历史](../packages/core/session/README.zh.md)提供提供方声明。
 

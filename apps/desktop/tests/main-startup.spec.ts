@@ -392,7 +392,12 @@ vi.mock('../src/welcome-backend.ts', () => ({
     analyticsEnabled: async () => harness.analyticsEnabled,
     report: harness.analytics,
     readLocalePreference: async () => null,
-    read: async (): Promise<unknown> => (await harness.hosts.at(-1)!.fetch()).json() as Promise<unknown>,
+    read: async (): Promise<unknown> => {
+      const host = harness.hosts.at(-1)
+      return host === undefined
+        ? { hasApiKey: true, writable: true, localePreference: null }
+        : (await host.fetch()).json() as Promise<unknown>
+    },
     save: async () => ({ ok: true }),
     account: { watch: harness.watchAccount, state: async () => ({ status: 'signed-out', attempt: null }) },
   }),

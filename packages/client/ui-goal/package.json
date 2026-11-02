@@ -46,7 +46,8 @@
   },
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "workspace:~"
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-client-store": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-api-remotes": "workspace:*",

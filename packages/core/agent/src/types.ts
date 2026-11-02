@@ -89,7 +89,7 @@ export interface ModelSelection {
 export interface ModelSelectionProjection {
   /** Selection used by the latest recorded model request. */
   readonly lastUsed: ModelSelection | null
-  /** Selection the next model step uses; null while the Agent's initial options supply the route. */
+  /** Source choice for the next step's route resolution; null while the Agent's initial options supply it. */
   readonly next: ModelSelection | null
 }
 
