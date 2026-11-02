@@ -69,6 +69,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   hmr: 'boot.md',
   mcpResources: 'mcp.md',
   agentLoop: 'core.md',
+  agentPreStepTiming: 'core.md',
   agentDefaultModel: 'core.md',
   agentPresets: 'core.md',
   agents: 'core.md',

@@ -7,6 +7,13 @@ A service can be a core spine service, a swappable capability seam, a bundle/com
 
 ```mermaid
 flowchart LR
+  pkg_agent["agent"]
+  svc_agentPreStepTiming["ctx.agentPreStepTiming<br/>Optional pre-step operation timing"]
+  pkg_agent_instructions["agent-instructions"]
+  pkg_session_reference["session-reference"]
+  pkg_time_context["time-context"]
+  pkg_tmux_context["tmux-context"]
+  pkg_tool_skill["tool-skill"]
   pkg_action_cards["action-cards"]
   svc_actionCards["ctx.actionCards<br/>Optional action cards"]
   pkg_creation_recommendations["creation-recommendations"]
@@ -94,7 +101,6 @@ flowchart LR
   svc_toolResultPruner["ctx.toolResultPruner<br/>Model-free tool-result pruning"]
   pkg_session["session"]
   svc_sessions["ctx.sessions<br/>In-memory session store"]
-  pkg_agent["agent"]
   pkg_session_persistence["session-persistence"]
   pkg_session_query["session-query"]
   pkg_session_query_sqlite["session-query-sqlite"]
@@ -165,7 +171,6 @@ flowchart LR
   svc_sessionFeedback["ctx.sessionFeedback<br/>Session-level feedback recorder"]
   svc_workspaceRegistry["ctx.workspaceRegistry<br/>Workspace entity registry"]
   svc_sessionQuery["ctx.sessionQuery<br/>Session reads, traces, filters, and search"]
-  pkg_session_reference["session-reference"]
   pkg_tool_session_query["tool-session-query"]
   pkg_file_reference["file-reference"]
   svc_fileReferences["ctx.fileReferences<br/>File reference discovery"]
@@ -183,7 +188,6 @@ flowchart LR
   svc_tools["ctx.tools<br/>Scoped tool registry and executor selection"]
   pkg_tool_ask_user["tool-ask-user"]
   pkg_tool_cordis["tool-cordis"]
-  pkg_tool_skill["tool-skill"]
   pkg_tool_todo["tool-todo"]
   pkg_user_questions["user-questions"]
   svc_userQuestions["ctx.userQuestions<br/>Human question/answer seam"]
@@ -315,6 +319,7 @@ flowchart LR
   pkg_experimental_liveshare["experimental-liveshare"]
   svc_liveshareShares["ctx.liveshareShares<br/>Owner share management Remote"]
   pkg_action_cards --> svc_actionCards
+  pkg_agent --> svc_agentPreStepTiming
   pkg_agent --> svc_agents
   pkg_agent_default_model --> svc_agentDefaultModel
   pkg_agent_loop --> svc_agentLoop
@@ -486,6 +491,11 @@ flowchart LR
   svc_agentDefaultModel --> pkg_headless
   svc_agentLoop --> pkg_base
   svc_agentLoop --> pkg_sdk_minimal
+  svc_agentPreStepTiming --> pkg_agent_instructions
+  svc_agentPreStepTiming --> pkg_session_reference
+  svc_agentPreStepTiming --> pkg_time_context
+  svc_agentPreStepTiming --> pkg_tmux_context
+  svc_agentPreStepTiming --> pkg_tool_skill
   svc_agentTeams --> pkg_experimental_tool_agent_team
   svc_agents --> pkg_acp
   svc_agents --> pkg_agent_loop
@@ -648,6 +658,7 @@ flowchart LR
 
 | ctx key | Role | Owner | Implementations | Direct consumers | Companion plugins | Note |
 | --- | --- | --- | --- | --- | --- | --- |
+| `ctx.agentPreStepTiming` | `seam` | [`agent`](../packages/core/agent) | - | [`agent-instructions`](../packages/context/agent-instructions), [`session-reference`](../packages/context/session-reference), [`time-context`](../packages/context/time-context), [`tmux-context`](../packages/context/tmux-context), [`tool-skill`](../packages/skill/tool-skill) | - | Declares optional provider-local elapsed-time measurement. External plugins can provide the timing service; consumers preserve task results and rejections without timing downstream listeners. |
 | `ctx.actionCards` | `service` | [`action-cards`](../packages/experimental/action-cards) | - | [`creation-recommendations`](../packages/experimental/creation-recommendations), [`client-ui-action-cards`](../packages/experimental/client-ui-action-cards) | - | Owns the card tool, card state, user actions and status notices; card kinds register their actions and handlers. |
 | `ctx.pluginRecommendations` | `service` | [`plugin-recommendations`](../packages/experimental/plugin-recommendations) | - | [`client-ui-plugin-recommendations`](../packages/experimental/client-ui-plugin-recommendations) | - | Reads the current catalog text of an official plugin card and enables the plugin through the profile plugin manager after a click. |
 | `ctx.headlessStartup` | `core` | [`headless`](../packages/bundle/headless) | - | [`headless`](../packages/bundle/headless) | - | Supplies parsed task and run options to the headless runner and its sandbox-policy configuration. |

@@ -108,6 +108,14 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'agentPreStepTiming',
+    pkg: 'agent',
+    title: 'Optional pre-step operation timing',
+    mode: 'seam',
+    consumers: ['agent-instructions', 'session-reference', 'time-context', 'tmux-context', 'tool-skill'],
+    note: 'Declares optional provider-local elapsed-time measurement. External plugins can provide the timing service; consumers preserve task results and rejections without timing downstream listeners.',
+  },
+  {
     key: 'actionCards',
     pkg: 'action-cards',
     title: 'Optional action cards',

@@ -57,6 +57,8 @@ When the open turn contains exactly one Host-validated browser zone, the timesta
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+An optional `agentPreStepTiming` provider can measure this plugin's own pre-step work; downstream listeners are excluded. See the [Agent timing API](../../core/agent/README.md).
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

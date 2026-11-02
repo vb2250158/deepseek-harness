@@ -4,7 +4,7 @@ import { chmod, mkdtemp, mkdir, rm, stat, symlink, utimes, writeFile } from 'nod
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Config as AgentInstructionsConfig } from '@deepseek-ai/dsh-agent-instructions'
@@ -282,9 +282,15 @@ class BlockingReadFileSystem extends RecordingFileSystem {
   }
 }
 
+const ownedInstructionContexts = new WeakSet<Context>()
+
 async function mountAgentInstructionsPlugin(ctx: Context, config: AgentInstructionsConfig): Promise<Awaited<ReturnType<Context['plugin']>>> {
+  if (!ownedInstructionContexts.has(ctx)) {
+    ownedInstructionContexts.add(ctx)
+    onTestFinished(async () => { await ctx.fiber.dispose() })
+  }
   if (ctx.get('workingDirectory') === undefined) provideWorkingDirectoryFixture(ctx)
-  if (ctx.get('sessionProjections') === undefined) if (ctx.get('sessionProjections') === undefined) await ctx.plugin(SessionProjectionRegistry)
+  if (ctx.get('sessionProjections') === undefined) await ctx.plugin(SessionProjectionRegistry)
   if (ctx.get('agents') === undefined) await ctx.plugin(AgentRegistry)
   return ctx.plugin(AgentInstructions, config)
 }
@@ -596,14 +602,20 @@ describe('workspace context instruction discovery', () => {
     }
   })
 
-  it('follows a symlinked instruction file to its target content', async () => {
+  it('follows a symlinked instruction file to its target content', async (t) => {
     const root = await tempRepo()
     const home = await tempRepo()
     const outside = await tempRepo()
     try {
       await mkdir(join(root, '.git'), { recursive: true })
       await write(join(outside, 'shared.md'), 'shared instruction body')
-      await symlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'))
+      try {
+        await symlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'))
+      } catch (error: unknown) {
+        // Windows requires file-symlink privileges; preserve this case where the host supports it.
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') t.skip()
+        throw error
+      }
 
       pinHarnessHome(home)
       const files = await discoverBaselineInstructionFiles({ cwd: root })
@@ -620,14 +632,20 @@ describe('workspace context instruction discovery', () => {
     }
   })
 
-  it('follows a symlinked instruction file through ctx.fs to its target content', async () => {
+  it('follows a symlinked instruction file through ctx.fs to its target content', async (t) => {
     const root = await tempRepo()
     const home = await tempRepo()
     const outside = await tempRepo()
     try {
       await mkdir(join(root, '.git'), { recursive: true })
       await write(join(outside, 'shared.md'), 'shared provider instruction body')
-      await symlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'))
+      try {
+        await symlink(join(outside, 'shared.md'), join(root, 'AGENTS.md'))
+      } catch (error: unknown) {
+        // Windows requires file-symlink privileges; preserve this case where the host supports it.
+        if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') t.skip()
+        throw error
+      }
       const ctx = new Context()
       provideWorkingDirectoryFixture(ctx)
       pinHarnessHome(home)
@@ -5242,7 +5260,7 @@ describe('dynamic nested workspace context injection', () => {
       // removed; an unavailable classification would emit no change at all.
       await rm(join(root, 'pkg/AGENTS.md'))
       await mkdir(join(root, 'pkg/elsewhere'), { recursive: true })
-      await symlink(join(root, 'pkg/elsewhere'), join(root, 'pkg/AGENTS.md'))
+      await symlink(join(root, 'pkg/elsewhere'), join(root, 'pkg/AGENTS.md'), process.platform === 'win32' ? 'junction' : 'dir')
       await executeToolFixture(ctx, {
         signal: testToolSignal,
         callId: ToolCallId('read-after-symlink-dir'), name: 'read', arguments: { file_path: join('pkg', 'file.txt') }, agent,

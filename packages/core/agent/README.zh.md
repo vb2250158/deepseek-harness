@@ -88,6 +88,8 @@ await handle.agent.whenIdle()
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+可选 `agentPreStepTiming.run(position, operation, task)` 服务用于测量预处理提供方自己的异步工作。提供方先通过 `next()` 委托下游，再测量自有操作，并显式传入 Agent、轮次与步骤。计时提供方保留结果和错误，只记录名称与耗时，不记录任务输入或输出；服务缺失时，消费者直接执行原任务。
+
 `agent/request-context` 在完整输入及本次路由元数据入日志后、模型历史冻结前执行。监听者通过日志记录替换并调用 `next()`。`agent/request-context-ready` 在压缩结束后恢复必需上下文。取消保留已接纳事实，失败阻止发送。
 
 <details>

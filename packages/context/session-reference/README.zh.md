@@ -59,6 +59,8 @@ kind: "package-reference"
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+可选 `agentPreStepTiming` 提供方可测量本插件自身的输入预处理，不包含下游监听器的执行时间；参见 [Agent 计时接口](../../core/agent/README.zh.md)。
+
 <details>
 <summary>实现细节——点击展开</summary>
 

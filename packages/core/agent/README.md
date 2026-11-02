@@ -88,6 +88,8 @@ The `agent/*` events let plugins act on live work without depending on the loop 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+The optional `agentPreStepTiming.run(position, operation, task)` service measures a pre-step provider's own asynchronous work. Providers delegate with `next()` before timing their work and pass the owning Agent, turn and step explicitly. The timing provider preserves results and errors and records names and elapsed time without task inputs or outputs. Without a timing provider, consumers execute their original task directly.
+
 `agent/request-context` reconciles the complete durable input and registration-bound request context before the loop freezes model history. Listeners commit logged replacements and delegate with `next()`. `agent/request-context-ready` restores required context after compaction settles. Cancellation retains admitted facts; failures prevent dispatch.
 
 <details>
