@@ -176,6 +176,21 @@ export async function collectCliHelp(
   return [...pages.values()]
 }
 
+/**
+ * Resolve simultaneous profile-help processes, retaining the repository default unless explicitly configured.
+ * @param env - Process environment; DSH_CLI_HELP_CONCURRENCY may bound expensive source profile boots.
+ * @returns A positive safe integer worker count.
+ */
+export function cliHelpConcurrency(env: NodeJS.ProcessEnv = process.env): number {
+  const configured = env.DSH_CLI_HELP_CONCURRENCY
+  if (configured === undefined) return defaultParallelism(env)
+  const value = Number(configured)
+  if (!/^[1-9][0-9]*$/u.test(configured) || !Number.isSafeInteger(value)) {
+    throw new Error('DSH_CLI_HELP_CONCURRENCY must be a positive safe integer')
+  }
+  return value
+}
+
 async function collectHelp(): Promise<HelpPage[]> {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-cli-help-'))
   const profiles = Object.keys(PROFILE_TEMPLATES)
@@ -207,7 +222,7 @@ async function collectHelp(): Promise<HelpPage[]> {
     } finally {
       signal.removeEventListener('abort', abort)
     }
-  }, topLevelHelpArgs(profiles), defaultParallelism())
+  }, topLevelHelpArgs(profiles), cliHelpConcurrency())
   try {
     return await collectCliHelp(reader.readHelp, profiles)
   } finally {

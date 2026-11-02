@@ -1,7 +1,7 @@
 /** Command discovery and complete output preservation for the CLI reference. */
 
 import { describe, expect, it } from 'vitest'
-import { collectCliHelp, parseCliHelp, prefetchHelp, topLevelHelpArgs } from './gen-cli-help.ts'
+import { cliHelpConcurrency, collectCliHelp, parseCliHelp, prefetchHelp, topLevelHelpArgs } from './gen-cli-help.ts'
 
 interface PendingRead {
   args: string
@@ -130,5 +130,16 @@ describe('CLI help prefetch', () => {
 
   it.each([0, 1.5])('rejects concurrency %j', (concurrency) => {
     expect(() => prefetchHelp(async () => '', [], concurrency)).toThrow('concurrency must be a positive integer')
+  })
+})
+
+describe('CLI help process budget', () => {
+  it('uses an explicit smaller process budget without changing the repository default', () => {
+    expect(cliHelpConcurrency({ DSH_CLI_HELP_CONCURRENCY: '1' })).toBe(1)
+    expect(cliHelpConcurrency({})).toBeGreaterThan(0)
+  })
+
+  it.each(['', '0', '-1', '1.5', '1e2', ' 2', '9007199254740992'])('rejects invalid configured process counts %j', (configured) => {
+    expect(() => cliHelpConcurrency({ DSH_CLI_HELP_CONCURRENCY: configured })).toThrow('DSH_CLI_HELP_CONCURRENCY must be a positive safe integer')
   })
 })
