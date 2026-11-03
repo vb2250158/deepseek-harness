@@ -1,4 +1,5 @@
 import { once } from 'node:events'
+import type { IncomingMessage } from 'node:http'
 import { WebSocketServer } from 'ws'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import { accountView, desktopAccountBackend } from '../src/account-backend.ts'
@@ -28,7 +29,7 @@ it('uses account Remote commands without returning additional wire fields', asyn
   const backend = desktopAccountBackend('http://127.0.0.1:1234', (request) => {
     requests.push(request)
     return Promise.resolve({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null, token: 'private' })
-  }, () => Promise.resolve(''))
+  }, '')
   const client = { version: '1.2.3', locale: 'en', timezoneOffsetSeconds: 28_800 }
   expect(await backend.start(client)).toEqual({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })
   expect(await backend.signOut(client)).toMatchObject({ status: 'signed-out' })
@@ -59,12 +60,13 @@ it('receives live expiry separately from account snapshots', async () => {
   const snapshot = { status: 'signed-out', attempt: null,
     links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' } }
   const received = Promise.withResolvers<undefined>()
-  const backend = desktopAccountBackend(`http://127.0.0.1:${address.port}`, () => Promise.resolve(snapshot), () => Promise.resolve(''))
+  const backend = desktopAccountBackend(`http://127.0.0.1:${address.port}`, () => Promise.resolve(snapshot), 'dsh-auth-fixture=signed')
   const stop = backend.watch(
     (value) => { expect(value).toEqual(snapshot); received.resolve(undefined) }, vi.fn(), expired, onAnalyticsEnabledChanged,
   )
   onTestFinished(stop)
-  await connected
+  const [, upgrade] = await connected as [unknown, IncomingMessage]
+  expect(upgrade.headers.cookie).toBe('dsh-auth-fixture=signed')
   // Logical streams share the socket; observe their opening frames before sending data.
   const streams = new Map<string, string>()
   const opened = Promise.withResolvers<undefined>()
@@ -90,4 +92,35 @@ it('receives live expiry separately from account snapshots', async () => {
   socket.send(JSON.stringify({ type: 'item', streamId: streams.get('account/watchExpiry'), value: 'session-expired' }))
   await vi.waitFor(() => { expect(expired).toHaveBeenCalledOnce() })
   stop()
+})
+
+it('refreshes the shared Web cookie when the account stream reconnects after a minute', async () => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await once(server, 'listening')
+  let stop = (): void => {}
+  onTestFinished(async () => {
+    stop()
+    vi.useRealTimers()
+    for (const client of server.clients) client.terminate()
+    await new Promise<void>((resolve, reject) => { server.close((error) => { if (error) reject(error); else resolve() }) })
+  })
+  const address = server.address()
+  if (typeof address === 'string' || address === null) throw new Error('missing server address')
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+  vi.setSystemTime(1_000)
+  const currentCookie = vi.fn(() => `dsh-auth-fixture=issued-${String(Date.now())}`)
+  const failed = Promise.withResolvers<undefined>()
+  const backend = desktopAccountBackend(`http://127.0.0.1:${address.port}`, async () => undefined, currentCookie)
+  const firstConnection = once(server, 'connection')
+  stop = backend.watch(vi.fn(), () => { failed.resolve(undefined) }, vi.fn())
+  const [firstSocket, firstRequest] = await firstConnection as [import('ws').WebSocket, IncomingMessage]
+  expect(firstRequest.headers.cookie).toBe('dsh-auth-fixture=issued-1000')
+  firstSocket.close()
+  await failed.promise
+  vi.setSystemTime(62_000)
+  const secondConnection = once(server, 'connection')
+  await vi.advanceTimersByTimeAsync(1_000)
+  const [, secondRequest] = await secondConnection as [unknown, IncomingMessage]
+  expect(secondRequest.headers.cookie).toBe('dsh-auth-fixture=issued-63000')
+  expect(currentCookie).toHaveBeenCalledTimes(2)
 })

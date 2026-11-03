@@ -48,9 +48,9 @@
                 # Route-priced request images at the provider cap; the small
                 # context window turns that visual pressure into an automatic
                 # compaction the text-only heuristic would not trigger.
-                # The floored 0.8 threshold is 8504 tokens: the initial canonical
+                # The floored 0.8 threshold is 9188 tokens: the initial canonical
                 # request fits, while its first acknowledgement crosses it.
-                contextWindow: 10631
+                contextWindow: 11486
                 imageRequestTokens: 384
 
 - id: attachment-local

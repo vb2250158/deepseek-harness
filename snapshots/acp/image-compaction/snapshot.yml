@@ -1,6 +1,8 @@
 version: 1
 scenario: image-compaction
 profile: acp
+fixtureVariants:
+  win32: win-x64
 composition: image-compaction
 recording: authored
 header:

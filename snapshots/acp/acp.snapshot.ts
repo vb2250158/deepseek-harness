@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 import {
   defineAcpSnapshotSuite,
   parseSnapshotManifest,
+  snapshotFixtureDirectory,
+  snapshotCrossProfileSidecar,
   type Scenario,
   type SnapshotSuiteOptions,
 } from '@deepseek-ai/dsh-session-snapshot'
@@ -48,15 +50,24 @@ function localScenarioSource(source: string | undefined): string | undefined {
 }
 
 const scenarios: Scenario[] = controllerCases.map((controller) => {
-  const manifestPath = join(corpusDir, controller.name, 'snapshot.yml')
+  const originalDirectory = join(corpusDir, controller.name)
+  const originalPath = join(originalDirectory, 'snapshot.yml')
+  const originalManifest = parseSnapshotManifest(readFileSync(originalPath, 'utf8'), originalPath)
+  const fixtureDirectory = snapshotFixtureDirectory(originalDirectory, originalManifest)
+  const manifestPath = join(fixtureDirectory, 'snapshot.yml')
   const manifest = parseSnapshotManifest(readFileSync(manifestPath, 'utf8'), manifestPath)
   if (manifest.recording === undefined || manifest.header === undefined) {
     throw new Error(`${controller.name}: ACP snapshot manifest lacks recording or header metadata`)
   }
   const systemPromptSource = localScenarioSource(manifest.header.systemPromptSource)
   const toolSchemasSource = localScenarioSource(manifest.header.toolSchemasSource)
+  const systemPromptFile = snapshotCrossProfileSidecar(corpusDir, manifest.header.systemPromptSource, 'system-prompt.expected.md')
+  const toolSchemasFile = snapshotCrossProfileSidecar(corpusDir, manifest.header.toolSchemasSource, 'tool-schemas.expected.json')
   return {
     ...controller,
+    fixtureDirectory,
+    ...(systemPromptFile === undefined ? {} : { systemPromptFile }),
+    ...(toolSchemasFile === undefined ? {} : { toolSchemasFile }),
     recorded: manifest.recording === 'live',
     ...(manifest.sessionFormat === undefined ? {} : { sessionFormat: manifest.sessionFormat }),
     ...(manifest.replay?.override === true ? { overridden: true } : {}),
@@ -67,7 +78,7 @@ const scenarios: Scenario[] = controllerCases.map((controller) => {
     ...(toolSchemasSource === undefined ? {} : { toolSchemasSource }),
     ...(manifest.platform === 'posix' ? { posixOnly: true } : {}),
     ...(manifest.platform === 'pwsh' ? { pwshOnly: true } : {}),
-    ...(controller.configPath === undefined ? {} : { configPath: controller.configPath }),
+    ...(controller.configPath === undefined ? {} : { configPath: join(fixtureDirectory, 'cordis.yml') }),
     ...manifest.permission === undefined && manifest.environment === undefined
       ? {}
       : {

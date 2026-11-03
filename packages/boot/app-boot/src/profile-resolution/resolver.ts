@@ -191,22 +191,24 @@ function canonicalPath(path: string): string {
   }
 }
 
-function prefixes(path: string): readonly string[] {
+function prefixes(path: string, realPath = canonicalPath(path)): readonly string[] {
   const configured = resolve(path) + sep
-  const canonical = canonicalPath(path) + sep
+  const canonical = realPath + sep
   return canonical === configured ? [configured] : [configured, canonical]
 }
 
 function compileResolution(resolution: RuntimeResolution): CompiledResolution {
+  // Reuse each entry's real path within this generation; successors resolve it again.
+  const entries = resolution.entries.map(entry => ({ ...entry, realDir: canonicalPath(entry.packageDir) }))
   return {
-    entries: new Map(resolution.entries.map(entry => [entry.name, { ...entry, realDir: canonicalPath(entry.packageDir) }])),
+    entries: new Map<string, CompiledEntry>(entries.map(entry => [entry.name, entry])),
     profilesDir: resolution.profilesDir,
     profileDir: resolution.profileDir,
     profilePaths: prefixes(resolution.profilesDir),
     profile: resolution.profileDir === undefined ? [] : prefixes(resolution.profileDir),
-    installationPaths: [...new Set(resolution.entries
+    installationPaths: [...new Set(entries
       .filter(entry => entry.scope === 'installation')
-      .flatMap(entry => prefixes(entry.packageDir)))],
+      .flatMap(entry => prefixes(entry.packageDir, entry.realDir)))],
     linkedPaths: resolution.linkedRoots.flatMap(root => prefixes(root.realPath)),
     localPackageNames: new Set(resolution.localPackageNames),
     esmRoutes: new Map(),

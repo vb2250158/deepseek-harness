@@ -254,6 +254,37 @@ describe('runtime resolution', { concurrent: false }, () => {
       .toEqual({ marker: 1 })
   })
 
+  it('recomputes installation prefixes after a package link changes between interceptions', async () => {
+    const f = fixture('runtime-library')
+    const workspace = join(f.root, 'work')
+    const firstTarget = join(workspace, 'first')
+    const nextTarget = join(workspace, 'next')
+    pkg(dirname(f.installAnchor), '@deepseek-ai/dsh', 0, { 'runtime-library': '*', 'inner-peer': '*' })
+    pkg(join(dirname(f.installAnchor), 'node_modules', 'inner-peer'), 'inner-peer', 1)
+    for (const [target, marker] of [[firstTarget, 9], [nextTarget, 29]] as const) {
+      pkg(target, 'runtime-library', 0, {}, { 'inner-peer': '*' })
+      pkg(join(target, 'node_modules', 'inner-peer'), 'inner-peer', marker)
+    }
+    rmSync(f.installed, { recursive: true })
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    symlinkSync(firstTarget, f.installed, linkType)
+    const firstResolution = { ...await resolutionOf(f), linkedRoots: [{ name: 'workspace-root', realPath: workspace }] }
+    const first = installRuntimeInterception(firstResolution)
+    registrations.push(first)
+    expect(createRequire(join(firstTarget, 'entry.cjs'))('inner-peer')).toEqual({ marker: 9 })
+    expect(await importFrom('inner-peer', pathToFileURL(join(firstTarget, 'entry.mjs')).href)).toMatchObject({ marker: 9 })
+    first.dispose()
+    registrations.pop()
+    unlinkSync(f.installed)
+    symlinkSync(nextTarget, f.installed, linkType)
+    const nextResolution = { ...await resolutionOf(f), linkedRoots: [{ name: 'workspace-root', realPath: workspace }] }
+    const next = installRuntimeInterception(nextResolution)
+    registrations.push(next)
+    expect(createRequire(join(nextTarget, 'entry.cjs'))('inner-peer')).toEqual({ marker: 29 })
+    expect(await importFrom('inner-peer', pathToFileURL(join(nextTarget, 'entry.mjs')).href)).toMatchObject({ marker: 29 })
+    expect(createRequire(join(f.profile.dir, 'entry.cjs'))('inner-peer')).toEqual({ marker: 1 })
+  })
+
   it('fails resolution construction before writing when the profile manifest is malformed', async () => {
     const f = fixture()
     file(join(f.profile.dir, 'package.json'), '{')

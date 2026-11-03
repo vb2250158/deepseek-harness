@@ -66,6 +66,22 @@ export function topLevelHelpArgs(profiles: readonly string[]): string[][] {
   return [[], ['plugin'], ...[...profiles].sort().flatMap(profile => [[profile], ['--profile', profile]])]
 }
 
+/**
+ * Resolve the child-process allowance before any help invocation starts.
+ * @param raw - optional DSH_CLI_HELP_CONCURRENCY override.
+ * @param fallback - worker budget for an invocation without an explicit allowance.
+ * @returns the maximum number of help children in flight.
+ * @throws when a supplied override is not a positive decimal integer.
+ */
+export function cliHelpConcurrency(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || String(parsed) !== raw) {
+    throw new Error(`gen-cli-help: DSH_CLI_HELP_CONCURRENCY must be a positive integer, got ${JSON.stringify(raw)}.`)
+  }
+  return parsed
+}
+
 /** Help reads started ahead of an in-order consumer. */
 export interface PrefetchedHelpReader {
   /**
@@ -176,25 +192,11 @@ export async function collectCliHelp(
   return [...pages.values()]
 }
 
-/**
- * Resolve simultaneous profile-help processes, retaining the repository default unless explicitly configured.
- * @param env - Process environment; DSH_CLI_HELP_CONCURRENCY may bound expensive source profile boots.
- * @returns A positive safe integer worker count.
- */
-export function cliHelpConcurrency(env: NodeJS.ProcessEnv = process.env): number {
-  const configured = env.DSH_CLI_HELP_CONCURRENCY
-  if (configured === undefined) return defaultParallelism(env)
-  const value = Number(configured)
-  if (!/^[1-9][0-9]*$/u.test(configured) || !Number.isSafeInteger(value)) {
-    throw new Error('DSH_CLI_HELP_CONCURRENCY must be a positive safe integer')
-  }
-  return value
-}
-
 async function collectHelp(): Promise<HelpPage[]> {
+  const concurrency = cliHelpConcurrency(process.env.DSH_CLI_HELP_CONCURRENCY, defaultParallelism())
   const directory = mkdtempSync(join(tmpdir(), 'dsh-cli-help-'))
   const profiles = Object.keys(PROFILE_TEMPLATES)
-  // Concurrent profile boots share the repository worker budget.
+  // Aggregate callers allocate this leaf's children separately from the other running gates.
   const reader = prefetchHelp(async (args, signal) => {
     // Each invocation boots against its own empty Harness and agents homes.
     const home = mkdtempSync(join(directory, 'invocation-'))
@@ -222,7 +224,7 @@ async function collectHelp(): Promise<HelpPage[]> {
     } finally {
       signal.removeEventListener('abort', abort)
     }
-  }, topLevelHelpArgs(profiles), cliHelpConcurrency())
+  }, topLevelHelpArgs(profiles), concurrency)
   try {
     return await collectCliHelp(reader.readHelp, profiles)
   } finally {

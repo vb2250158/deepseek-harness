@@ -1,13 +1,57 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { resolveLinuxNodePtyAddon, resolveWindowsNodePtyAddons } from './executable-native-pty.ts'
+import { resolveLinuxNodePtyAddon, resolveWindowsNodePtyAddons, stageNodePtyPrebuild } from './executable-native-pty.ts'
 
 const roots: string[] = []
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+describe('stageNodePtyPrebuild', () => {
+  it('replaces hardlinked deployed files while preserving the installed source and other targets', async () => {
+    const root = temporaryPackage()
+    const source = join(root, 'installed', 'win32-x64')
+    const destination = join(root, 'staged', 'win32-x64')
+    const installed = createAddon(source, 'conpty', 'conpty.dll')
+    writeFileSync(installed, 'installed addon')
+    const deployed = join(destination, 'conpty', 'conpty.dll')
+    mkdirSync(dirname(deployed), { recursive: true })
+    linkSync(installed, deployed)
+    expect(statSync(installed).ino).toBe(statSync(deployed).ino)
+    const stale = createAddon(destination, 'obsolete.node')
+    const sibling = createAddon(join(root, 'staged', 'linux-x64'), 'pty.node')
+
+    await stageNodePtyPrebuild(source, destination)
+
+    expect(readFileSync(deployed, 'utf8')).toBe('installed addon')
+    expect(existsSync(stale)).toBe(false)
+    expect(existsSync(sibling)).toBe(true)
+    writeFileSync(deployed, 'staged addon')
+    expect(readFileSync(installed, 'utf8')).toBe('installed addon')
+  })
+
+  it('copies a prebuild into a missing staging directory', async () => {
+    const root = temporaryPackage()
+    const source = join(root, 'installed', 'linux-arm64')
+    createAddon(source, 'pty.node')
+    const destination = join(root, 'staged', 'linux-arm64')
+
+    await stageNodePtyPrebuild(source, destination)
+
+    expect(existsSync(join(destination, 'pty.node'))).toBe(true)
+  })
+
+  it('rejects the source directory as its own staging target without removing its files', async () => {
+    const source = temporaryPackage()
+    const addon = createAddon(source, 'conpty.node')
+
+    await expect(stageNodePtyPrebuild(source, source)).rejects.toThrow('must be separate directories')
+
+    expect(existsSync(addon)).toBe(true)
+  })
 })
 
 describe('resolveLinuxNodePtyAddon', () => {

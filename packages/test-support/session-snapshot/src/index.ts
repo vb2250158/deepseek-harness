@@ -20,6 +20,7 @@
 export {
   redactSessionSnapshotIds,
 } from './identity.ts'
+export { snapshotCrossProfileSidecar, snapshotFixtureDirectory } from './fixture-variant.ts'
 export {
   REPLAY_CREDENTIAL_ENV,
   runScenario,

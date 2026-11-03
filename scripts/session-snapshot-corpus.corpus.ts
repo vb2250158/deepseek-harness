@@ -9,6 +9,7 @@ import {
   captureExpectedWorkspaceSnapshot,
   EMPTY_WORKSPACE_MARKER,
   parseSnapshotManifest,
+  snapshotFixtureDirectory,
   parseSessionFixtureName,
   redactSessionSnapshotIds,
   scrubSystemPrompts,
@@ -76,12 +77,36 @@ async function scenarios(): Promise<Scenario[]> {
           header: manifest.header as NonNullable<SnapshotManifest['header']>,
         },
       })
+      for (const [platform, variant] of Object.entries(manifest.fixtureVariants ?? {})) {
+        const variantDir = snapshotFixtureDirectory(dir, manifest, platform as NodeJS.Platform)
+        const variantPath = join(variantDir, 'snapshot.yml')
+        const variantManifest = parseSnapshotManifest(await readFile(variantPath, 'utf8'), variantPath)
+        expect(variantManifest.scenario, `${profile}/${entry.name}/${variant}: scenario`).toBe(entry.name)
+        expect(variantManifest.profile, `${profile}/${entry.name}/${variant}: profile`).toBe(manifest.profile)
+        expect(variantManifest.fixtureVariants, `${profile}/${entry.name}/${variant}: variants cannot recurse`).toBeUndefined()
+        expect(variantManifest.composition, `${variantPath}: composition`).toBeTypeOf('string')
+        expect(variantManifest.recording, `${variantPath}: recording`).toMatch(/^(live|authored)$/)
+        expect(variantManifest.header, `${variantPath}: header`).toBeDefined()
+        result.push({
+          key: `${profile}/${entry.name}/${variant}`,
+          profile,
+          name: entry.name,
+          dir: variantDir,
+          manifest: {
+            ...variantManifest,
+            composition: variantManifest.composition as string,
+            recording: variantManifest.recording as 'live' | 'authored',
+            header: variantManifest.header as NonNullable<SnapshotManifest['header']>,
+          },
+        })
+      }
     }
   }
   return result
 }
 
 function referencedScenario(owner: Scenario, source: string): string {
+  if (source === owner.name) return owner.key
   return source.includes('/') ? source : `${owner.profile}/${source}`
 }
 

@@ -205,7 +205,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       { plugin: '@deepseek-ai/dsh-time-context', operation: 'projection-ready' }, ready) ?? ready())
     ctx.fiber.assertActive()
     const decision = await next()
-    const work = async (): Promise<PreStepDecision> => {
+    const work = (): PreStepDecision => {
       if (decision.kind === 'reject' || signal.aborted) return decision
       const now = Date.now()
       const state = timeContextProjectionHandle.stateOf(agent.session)
@@ -244,7 +244,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       }
     }
     return ctx.get('agentPreStepTiming')?.run({ agent, turn, step },
-      { plugin: '@deepseek-ai/dsh-time-context', operation: 'time-context' }, work) ?? work()
+      { plugin: '@deepseek-ai/dsh-time-context', operation: 'time-context' }, () => Promise.resolve(work())) ?? work()
   }, { prepend: true })
   await projectionReady
 }

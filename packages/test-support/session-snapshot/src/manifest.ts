@@ -110,6 +110,8 @@ export interface SnapshotManifest {
   replay?: SnapshotReplayManifest
   /** Optional host requirement; portable scenarios omit it. */
   platform?: SnapshotPlatform
+  /** ACP child fixture directory selected by the corresponding operating system. */
+  fixtureVariants?: { win32?: string }
   /** Explicit process fallback permission preset. */
   permission?: SnapshotPermission
   /** Test-only string environment additions needed by the declared composition. */
@@ -217,6 +219,7 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
       'header',
       'replay',
       'platform',
+      'fixtureVariants',
       'permission',
       'environment',
       'workspace',
@@ -409,6 +412,16 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
       }
     }
 
+    let fixtureVariants: SnapshotManifest['fixtureVariants']
+    if (root.fixtureVariants !== undefined) {
+      if (root.profile !== 'acp') throw new Error('manifest.fixtureVariants requires the ACP adapter')
+      const variants = record(root.fixtureVariants, 'manifest.fixtureVariants')
+      exactKeys(variants, ['win32'], 'manifest.fixtureVariants')
+      fixtureVariants = variants.win32 === undefined
+        ? {}
+        : { win32: name(variants.win32, 'manifest.fixtureVariants.win32') }
+    }
+
     return {
       version: 1,
       ...(scenario === undefined ? {} : { scenario }),
@@ -418,6 +431,7 @@ export function parseSnapshotManifest(source: string, path = 'snapshot.yml'): Sn
       ...(header === undefined ? {} : { header }),
       ...(replay === undefined ? {} : { replay }),
       ...(platform === undefined ? {} : { platform }),
+      ...(fixtureVariants === undefined ? {} : { fixtureVariants }),
       ...(permission === undefined ? {} : { permission }),
       ...(environment === undefined ? {} : { environment }),
       ...(workspace === undefined ? {} : { workspace }),

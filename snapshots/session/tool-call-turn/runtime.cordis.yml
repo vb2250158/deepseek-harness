@@ -1,0 +1,14 @@
+# These Bash protocol and recovery recordings use the SDK's explicit test carrier.
+# It executes real commands while keeping the recorded shell and sandbox composition portable.
+- id: tool-bash
+  disabled: false
+- id: tool-pwsh
+  disabled: true
+- id: bash-sandbox
+  disabled: false
+- id: pwsh-sandbox
+  disabled: true
+- id: sandbox
+  config:
+    runnerCommand: !!js '[process.execPath, process.env.DSH_SNAPSHOT_BASH_RUNNER]'
+    runnerFailureSignatures: ['sdk-snapshot-runner: profile rejected']

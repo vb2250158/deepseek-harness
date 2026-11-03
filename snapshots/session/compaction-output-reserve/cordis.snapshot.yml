@@ -1,5 +1,5 @@
 # With 1,800 tokens of headroom, a 1,000-token output reservation lowers the
-# trigger from 7,090 to 6,090, between the initial request and its first tool result.
+# trigger from 7,299 to 6,324, between the initial request and its first tool result.
 
 - id: agent-instructions
   disabled: true
@@ -31,7 +31,12 @@
             name: DeepSeek
             models:
               - id: deepseek-v4-flash
-                contextWindow: 8890
+                contextWindow: 9124
                 defaultMaxTokens: 1000
     - id: compaction-working-directory
       name: '../../../packages/test-support/session-snapshot/tests/fixtures/compaction-working-directory.ts'
+
+# Fixed-budget compaction scenario: keep the recorded tool set, whose token counts the thresholds were tuned to.
+- id: tool-fs
+  config:
+    applyPatch: false
