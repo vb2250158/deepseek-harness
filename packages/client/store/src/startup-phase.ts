@@ -1,8 +1,14 @@
 /**
- * Record one successful first-screen commit per document, measured from its time origin.
- * @param stage - The committed first-screen surface; failed loads must not call this function.
+ * Record one first-screen result per document, measured from its time origin.
+ * @param stage - The first-screen surface; failed loads must not call this function.
+ * @param result - Successful visible commit by default, or an explicit layout-owned non-visible result.
  */
-export function recordStartupPhase(stage: 'session-list' | 'session-content'): void {
+export function recordStartupPhase(
+  stage: 'session-list' | 'session-content',
+  result: { readonly outcome: 'committed' }
+    | { readonly outcome: 'not-visible'; readonly reason: 'initial-main-panel' | 'sidebar-collapsed' }
+      = { outcome: 'committed' },
+): void {
   try {
     const clock = globalThis.performance
     if (clock.getEntriesByName('dsh:startup', 'measure').some((entry) => {
@@ -13,7 +19,7 @@ export function recordStartupPhase(stage: 'session-list' | 'session-content'): v
         && 'stage' in detail && detail.stage === stage
     })) return
     clock.measure('dsh:startup', {
-      start: 0, end: clock.now(), detail: { version: 1, kind: 'phase', stage },
+      start: 0, end: clock.now(), detail: { version: 1, kind: 'phase', stage, ...result },
     })
   } catch (_measurementError) {
     // Optional diagnostics must not affect rendering in carriers without User Timing.

@@ -1002,9 +1002,11 @@ export function WorkspaceBrowser({
   // Observe the committed surface, not a render that React may discard.
   useLayoutEffect(() => {
     if (list.phase === 'ready' && workspacePhase === 'ready' && workspaceStreamState === 'idle') {
-      recordStartupPhase('session-list')
+      recordStartupPhase('session-list', wide
+        ? { outcome: 'committed' }
+        : { outcome: 'not-visible', reason: 'sidebar-collapsed' })
     }
-  }, [list.phase, workspacePhase, workspaceStreamState])
+  }, [list.phase, workspacePhase, workspaceStreamState, wide])
   const mainSessionId = Object.values(list.byId)
     .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
   const currentBlank = mainSessionId !== undefined && list.byId[mainSessionId]?.blank === true

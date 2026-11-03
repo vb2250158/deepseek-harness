@@ -234,7 +234,7 @@ These pages cover the sidebar host, the hero surface, and the picking backends.
 <a id="startup-diagnostics"></a>
 ## Startup diagnostics
 
-First-screen diagnostics record `session-list` after the first successful Session catalog and idle Workspace data React commit, including empty results, without waiting for historical pagination. The optional `useInitialSelection` root hook publishes initial main selection restoration as `pending`, `ready`, or `error`; failed initialization remains `error` rather than a successful empty selection. This transient diagnostic state does not enter Session logs or persisted settings.
+First-screen diagnostics record `session-list` after the first successful Session catalog and idle Workspace data React commit, including empty results, without waiting for historical pagination. An expanded sidebar records `outcome: 'committed'`; a collapsed sidebar records `outcome: 'not-visible', reason: 'sidebar-collapsed'` once data is ready, without waiting for expansion or claiming that the list was displayed. The optional `useInitialSelection` root hook publishes initial main selection restoration as `pending`, `ready`, or `error`; failed initialization remains `error` rather than a successful empty selection. This transient diagnostic state does not enter Session logs or persisted settings.
 
 <a id="model-experience"></a>
 ## Model Experience

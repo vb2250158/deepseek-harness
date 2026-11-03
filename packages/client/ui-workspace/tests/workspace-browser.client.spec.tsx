@@ -2842,6 +2842,28 @@ describe('Workspace tree grouping', () => {
 
 
 describe('first-screen startup list completion', () => {
+  it('records successful ready data in a collapsed sidebar as not visible without waiting for expansion', () => {
+    const entries: PerformanceMeasure[] = []
+    vi.spyOn(performance, 'getEntriesByName').mockImplementation(() => entries)
+    const measure = vi.spyOn(performance, 'measure').mockImplementation((name, options) => {
+      const detail: unknown = typeof options === 'object' ? options.detail : undefined
+      const entry: PerformanceMeasure = { name, entryType: 'measure', startTime: 0, duration: 1, detail, toJSON: () => ({}) }
+      entries.push(entry)
+      return entry
+    })
+    const list = createSnapshotStore(sessionState([], { phase: 'pending' }))
+    const workspaces = createSnapshotStore<WorkspaceSnapshot>({ ...workspaceState([]), state: 'error' })
+    const b = mount({ wide: false, useSessions: bindSnapshotSelector(list), useWorkspaces: bindSnapshotSelector(workspaces) })
+    expect(measure).not.toHaveBeenCalled()
+    act(() => { list.set(sessionState([])) })
+    expect(measure).not.toHaveBeenCalled()
+    act(() => { workspaces.set({ ...workspaceState([]), state: 'idle' }) })
+    expect(entries[0]?.detail).toEqual({ version: 1, kind: 'phase', stage: 'session-list', outcome: 'not-visible', reason: 'sidebar-collapsed' })
+    rerender(b, { wide: true })
+    expect(measure).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
   it('records the successful first-page React commit without waiting for historical pagination', () => {
     const entries: PerformanceMeasure[] = []
     const measure = vi.fn((name: string, options?: string | PerformanceMeasureOptions) => {
@@ -2860,7 +2882,7 @@ describe('first-screen startup list completion', () => {
     expect(measure).not.toHaveBeenCalled()
     act(() => { workspaces.set(workspaceState([])) })
     expect(measure).toHaveBeenCalledWith('dsh:startup', expect.objectContaining({
-      start: 0, detail: { version: 1, kind: 'phase', stage: 'session-list' },
+      start: 0, detail: { version: 1, kind: 'phase', stage: 'session-list', outcome: 'committed' },
     }))
     b.view.rerender(<WorkspaceBrowser {...b.props} />)
     expect(measure).toHaveBeenCalledTimes(1)

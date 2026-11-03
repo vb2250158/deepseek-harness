@@ -22,7 +22,7 @@ React-free observable and snapshot-store primitives shared by Client controllers
 <a id="startup-diagnostics"></a>
 ## Startup diagnostics
 
-`recordStartupPhase(stage)` records one completed first-screen phase per document through native User Timing (`dsh:startup`, `detail: { version: 1, kind: 'phase', stage }`), from document time origin to the caller's commit observation. Optional timing failures are contained; callers own successful-readiness conditions.
+`recordStartupPhase(stage, result)` records one first-screen result per document through native User Timing (`dsh:startup`, `detail: { version: 1, kind: 'phase', stage, ...result }`), from document time origin to the caller's commit observation. Omitting `result` records `outcome: 'committed'`; a layout-owned `outcome: 'not-visible'` requires `reason: 'initial-main-panel'` or `'sidebar-collapsed'` and does not claim that content was displayed. The first result wins across later navigation. Optional timing failures are contained; callers own successful-readiness and visibility conditions.
 
 <a id="model-experience"></a>
 ## Model Experience

@@ -235,7 +235,7 @@ Workspace 与 Session 悬浮卡片会复制对应行被截断的值：激活 Wor
 <a id="startup-diagnostics"></a>
 ## 启动诊断
 
-首屏诊断在首批 Session 目录和空闲 Workspace 数据成功提交到 React 后记录 `session-list`，包括成功的空结果，不等待历史分页。可选的根 hook `useInitialSelection` 将主区域初始选择恢复状态发布为 `pending`、`ready` 或 `error`；初始化失败保持 `error`，不会视为成功的空选择。该临时诊断状态不会写入 Session 日志或持久化设置。
+首屏诊断在首批 Session 目录和空闲 Workspace 数据成功提交到 React 后记录 `session-list`，包括成功的空结果，不等待历史分页。侧栏展开时记录 `outcome: 'committed'`；侧栏折叠时，在数据就绪后记录 `outcome: 'not-visible', reason: 'sidebar-collapsed'`，不等待展开，也不表示列表已经显示。可选的根 hook `useInitialSelection` 将主区域初始选择恢复状态发布为 `pending`、`ready` 或 `error`；初始化失败保持 `error`，不会视为成功的空选择。该临时诊断状态不会写入 Session 日志或持久化设置。
 
 <a id="model-experience"></a>
 ## 模型体验

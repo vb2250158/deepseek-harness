@@ -63,9 +63,10 @@ function resize(width: number): void {
   })
 }
 
-function mountFrame(windowWidth = frameWidth, content?: AppFrameProps['renderSlot']) {
+function mountFrame(windowWidth = frameWidth, content?: AppFrameProps['renderSlot'], initialPanelId: MainPanelId | null = null) {
   vi.stubGlobal('innerWidth', windowWidth)
   const instance = createLayoutStore().create()
+  if (initialPanelId !== null) instance.actions.selectPanel(initialPanelId)
   const slotCalls: { key: string; props: object; options: RenderOpts | undefined }[] = []
   const renderSlot: AppFrameProps['renderSlot'] = (key, owner, options) => {
     slotCalls.push({ key, props: owner, options })
@@ -190,6 +191,31 @@ afterEach(() => {
 })
 
 describe('AppFrame', () => {
+  it('records initial global-panel content as not visible without changing panel or Session selection', () => {
+    const entries: PerformanceMeasure[] = []
+    vi.spyOn(performance, 'getEntriesByName').mockImplementation(() => entries)
+    const measure = vi.spyOn(performance, 'measure').mockImplementation((name, options) => {
+      const detail: unknown = typeof options === 'object' ? options.detail : undefined
+      const entry: PerformanceMeasure = { name, entryType: 'measure', startTime: 0, duration: 1, detail, toJSON: () => ({}) }
+      entries.push(entry)
+      return entry
+    })
+    const { instance, getByTestId } = mountFrame(frameWidth, undefined, 'bot' as MainPanelId)
+    expect(getByTestId('main-content').getAttribute('data-entry-key')).toBe('bot')
+    expect(selectedSession).toBe('s-test')
+    expect(entries[0]?.detail).toEqual({ version: 1, kind: 'phase', stage: 'session-content', outcome: 'not-visible', reason: 'initial-main-panel' })
+    act(() => { instance.actions.selectPanel(null) })
+    expect(measure).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not label a user-selected panel as the initial non-visible Conversation', () => {
+    vi.spyOn(performance, 'getEntriesByName').mockReturnValue([])
+    const measure = vi.spyOn(performance, 'measure')
+    const { instance } = mountFrame()
+    act(() => { instance.actions.selectPanel('bot' as MainPanelId) })
+    expect(measure).not.toHaveBeenCalled()
+  })
+
   it('localizes the product title without a configured build title', () => {
     mountFrame()
     expect(document.title).toBe('DSH Local Build')

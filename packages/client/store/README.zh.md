@@ -22,7 +22,7 @@ kind: "package-library"
 <a id="startup-diagnostics"></a>
 ## 启动诊断
 
-`recordStartupPhase(stage)` 通过原生用户计时（User Timing）为每个文档的每个首屏阶段记录一次完成区间（`dsh:startup`、`detail: { version: 1, kind: 'phase', stage }`），从文档时间原点到调用方观察到提交的时刻。可选计时失败不会影响调用方；调用方负责确认成功就绪条件。
+`recordStartupPhase(stage, result)` 通过原生用户计时（User Timing）为每个文档的每个首屏阶段记录一次结果（`dsh:startup`、`detail: { version: 1, kind: 'phase', stage, ...result }`），从文档时间原点到调用方观察到提交的时刻。省略 `result` 时记录 `outcome: 'committed'`；由布局拥有者报告的 `outcome: 'not-visible'` 必须携带 `reason: 'initial-main-panel'` 或 `'sidebar-collapsed'`，不表示内容已经显示。后续导航不会替换首条结果。可选计时失败不会影响调用方；调用方负责确认成功就绪和可见条件。
 
 <a id="model-experience"></a>
 ## 模型体验

@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { recordStartupPhase } from '@deepseek-ai/dsh-client-store'
 import type {
   HostObservable, InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
@@ -45,6 +46,14 @@ function CenterColumn(props: { children?: ReactNode; inert: boolean }) {
 /** Subscribe to the main key without subscribing the column frame to each panel id. */
 function MainPanel({ usePanelInfo, renderSlot }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'>) {
   const panelId = usePanelInfo(info => info.activePanelId)
+  const initialCommitted = useRef(false)
+  useLayoutEffect(() => {
+    if (initialCommitted.current) return
+    initialCommitted.current = true
+    if (panelId !== null) {
+      recordStartupPhase('session-content', { outcome: 'not-visible', reason: 'initial-main-panel' })
+    }
+  }, [panelId])
   return <div className={css.mainPanel} data-global-panel={panelId !== null || undefined}>
     {renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })}
   </div>

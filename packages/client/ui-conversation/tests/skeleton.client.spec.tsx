@@ -1079,7 +1079,7 @@ describe('first-screen startup content completion', () => {
     expect(measure).not.toHaveBeenCalled()
     act(() => { loading.session.set(sessionSnapshotOf({ openState: 'open' })) })
     await waitFor(() => { expect(measure).toHaveBeenCalledWith('dsh:startup', expect.objectContaining({
-      start: 0, detail: { version: 1, kind: 'phase', stage: 'session-content' },
+      start: 0, detail: { version: 1, kind: 'phase', stage: 'session-content', outcome: 'committed' },
     })) })
     loading.rerender()
     expect(measure).toHaveBeenCalledTimes(1)
