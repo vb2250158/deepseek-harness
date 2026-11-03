@@ -161,6 +161,34 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     await harness.close()
   })
 
+  it('validates the optional initialize budget without supplying a new default', async () => {
+    const config: sdk.Config = {
+      providerName: 'dsh-sdk', profile: 'sdk', patches: [], dshHome: process.cwd(),
+      provider: 'p', model: 'm', env: {},
+    }
+    expect(sdk.Config(config).initializeTimeoutMs).toBeUndefined()
+    config.initializeTimeoutMs = 110_000
+    expect(sdk.Config(config).initializeTimeoutMs).toBe(110_000)
+    const ctx = await setup()
+    for (const initializeTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(ctx.plugin(sdk, {
+        providerName: 'invalid-budget', profile: 'sdk', patches: [], dshHome: process.cwd(),
+        provider: 'p', model: 'm', env: {}, initializeTimeoutMs,
+      })).rejects.toThrow('initializeTimeoutMs')
+    }
+    await ctx.fiber.dispose()
+  })
+  it('forwards an explicit initialize budget and leaves the SDK default absent', async () => {
+    for (const initializeTimeoutMs of [undefined, 110_000]) {
+      const ctx = await setup({}, initializeTimeoutMs === undefined ? {} : { initializeTimeoutMs })
+      const run = await startExternalActivation(ctx, 'dsh-sdk', request('budget proof'))
+      await run.result
+      expect(createdHarnessOptions.at(-1)?.initializeTimeoutMs).toBe(initializeTimeoutMs)
+      await run.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('runs a child turn end to end with a parent-unique run id', async () => {
     const ctx = await setup({ FAKE_TEXT: 'hello from sdk child' })
     const run = await startExternalActivation(ctx, 'dsh-sdk', request('do X'))

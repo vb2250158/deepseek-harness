@@ -46,6 +46,7 @@ The provider advertises `agentOptions: true`, with `agentPreset`/`outputSchema`/
 | `model` | `deepseek-v4-flash` | Model sent in the child's `initialize` |
 | `maxTokens` | adapter/provider route default | Per-request output-token cap sent in the child's `initialize` |
 | `env` | `{}` | Explicit child environment layered over the credential-scrubbed parent environment |
+| `initializeTimeoutMs` | SDK default (`10000`) | Optional bound for the child initialize handshake; configure it for profiles with slower startup |
 | `shutdownTimeoutMs` | `1000` | Bound on the protocol `shutdown` exchange during dispose |
 | `disposeEofGraceMs` | `6000` | Grace after stdin EOF before platform termination |
 | `disposeGraceMs` | `3000` | Exit-confirmation grace after termination |

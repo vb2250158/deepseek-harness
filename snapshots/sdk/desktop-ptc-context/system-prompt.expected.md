@@ -84,7 +84,7 @@ interface ToolArgsMap {
     workdir?: string;
     /** Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies. */
     run_in_background?: boolean;
-    /** The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. */
+    /** The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists. */
     sandbox_permissions?: "workspace-write" | "danger-full-access";
     /** Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access. Use the language of the user’s current request. */
     justification?: string;
@@ -106,7 +106,7 @@ interface ToolArgsMap {
     new_string: string;
     /** Replace all matches. Defaults to false; when false, old_string must appear exactly once. */
     replace_all?: boolean;
-    /** The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. */
+    /** The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists. */
     sandbox_permissions?: "workspace-write" | "danger-full-access";
     /** Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access. Use the language of the user’s current request. */
     justification?: string;
@@ -351,7 +351,7 @@ interface ToolArgsMap {
     file_path: string;
     /** Full UTF-8 text content to write. */
     content: string;
-    /** The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. */
+    /** The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists. */
     sandbox_permissions?: "workspace-write" | "danger-full-access";
     /** Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access. Use the language of the user’s current request. */
     justification?: string;

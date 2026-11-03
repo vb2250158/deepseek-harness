@@ -50,7 +50,7 @@ def test_plan_example_reports_truncation_and_accepts_explicit_dismissal(
         monkeypatch.setattr(sys, "stdin", terminal)
         def configured_harness(**options: object) -> DeepSeekHarness:
             return DeepSeekHarness(
-                **options, dsh_bin=_dsh_bin(), patches=(str(patch),),
+                **options, dsh_bin=_dsh_bin(tmp_path), patches=(str(patch),),
                 base_url=model.url, api_key="keyless-plan-example",
                 initialize_timeout_seconds=30, request_timeout_seconds=20, shutdown_timeout_seconds=20,
             )

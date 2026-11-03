@@ -3732,6 +3732,8 @@ export interface Config {
    * not leak implicitly.
    */
   env: Record<string, string>
+  /** Optional initialize-handshake budget in milliseconds; omission keeps the SDK default. */
+  initializeTimeoutMs?: number
   /** Bound (ms) on the protocol `shutdown` exchange during dispose. */
   shutdownTimeoutMs?: number
   /**

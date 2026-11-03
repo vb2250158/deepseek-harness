@@ -91,7 +91,7 @@
           },
           "sandbox_permissions": {
             "type": "string",
-            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.",
+            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
             "enum": [
               "workspace-write",
               "danger-full-access"
@@ -152,7 +152,7 @@
           },
           "sandbox_permissions": {
             "type": "string",
-            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
             "enum": [
               "workspace-write",
               "danger-full-access"
@@ -881,7 +881,7 @@
           },
           "sandbox_permissions": {
             "type": "string",
-            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+            "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
             "enum": [
               "workspace-write",
               "danger-full-access"
@@ -992,7 +992,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -1053,7 +1053,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -1798,7 +1798,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -1908,7 +1908,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -1969,7 +1969,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -2714,7 +2714,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -2824,7 +2824,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -2885,7 +2885,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -3630,7 +3630,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -3740,7 +3740,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact command the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -3801,7 +3801,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"
@@ -4546,7 +4546,7 @@
             },
             "sandbox_permissions": {
               "type": "string",
-              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval.",
+              "description": "The narrowest wider sandbox mode for a one-shot retry of the exact operation the sandbox just denied; the retry asks the user for approval. Never set it when the standing policy is `danger-full-access`: no wider DSH file policy exists.",
               "enum": [
                 "workspace-write",
                 "danger-full-access"

@@ -28,6 +28,7 @@
       name: '@deepseek-ai/dsh-subagent-dsh-sdk'
       config:
         profile: sdk
+        initializeTimeoutMs: 110000
         patches: !!js JSON.parse(process.env.DSH_TEST_CHILD_PATCHES ?? '[]')
         dshHome: !!js process.env.DSH_TEST_CHILD_HOME
         provider: mock

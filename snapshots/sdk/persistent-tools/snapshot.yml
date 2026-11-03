@@ -1,4 +1,6 @@
 version: 1
+# The recorded persistent Bash PTY starts /bin/bash and pins POSIX /tmp output.
+platform: posix
 scenario: persistent-tools
 profile: sdk
 composition: sdk-minimal

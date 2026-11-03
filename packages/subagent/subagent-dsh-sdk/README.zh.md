@@ -46,6 +46,7 @@ kind: "package-reference"
 | `model` | `deepseek-v4-flash` | 写入子进程 `initialize` 的模型 |
 | `maxTokens` | 适配器／提供方路由默认值 | 写入子进程 `initialize` 的单次请求输出 token 上限 |
 | `env` | `{}` | 叠加在已清理凭据的父环境之上的显式子环境 |
+| `initializeTimeoutMs` | SDK 默认值（`10000`） | 子进程初始化握手的可选时限；启动较慢的 profile 可显式配置 |
 | `shutdownTimeoutMs` | `1000` | dispose（资源释放）期间协议 `shutdown` 交换的时限 |
 | `disposeEofGraceMs` | `6000` | stdin EOF 之后、平台终止之前的宽限 |
 | `disposeGraceMs` | `3000` | 终止后的退出确认宽限 |

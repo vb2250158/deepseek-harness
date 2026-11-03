@@ -28,6 +28,7 @@
       config:
         providerName: dsh-sdk-diagnostic
         profile: sdk
+        initializeTimeoutMs: 110000
         patches:
           - !!js process.env.DSH_TEST_CHILD_PATCH
         dshHome: !!js dshHomePath('children/first')
@@ -47,6 +48,7 @@
       config:
         providerName: dsh-sdk-diagnostic-second
         profile: sdk
+        initializeTimeoutMs: 110000
         patches:
           - !!js process.env.DSH_TEST_CHILD_PATCH
         dshHome: !!js dshHomePath('children/second')

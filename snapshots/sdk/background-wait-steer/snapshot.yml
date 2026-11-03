@@ -1,4 +1,6 @@
 version: 1
+# The recording pins POSIX SIGTERM settlement text; native Windows termination has a different declared output.
+platform: posix
 scenario: background-wait-steer
 profile: sdk
 composition: sdk-background-wait

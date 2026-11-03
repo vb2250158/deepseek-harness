@@ -199,7 +199,7 @@ def test_model_server_only_allows_expected_connection_aborts(
     assert not model.thread.is_alive()
 
 
-def _dsh_bin() -> str | None:
+def _dsh_bin(tmp_path: Path) -> str | None:
     mode = os.environ.get("DSH_COMMANDS_TEST_RUNTIME", "built")
     if mode == "installed":
         return None
@@ -210,6 +210,11 @@ def _dsh_bin() -> str | None:
     binary = repo / "apps/cli/lib/bin.js"
     if node is None or not binary.is_file():
         pytest.skip("requires Node and built dsh CLI, or DSH_COMMANDS_TEST_RUNTIME=installed")
+    if sys.platform == "win32":
+        # CreateProcess needs an executable carrier; the built CLI is JavaScript.
+        launcher = tmp_path / "dsh-built.cmd"
+        launcher.write_text(f'@"{node}" "{binary}" %*\r\n', encoding="utf-8")
+        return str(launcher)
     return str(binary)
 
 
@@ -256,7 +261,7 @@ def _runtime(
         with patch.open("a", encoding="utf-8") as extra:
             extra.write(f"- id: goal\n  config:\n    defaultMaxGoalRounds: {max_goal_rounds}\n")
     patches = (patch,) if capture_patch is None else (patch, capture_patch.resolve())
-    dsh_bin = _dsh_bin()
+    dsh_bin = _dsh_bin(tmp_path)
     with _ModelServer(completions) as model_server, ThreadPoolExecutor(max_workers=2) as workers:
         harness = DeepSeekHarness(
             cwd=str(workspace), runtime_cwd=str(workspace), dsh_home=str(home),

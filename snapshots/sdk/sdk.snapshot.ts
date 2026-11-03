@@ -12,7 +12,7 @@
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, join } from 'node:path'
+import { basename, delimiter, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
@@ -419,6 +419,7 @@ function contextOf(logs: readonly { content: string; header: Record<string, unkn
   return {
     sessionIds: logs.flatMap(log => typeof log.header.id === 'string' ? [log.header.id] : []),
     cwd,
+    cwdAliases: [cwd.split(sep).join('/')],
   }
 }
 
@@ -427,6 +428,7 @@ function contextOfContents(contents: readonly string[]): NormalizeContext {
   return {
     sessionIds: headers.flatMap(header => typeof header.id === 'string' ? [header.id] : []),
     cwd: typeof headers[0]?.cwd === 'string' ? headers[0].cwd : '\0no-cwd\0',
+    cwdAliases: typeof headers[0]?.cwd === 'string' ? [headers[0].cwd.split(sep).join('/')] : [],
   }
 }
 
@@ -444,7 +446,7 @@ async function hydrateReplayFixtures(scenario: CorpusScenario, cwd: string): Pro
   await mkdir(root, { recursive: true })
   return Promise.all((await fixtureFiles(scenario)).map(async (source) => {
     const destination = join(root, basename(source))
-    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', JSON.stringify(cwd).slice(1, -1)))
+    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', JSON.stringify(cwd.split(sep).join('/')).slice(1, -1)))
     return destination
   }))
 }
@@ -763,11 +765,39 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   const patchRoot = join(cwd, '.snapshot-patches')
   await mkdir(patchRoot, { recursive: true })
   const assertions = SDK_ASSERTIONS[scenario.name] ?? {}
+  // Keep platform-only bundled skill providers outside the cross-platform replay.
+  // Scenario-authored runners below still override this test carrier.
+  const sandboxPatch = join(patchRoot, 'sandbox-carrier.yml')
+  await writeFile(sandboxPatch, [
+    ...scenario.manifest.profile === 'sdk-minimal'
+      ? ['- id: persistent-bash', '  disabled: false', '- id: persistent-pwsh', '  disabled: true']
+      : ['- id: tool-bash', '  disabled: false', '- id: tool-pwsh', '  disabled: true'],
+    '- id: bash-sandbox',
+    '  disabled: false',
+    '- id: pwsh-sandbox',
+    '  disabled: true',
+    '- id: sandbox',
+    '  config:',
+    '    runnerCommand:',
+    `      - ${JSON.stringify(process.execPath)}`,
+    `      - ${JSON.stringify(fileURLToPath(new URL('./passthrough-runner.mjs', import.meta.url)))}`,
+    "    runnerFailureSignatures: ['sdk-snapshot-runner: profile rejected']",
+    '',
+  ].join('\n'))
+  const ptcShellPatch = join(patchRoot, 'ptc-shell-carrier.yml')
+  if (scenario.manifest.composition === 'ptc') {
+    await writeFile(ptcShellPatch, [
+      '- id: bash-sandbox', '  disabled: false', '- id: pwsh-sandbox', '  disabled: true',
+      '- id: tool-bash', '  disabled: false', '- id: tool-pwsh', '  disabled: true', '',
+    ].join('\n'))
+  }
   const patches = [
+    sandboxPatch,
     ...legacySdkCompositions.has(scenario.manifest.composition) ? [legacySdkContextPatch] : [],
     ...authoredPatches(scenario, !recording),
     ...assertions.patches ?? [],
     ...scenario.name === 'session-resume' && !recording ? [join(scenario.dir, 'replay.cordis.yml')] : [],
+    ...scenario.manifest.composition === 'ptc' ? [ptcShellPatch] : [],
   ]
     .map((patch, index) => materializeProfilePatch(patch, cwd, scenario.manifest.profile, patchRoot, index))
   let childSessionsRoot: string | undefined
@@ -779,7 +809,7 @@ async function runScenario(scenario: CorpusScenario): Promise<{
     await mkdir(childHome, { recursive: true })
     childSessionsRoot = join(childHome, 'sessions')
     childEnvironment = {
-      DSH_TEST_CHILD_PATCHES: JSON.stringify([legacyChildPatch, childPatch]),
+      DSH_TEST_CHILD_PATCHES: JSON.stringify([sandboxPatch, legacyChildPatch, childPatch]),
       DSH_TEST_CHILD_HOME: childHome,
     }
   }
@@ -807,6 +837,7 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   const env: Record<string, string> = {
     ...Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>,
     ...recording ? {} : REPLAY_CREDENTIAL_ENV,
+    ...process.platform === 'win32' ? { PATH: `C:/Program Files/Git/bin;${process.env.PATH ?? ''}` } : {},
     DSH_SNAPSHOT: mode,
     DSH_SNAPSHOT_PROVIDER: route.provider,
     DSH_SNAPSHOT_MODEL: route.model,
@@ -1023,6 +1054,11 @@ async function runScenario(scenario: CorpusScenario): Promise<{
       titleSubscription?.close()
     }
     await harness.close()
+    if (childSessionsRoot !== undefined && !existsSync(childSessionsRoot)) {
+      const outcomes = results.flatMap(result => result.events)
+        .filter(event => event.type === 'tool/result' || event.type === 'turn/end')
+      throw new Error(`${scenario.name}: SDK child persisted no Session; parent outcomes: ${JSON.stringify(outcomes)}`)
+    }
     const logs = (await Promise.all([
       persistedLogs(sessionsRoot),
       ...(childSessionsRoot === undefined ? [] : [persistedLogs(childSessionsRoot)]),
@@ -1179,8 +1215,8 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
   })
 
   for (const scenario of sdkScenarios) {
-    const scenarioTest = recording
-      && (scenario.manifest.recording === 'authored' || scenario.manifest.sessionFormat !== undefined)
+    const scenarioTest = scenario.manifest.platform === 'posix' && process.platform === 'win32'
+      || recording && (scenario.manifest.recording === 'authored' || scenario.manifest.sessionFormat !== undefined)
       ? it.skip
       : it
     scenarioTest(`${mode}s ${scenario.name} through dsh --profile ${scenario.manifest.profile}`, async () => {
@@ -1605,7 +1641,7 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
           const existing = expectedContents[index]
           if (existing === undefined) throw new Error(`no fixture for persisted log ${index}`)
           return scrubSessionSnapshot(tokenizeSessionFixtureCwd(
-            stabilizeRefreshLog(log.content, existing, replacements, actualContext),
+            stabilizeRefreshLog(tokenizeSessionFixtureCwd(log.content), existing, replacements, actualContext),
           ))
         })
         expectedContents = redactSessionSnapshotIds(stabilizeFixtureMessageIds(reconcileCatalogCreationTimes(refreshed, 'preserve-headers'), expectedContents))
