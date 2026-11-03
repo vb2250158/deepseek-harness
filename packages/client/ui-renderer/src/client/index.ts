@@ -10,6 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 import { SlotRegistry } from './registry.ts'
+import { startupApplication } from './startup-commit.tsx'
 
 export { SlotRegistry } from './registry.ts'
 export type { RootOwnerProps } from './registry.ts'
@@ -70,15 +71,16 @@ function BootHandoff(props: { app: () => ReactNode; boot: BootSnapshot }): React
 
 /** Mount React while preserving the framework-free boot DOM through hydration. */
 function mountApp(container: HTMLElement, app: () => ReactNode): Root {
+  const renderApp = startupApplication(app)
   const boot = container.querySelector<HTMLElement>(':scope > [data-dsh-boot]')
   if (boot !== null) {
     return hydrateRoot(container, createElement(BootHandoff, {
-      app,
+      app: renderApp,
       boot: { className: boot.className, html: boot.innerHTML },
     }))
   }
   const root = createRoot(container)
-  flushSync(() => { root.render(app()) })
+  flushSync(() => { root.render(renderApp()) })
   return root
 }
 

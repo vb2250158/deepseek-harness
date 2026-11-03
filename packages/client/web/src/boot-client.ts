@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { BootManifest, ClientModuleLoader } from '@deepseek-ai/dsh-client-modules/client'
 import { STATE_LABELS } from './loader-status.ts'
+import { beginStartupPhase, StartupEntryMeasures } from './startup-measures.ts'
 
 /** Entry state label as the boot page renders it. */
 export type EntryStateLabel = (typeof STATE_LABELS)[keyof typeof STATE_LABELS] | 'loading' | 'failed'
@@ -35,25 +36,42 @@ export interface ClientBootOptions {
  */
 export async function bootClient(options: ClientBootOptions): Promise<void> {
   const { ctx, manifest, onEntryState } = options
-  await ctx.plugin(Loader)
-  const loader = ctx.loader
-  loader.internal = options.modules as never
-
-  ctx.on('internal/status', (fiber) => {
-    const entry = fiber.entry
-    if (entry === undefined || entry.fiber === undefined) return
-    onEntryState?.(entry.options.name, STATE_LABELS[entry.fiber.state])
-  })
-
-  const rows = manifest.plugins.map(row => row.id)
-  for (const name of rows) onEntryState?.(name, 'loading')
-  await options.modules.entries.start(loader, manifest)
-  for (const entry of loader.entries()) {
-    if (entry.fiber === undefined) onEntryState?.(entry.options.name, 'failed')
+  const endPlugins = beginStartupPhase('plugins')
+  const entryMeasures = new StartupEntryMeasures(new Set(manifest.plugins.map(row => row.id)))
+  const reportState = (name: string, state: EntryStateLabel) => {
+    entryMeasures.update(name, state)
+    onEntryState?.(name, state)
   }
+  let loader: Context['loader'] | undefined
+  let stopStatus: (() => void) | undefined
+  try {
+    await ctx.plugin(Loader)
+    loader = ctx.loader
+    loader.internal = options.modules as never
 
-  await loader.await()
-  assertEntriesActive(ctx, options.modules)
+    stopStatus = ctx.on('internal/status', (fiber) => {
+      const entry = fiber.entry
+      if (entry === undefined || entry.fiber === undefined) return
+      reportState(entry.options.name, STATE_LABELS[entry.fiber.state])
+    })
+
+    const rows = manifest.plugins.map(row => row.id)
+    for (const name of rows) reportState(name, 'loading')
+    await options.modules.entries.start(loader, manifest)
+    for (const entry of loader.entries()) {
+      if (entry.fiber === undefined) reportState(entry.options.name, 'failed')
+    }
+
+    await loader.await()
+    assertEntriesActive(ctx, options.modules)
+  } finally {
+    stopStatus?.()
+    for (const entry of loader?.entries() ?? []) {
+      entryMeasures.update(entry.options.name, entry.fiber === undefined ? 'failed' : STATE_LABELS[entry.fiber.state])
+    }
+    entryMeasures.finish()
+    endPlugins()
+  }
 }
 
 /**

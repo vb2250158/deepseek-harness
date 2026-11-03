@@ -37,6 +37,10 @@ Web 和 Desktop 的数学公式渲染要求支持 WOFF2。[Web 构建](../../../
 
 启动分两个阶段：模块阶段接纳 parser 已加载的 bootstrap 批次，从 Host 提供的启动图构建模块系统，并通过只执行一次的共享 application 批次 URL 预取 `immediately` 层级。插件阶段随后激活每个图 entry 并等待全部就绪，之后才把带标记的启动 DOM 交给 UI 渲染器，由它 hydrate 并切换到完整 UI。
 
+启动诊断使用名为 `dsh:startup` 的原生 User Timing measure。其 `detail` 包含 `version: 1`、`kind: phase | plugin` 和 `stage: boot-ready | prefetch | plugins | mount | react-mount`；插件区间另含清单中的 `plugin` 及实际结束 `state`（`loading`、`pending`、`active` 或 `failed`）。数值 `startTime`、`duration` 与 `performance.timeOrigin` 使用同一时基。插件区间在首次激活或启动审计时结束，之后的插件生命周期变化不再计入启动。这些可重叠的墙钟区间不代表 CPU 耗时。`mount` 在渲染 effect 安装后结束；`react-mount` 在真实应用首次 layout effect 提交时结束，不把此前加载页的 hydration 算作应用提交，也不代表绘制或输入已就绪。迟加载的诊断可用 `performance.getEntriesByName('dsh:startup', 'measure')` 或启用 buffered 的 `PerformanceObserver` 读取既有条目；User Timing 不可用时不改变启动结果。
+
+每条插件 measure 覆盖整段启动激活区间，不是 loading 或 pending 的逐状态分段，也不等同精确依赖等待或初始化 CPU 耗时。各阶段区间可重叠，`react-mount` 可能在 `mount` effect 返回后才结束；消费者不能把它们强行组成相加为 100% 的父子饼图，也不能相减得出负的剩余耗时。
+
 ### 启动页
 
 启动页只使用原生 DOM 与本地 CSS，因此 bundle 与插件激活失败保持可见：它显示一个 spinner 节点，其 CSS 圆弧随 entry 激活而增长，并逐 entry 报告状态。spinner 及其动画相位会一直保留，直到完整 UI 替换启动页。导入或激活失败的插件会按名称报告并给出原因（缺失服务、导入失败或状态），而不是白屏。控制台包含原始导入错误。

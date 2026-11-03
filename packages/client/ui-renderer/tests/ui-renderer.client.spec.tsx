@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useState } from 'react'
 import { act, cleanup } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '../src/client/registry.ts'
@@ -101,3 +102,58 @@ describe('UI renderer plugin', () => {
     expect(() => slots.renderSlot('root', {})).toThrow('not installed')
   })
 })
+
+
+for (const hydrate of [false, true]) {
+  it(`measures only the actual first app commit with loading DOM=${String(hydrate)}`, async () => {
+    const previous = globalThis.performance
+    const samples: { name: string; detail: { stage: string }; appPresent: boolean }[] = []
+    const el = container()
+    vi.stubGlobal('performance', { now: () => previous.now(), measure: (name: string, options: { detail: { stage: string } }) => {
+      samples.push({ name, detail: options.detail, appPresent: el.querySelector('[data-app-commit]') !== null })
+    } })
+    const { ctx, slots } = await bench()
+    let update: (() => void) | undefined
+    const App = () => {
+      const [count, setCount] = useState(0)
+      update = () => { setCount(value => value + 1) }
+      return <div data-app-commit>{count}</div>
+    }
+    slots.register({ name: 'root' }, App)
+    if (hydrate) el.innerHTML = '<div class="boot" data-dsh-boot="">Loading plugins…</div>'
+    let unmount: (() => void) | undefined
+    try {
+      act(() => { unmount = ctx.get('uiRenderer')!.mount(el) })
+      expect(samples).toEqual([{ name: 'dsh:startup', detail: { version: 1, kind: 'phase', stage: 'react-mount' }, appPresent: true }])
+      act(() => { update?.() })
+      expect(el.querySelector('[data-app-commit]')?.textContent).toBe('1')
+      expect(samples).toHaveLength(1)
+    } finally {
+      act(() => { unmount?.() })
+      await ctx.fiber.dispose()
+      vi.stubGlobal('performance', previous)
+    }
+  })
+}
+
+for (const hydrate of [false, true]) {
+  it(`keeps mounting when the diagnostic clock throws with loading DOM=${String(hydrate)}`, async () => {
+    const { ctx, slots } = await bench()
+    slots.register({ name: 'root' }, () => <div data-clock-independent-app />)
+    const el = container()
+    if (hydrate) el.innerHTML = '<div class="boot" data-dsh-boot="">Loading plugins…</div>'
+    const previous = globalThis.performance
+    const measure = vi.fn()
+    vi.stubGlobal('performance', { now: () => { throw new Error('diagnostic clock unavailable') }, measure })
+    let unmount: (() => void) | undefined
+    try {
+      act(() => { unmount = ctx.get('uiRenderer')!.mount(el) })
+      expect(el.querySelector('[data-clock-independent-app]')).not.toBeNull()
+      expect(measure).not.toHaveBeenCalled()
+    } finally {
+      vi.stubGlobal('performance', previous)
+      act(() => { unmount?.() })
+      await ctx.fiber.dispose()
+    }
+  })
+}

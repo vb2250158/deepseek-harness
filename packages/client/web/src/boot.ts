@@ -13,6 +13,7 @@ import { bootClient } from './boot-client.ts'
 import { BootPage } from './boot-page.ts'
 import { mountClient } from './mount.ts'
 import { getStaticModules } from './seed.ts'
+import { beginStartupPhase } from './startup-measures.ts'
 import { installWindowDragRecall } from './window-drag/recall.ts'
 import './base.css'
 
@@ -54,7 +55,12 @@ export class AppWebEntry {
       // next microtask; an asynchronous bootstrap resolves it after its last
       // row, or rejects it into the failure rendering below. An absent global
       // means no bootstrap owns the document and there is nothing to wait for.
-      await (globalThis as { __DSH_BOOT_READY__?: { promise: Promise<void> } }).__DSH_BOOT_READY__?.promise
+      const endReady = beginStartupPhase('boot-ready')
+      try {
+        await (globalThis as { __DSH_BOOT_READY__?: { promise: Promise<void> } }).__DSH_BOOT_READY__?.promise
+      } finally {
+        endReady()
+      }
       const win = globalThis as DshWindow
       const moduleLoader = win.__ModuleLoader__
       if (moduleLoader === undefined) {
@@ -77,7 +83,8 @@ export class AppWebEntry {
       })
       this.manifest = this.modules.manifest
 
-      const prefetching = this.prefetchImmediateTier()
+      const endPrefetch = beginStartupPhase('prefetch')
+      const prefetching = this.prefetchImmediateTier().finally(endPrefetch)
       const ctx = new Context()
       this.ctx = ctx
       this.page.setTotal(this.manifest.plugins.length)

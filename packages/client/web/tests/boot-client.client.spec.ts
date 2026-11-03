@@ -147,3 +147,25 @@ describe('assertEntriesActive', () => {
     ].join('\n'))
   })
 })
+
+
+describe('startup activation measurements', () => {
+  it('records the real pending audit and releases its status observer after failure', async () => {
+    const previous = globalThis.performance
+    const measures: { name: string; detail: { kind: string; plugin?: string; state?: string } }[] = []
+    vi.stubGlobal('performance', { now: () => previous.now(), measure: (name: string, options: { detail: { kind: string; plugin?: string; state?: string } }) => { measures.push({ name, detail: options.detail }) } })
+    const ctx = new Context()
+    try {
+      const { modules } = modulesOf(graphOf(['waiting']), { waiting: { inject: ['absent'], apply: () => {} } })
+      await expect(bootClient({ ctx, modules, manifest: modules.manifest })).rejects.toThrow('waiting: pending')
+      expect(measures.filter(row => row.detail.kind === 'plugin')).toEqual([{ name: 'dsh:startup', detail: { version: 1, kind: 'plugin', stage: 'plugins', plugin: 'waiting', state: 'pending' } }])
+      const count = measures.length
+      await ctx.plugin({ apply: (scope: Context) => { scope.reflect.provide('absent', {}) } })
+      await ctx.loader.await()
+      expect(measures).toHaveLength(count)
+    } finally {
+      await ctx.fiber.dispose()
+      vi.stubGlobal('performance', previous)
+    }
+  })
+})
