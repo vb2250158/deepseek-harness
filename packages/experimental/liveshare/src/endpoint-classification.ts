@@ -206,6 +206,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'goals/pause': 'owner-only', // owner pauses a goal
   'goals/resume': 'owner-only', // owner resumes a goal
   'pluginInventory/list': 'owner-only', // owner plugin inventory
+  'pluginInventory/managementAvailable': 'owner-only', // owner plugin-management availability
   'commands/execute': 'owner-only', // owner executes a slash command
   'permissionPresets/catalog': 'owner-only', // owner permission presets
   'userQuestions/answer': 'owner-only', // owner answers a pending question
@@ -215,11 +216,14 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'agentPresets/read': 'owner-only', // owner agent presets
   'agentPresets/select': 'owner-only', // owner agent presets
   'schedule/catalog': 'owner-only', // owner schedules
-  'schedule/delete': 'owner-only', // owner schedules
+  'schedule/create': 'owner-only', // owner schedules
+  'schedule/deliveryLimits': 'owner-only', // owner schedules
   'schedule/deleteInactive': 'owner-only', // owner schedules
+  'schedule/edit': 'owner-only', // owner schedules
   'schedule/history': 'owner-only', // owner schedules
   'schedule/list': 'owner-only', // owner schedules
-  'schedule/update': 'owner-only', // owner schedules
+  'schedule/run': 'owner-only', // owner schedules
+  'schedule/view': 'owner-only', // owner schedules
   'subagents/interruptByParent': 'owner-only', // owner subagents
   'subagents/prompt': 'owner-only', // owner subagents
 
