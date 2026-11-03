@@ -18,6 +18,7 @@ kind: "package-reference"
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
 - [进一步探索](#further-exploration)
+- [启动诊断](#startup-diagnostics)
 - [模型体验](#model-experience)
 - [已知限制与延期工作](#known-limitations-and-deferred-work)
 - [开发备注](#dev-note)
@@ -230,6 +231,11 @@ Workspace 与 Session 悬浮卡片会复制对应行被截断的值：激活 Wor
 - [Workspace Controller](../../api/workspace-controller/README.zh.md)——负责 Workspace、成员关系与 Workspace 分组顺序的 Host 变更和框架无关 Client 投影。
 
 -----
+
+<a id="startup-diagnostics"></a>
+## 启动诊断
+
+首屏诊断在首批 Session 目录和空闲 Workspace 数据成功提交到 React 后记录 `session-list`，包括成功的空结果，不等待历史分页。可选的根 hook `useInitialSelection` 将主区域初始选择恢复状态发布为 `pending`、`ready` 或 `error`；初始化失败保持 `error`，不会视为成功的空选择。该临时诊断状态不会写入 Session 日志或持久化设置。
 
 <a id="model-experience"></a>
 ## 模型体验

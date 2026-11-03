@@ -18,6 +18,7 @@ This package lets users browse grouped or flat Session lists, choose a Workspace
 - [Use this package](#use-this-package)
 - [Understand the implementation](#understand-the-implementation)
 - [Further Exploration](#further-exploration)
+- [Startup diagnostics](#startup-diagnostics)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
@@ -229,6 +230,11 @@ These pages cover the sidebar host, the hero surface, and the picking backends.
 - [Workspace Controller](../../api/workspace-controller/README.md) — the Host mutations and framework-neutral Client projection that own Workspaces, membership, and Workspace group order.
 
 -----
+
+<a id="startup-diagnostics"></a>
+## Startup diagnostics
+
+First-screen diagnostics record `session-list` after the first successful Session catalog and idle Workspace data React commit, including empty results, without waiting for historical pagination. The optional `useInitialSelection` root hook publishes initial main selection restoration as `pending`, `ready`, or `error`; failed initialization remains `error` rather than a successful empty selection. This transient diagnostic state does not enter Session logs or persisted settings.
 
 <a id="model-experience"></a>
 ## Model Experience

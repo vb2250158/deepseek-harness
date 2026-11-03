@@ -21,6 +21,7 @@ kind: "package-reference"
 - [已发送用户文本](#sent-user-text)
 - [Shell 与标准 props](#shell-and-standard-props)
 - [临时 composer entry](#temporary-composer-entries)
+- [启动诊断](#startup-diagnostics)
 - [模型体验](#model-experience)
 - [已知限制与暂缓事项](#known-limitations-and-deferred-work)
 - [开发备注](#dev-note)
@@ -187,6 +188,11 @@ selector 必须是 owner currency 的纯函数。非 null 返回值作为 `match
 `conversation.input.activity` 在模型选择器与发送按钮之间承载一个控件。其 `onActiveChange` 回调将控件展开至整条工具栏并隐藏普通辅助控件和上下文用量按钮，同时保留编辑器与提交按钮。关闭活动后恢复这些控件，上下文详情保持关闭。首页输入框下方没有内容时，该区域保持收起。占用者在卸载时释放展开状态，并拥有活动专属反馈。
 
 会话标题右键使用共享[右键菜单](../ui-context-menu/README.zh.md)，目标是被点击面包屑所属会话。可复用图片库从其 Factory 注入的 `useContextMenu` hook 获取 `getTriggerProps`。
+
+<a id="startup-diagnostics"></a>
+## 启动诊断
+
+首屏诊断在初始选择恢复成功、且已选 Session 历史在提交后的 Conversation 中打开时记录 `session-content`；恢复成功但没有选中会话时也会记录。缺少恢复状态提供方或历史加载失败时，该阶段不会完成。计时结束于 React 布局提交，不等待后续历史分页或后台同步。
 
 <a id="model-experience"></a>
 ## 模型体验

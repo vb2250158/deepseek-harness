@@ -12,11 +12,17 @@ React-free observable and snapshot-store primitives shared by Client controllers
 
 ## Table of Contents
 
+- [Startup diagnostics](#startup-diagnostics)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
 
 -----
+
+<a id="startup-diagnostics"></a>
+## Startup diagnostics
+
+`recordStartupPhase(stage)` records one completed first-screen phase per document through native User Timing (`dsh:startup`, `detail: { version: 1, kind: 'phase', stage }`), from document time origin to the caller's commit observation. Optional timing failures are contained; callers own successful-readiness conditions.
 
 <a id="model-experience"></a>
 ## Model Experience

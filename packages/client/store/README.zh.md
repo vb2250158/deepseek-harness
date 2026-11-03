@@ -12,11 +12,17 @@ kind: "package-library"
 
 ## 目录
 
+- [启动诊断](#startup-diagnostics)
 - [模型体验](#model-experience)
 - [已知限制与暂缓事项](#known-limitations-and-deferred-work)
 - [开发备注](#dev-note)
 
 -----
+
+<a id="startup-diagnostics"></a>
+## 启动诊断
+
+`recordStartupPhase(stage)` 通过原生用户计时（User Timing）为每个文档的每个首屏阶段记录一次完成区间（`dsh:startup`、`detail: { version: 1, kind: 'phase', stage }`），从文档时间原点到调用方观察到提交的时刻。可选计时失败不会影响调用方；调用方负责确认成功就绪条件。
 
 <a id="model-experience"></a>
 ## 模型体验

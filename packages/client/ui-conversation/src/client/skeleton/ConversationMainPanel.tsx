@@ -1,9 +1,23 @@
+import { useLayoutEffect } from 'react'
+import { recordStartupPhase } from '@deepseek-ai/dsh-client-store'
 import type { ConversationSlotProps } from '../contract/slots.ts'
 import { conversationPhase } from '../contract/snapshot.ts'
 import { ConversationWidthControls } from './ConversationWidthControls.tsx'
 import css from './ConversationRoot.module.css'
 
 const CONTENT_SLOTS = { widthControls: ConversationWidthControls }
+
+function FirstSessionContentCommit(props: {
+  readonly useInitialSelection: NonNullable<ConversationSlotProps['useInitialSelection']>
+  readonly contentReady: boolean
+}) {
+  const selection = props.useInitialSelection(state => state)
+  // The observer mounts only with its provider, keeping the parent's hook order stable.
+  useLayoutEffect(() => {
+    if (selection === 'ready' && props.contentReady) recordStartupPhase('session-content')
+  }, [selection, props.contentReady])
+  return null
+}
 
 /**
  * Render the existing main Conversation frame around the extracted content.
@@ -52,6 +66,10 @@ export function ConversationMainPanel(props: ConversationSlotProps) {
       }, {
         slots: CONTENT_SLOTS,
       })}
+      {props.useInitialSelection === undefined ? null : <FirstSessionContentCommit
+        useInitialSelection={props.useInitialSelection}
+        contentReady={sessionId === undefined || (openState === 'open' && conversation !== undefined)}
+      />}
     </div>
   )
 }

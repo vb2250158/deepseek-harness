@@ -3,7 +3,7 @@ import { contextMenuHook } from '@deepseek-ai/dsh-client-test-runtime'
 import type { GlobalStandardProps, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createContext, useContext, type ReactNode } from 'react'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionListState, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -146,6 +146,8 @@ function mount(
     unpinnedViews?: readonly string[]
     /** Whether the View actions list has registrations. */
     entryActions?: boolean
+    /** Initial restoration state published by the Workspace owner. */
+    initialSelection?: 'pending' | 'ready' | 'error'
     /** Isolate header capability checks from the composer's required layout observers. */
     headerOnly?: boolean
   } = {},
@@ -353,6 +355,7 @@ function mount(
       useChat,
       useTrajectory,
       useSessions: bindSnapshotSelector(sessions),
+      useInitialSelection: selector => selector(options.initialSelection ?? 'ready'),
       usePanelInfo: selector => selector({ activePanelId: null }),
       useContextMenu: contextMenuHook(),
       useResource,
@@ -380,6 +383,7 @@ function mount(
     )
   }) as ConversationSlotProps['renderFactorySlot']
   const runtimeProps: PropsRuntime<'main.conversation'> & Pick<ConversationSlotProps, 'SessionProvider'> = {
+    useInitialSelection: selector => selector(options.initialSelection ?? 'ready'),
     usePanelInfo: selector => selector({ activePanelId: null }),
     sessionId,
     SessionProvider,
@@ -399,7 +403,7 @@ function mount(
   const props: ConversationSlotProps = { ...runtimeProps, renderSlot, renderFactorySlot }
   const view = render(<ConversationMainPanel {...props} />)
   return {
-    view, store, wiring, sink, retargetWorkspace, session, conversation, slotCalls, lineageOwners, seatOwners, open,
+    view, props, store, wiring, sink, retargetWorkspace, session, conversation, slotCalls, lineageOwners, seatOwners, open,
     pickerOwner: () => pickerOwner,
     setPinned,
     actionsOwner: () => {
@@ -1055,4 +1059,72 @@ describe('ConversationRoot resident composer', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
     expect(b.view.container.querySelector('[data-width-handle]')).toBeNull()
   })
+})
+
+
+describe('first-screen startup content completion', () => {
+  it('waits for successful history and selection commits, including an empty selection', async () => {
+    const entries: PerformanceMeasure[] = []
+    const measure = vi.fn((name: string, options?: string | PerformanceMeasureOptions) => {
+      const detail: unknown = typeof options === 'object' ? options.detail : undefined
+      const entry: PerformanceMeasure = { name, entryType: 'measure', startTime: 0, duration: 1, detail, toJSON: () => ({}) }
+      entries.push(entry)
+      return entry
+    })
+    vi.spyOn(performance, 'getEntriesByName').mockImplementation(() => entries)
+    vi.spyOn(performance, 'measure').mockImplementation(measure)
+    const loading = mount(sessionSnapshotOf({ openState: 'loading' }), [], undefined, { headerOnly: true })
+    expect(measure).not.toHaveBeenCalled()
+    act(() => { loading.session.set(sessionSnapshotOf({ openState: 'error' })) })
+    expect(measure).not.toHaveBeenCalled()
+    act(() => { loading.session.set(sessionSnapshotOf({ openState: 'open' })) })
+    await waitFor(() => { expect(measure).toHaveBeenCalledWith('dsh:startup', expect.objectContaining({
+      start: 0, detail: { version: 1, kind: 'phase', stage: 'session-content' },
+    })) })
+    loading.rerender()
+    expect(measure).toHaveBeenCalledTimes(1)
+    loading.view.unmount()
+    entries.length = 0
+    measure.mockClear()
+    const pending = mount(sessionSnapshotOf(), [], undefined, { sessionId: undefined, initialSelection: 'pending', headerOnly: true })
+    expect(measure).not.toHaveBeenCalled()
+    pending.view.unmount()
+    const failed = mount(sessionSnapshotOf(), [], undefined, { sessionId: undefined, initialSelection: 'error', headerOnly: true })
+    expect(measure).not.toHaveBeenCalled()
+    failed.view.unmount()
+    mount(sessionSnapshotOf(), [], undefined, { sessionId: undefined, initialSelection: 'ready', headerOnly: true })
+    expect(measure).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+})
+
+
+it('keeps parent hooks stable when the first-screen selection provider is added and removed', () => {
+  const entries: PerformanceMeasure[] = []
+  const measure = vi.fn((name: string, options?: string | PerformanceMeasureOptions) => {
+    const detail: unknown = typeof options === 'object' ? options.detail : undefined
+    const entry: PerformanceMeasure = { name, entryType: 'measure', startTime: 0, duration: 1, detail, toJSON: () => ({}) }
+    entries.push(entry)
+    return entry
+  })
+  vi.spyOn(performance, 'getEntriesByName').mockImplementation(() => entries)
+  vi.spyOn(performance, 'measure').mockImplementation(measure)
+  const b = mount(sessionSnapshotOf({ openState: 'loading' }), [], undefined, { headerOnly: true })
+  delete b.props.useInitialSelection
+  b.rerender()
+  const residentRoot = b.view.container.firstElementChild
+  act(() => { b.session.set(sessionSnapshotOf({ openState: 'open' })) })
+  b.rerender()
+  expect(measure).not.toHaveBeenCalled()
+  const state = createSnapshotStore<'pending' | 'ready' | 'error'>('ready')
+  b.props.useInitialSelection = bindSnapshotSelector(state)
+  b.rerender()
+  expect(measure).toHaveBeenCalledTimes(1)
+  delete b.props.useInitialSelection
+  b.rerender()
+  b.props.useInitialSelection = bindSnapshotSelector(state)
+  b.rerender()
+  expect(measure).toHaveBeenCalledTimes(1)
+  expect(b.view.container.firstElementChild).toBe(residentRoot)
+  vi.restoreAllMocks()
 })

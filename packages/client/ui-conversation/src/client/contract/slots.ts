@@ -346,6 +346,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 
   interface GlobalStandardProps {
+    /** First main selection restoration, published by the independent Workspace UI. */
+    useInitialSelection?: SnapshotSelectorHook<'pending' | 'ready' | 'error'>
     /** Workspace selector supplied by the independently loaded Workspace UI. */
     useWorkspaces: SnapshotSelectorHook<WorkspaceSnapshot>
   }

@@ -173,6 +173,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly selection = createSnapshotStore<MainSelection>(
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
+  /** First selection restoration result; no Session data or persisted state. */
+  readonly initialSelection = createSnapshotStore<'pending' | 'ready' | 'error'>('pending')
   private mainReference: SessionReference | undefined
   private restorationNavigation: AbortSignal | undefined
 
@@ -451,14 +453,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       if (workspace.phase !== 'ready' || sessions.phase !== 'ready') return
       if (this.mainReference !== undefined) {
         initial = 'done'
+        this.initialSelection.set('ready')
         return
       }
       initial = 'connecting'
+      this.initialSelection.set('pending')
       void this.restoreSelection(workspace, sessions).then(
-        () => { initial = 'done' },
+        () => {
+          initial = 'done'
+          if (!this.lifetime.signal.aborted && this.initialSelection.getSnapshot() === 'pending') {
+            this.initialSelection.set('ready')
+          }
+        },
         (reason: unknown) => {
           if (this.lifetime.signal.aborted) return
           initial = 'waiting'
+          this.initialSelection.set('error')
           console.warn('initial Session restoration failed:', reason)
         },
       )
@@ -515,7 +525,10 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     try {
       return await this.workspaces.initializeDefault(signal)
     } catch (_error: unknown) {
-      if (!signal.aborted) this.notify({ kind: 'defaultWorkspaceFailed' })
+      if (!signal.aborted) {
+        this.initialSelection.set('error')
+        this.notify({ kind: 'defaultWorkspaceFailed' })
+      }
       return undefined
     }
   }
@@ -565,6 +578,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }
     const previous = this.mainReference
     this.mainReference = reference
+    this.initialSelection.set('ready')
     previous?.release()
     if (panel === 'reveal') this.ctx.layout.selectPanel(null)
   }

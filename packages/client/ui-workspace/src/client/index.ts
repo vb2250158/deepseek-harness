@@ -73,6 +73,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface GlobalStandardProps {
     /** Selector hook over the pure Workspace Controller snapshot. */
     useWorkspaces: SnapshotSelectorHook<WorkspaceSnapshot>
+    /** First main selection restoration; errors do not represent an empty successful screen. */
+    useInitialSelection?: SnapshotSelectorHook<'pending' | 'ready' | 'error'>
     /** Whether the current Peer may call `action` on one Workspace resource. */
     useWorkspaceAccess: (workspaceId: WorkspaceId, action: RemoteEndpoint) => boolean
   }
@@ -126,7 +128,7 @@ export function apply(ctx: Context): void {
     ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
   )
   ctx.slots.provideRoot({
-    hooks: { workspaces: workspaces.list },
+    hooks: { workspaces: workspaces.list, initialSelection: uiWorkspace.initialSelection },
     keyedHooks: {
       workspaceAccess: (workspaceId, action) => action === undefined
         ? undefined

@@ -21,6 +21,7 @@ Desktop product events use the optional [product analytics service](../product-a
 - [Sent user text](#sent-user-text)
 - [Shell and standard props](#shell-and-standard-props)
 - [Temporary composer entries](#temporary-composer-entries)
+- [Startup diagnostics](#startup-diagnostics)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
@@ -187,6 +188,11 @@ The selector must be a pure function of the owner currency. Its non-null return 
 `conversation.input.activity` hosts one control between the model selector and Send. Its `onActiveChange` callback expands that control across the toolbar and hides ordinary accessory controls and the context meter while preserving the editor and submit action. Closing the activity restores those controls with context details closed. The empty hero dock remains collapsed when it has no content. The occupant releases expansion on unmount and owns any activity-specific feedback.
 
 Session title context gestures use the shared [context menu](../ui-context-menu/README.md) with the clicked breadcrumb’s Session. The reusable image gallery receives `getTriggerProps` from its Factory’s injected `useContextMenu` hook.
+
+<a id="startup-diagnostics"></a>
+## Startup diagnostics
+
+First-screen diagnostics record `session-content` after initial selection restoration succeeds and the selected Session history is open in the committed Conversation, or restoration succeeds with no selection. Missing restoration providers and failed history loads do not complete this phase. The timing ends at a React layout commit; it does not wait for later history pagination or background synchronization.
 
 <a id="model-experience"></a>
 ## Model Experience

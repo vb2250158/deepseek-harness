@@ -1587,3 +1587,29 @@ describe('UiWorkspaceService', () => {
     })
   })
 })
+
+
+describe('first-screen initial selection outcome', () => {
+  it('keeps the empty surface pending until default initialization settles, and preserves failure', async () => {
+    const init = Promise.withResolvers<WorkspaceView | undefined>()
+    const b = bench({ configureWorkspaces: (workspaces) => {
+      workspaces.initializeDefault.mockImplementation(() => init.promise)
+    } })
+    b.sessions.list.set(sessionState())
+    b.workspaces.list.set(workspaceState())
+    expect(b.uiWorkspace.initialSelection.getSnapshot()).toBe('pending')
+    init.reject(new Error('initialization denied'))
+    await vi.waitFor(() => { expect(b.uiWorkspace.initialSelection.getSnapshot()).toBe('error') })
+  })
+  it('completes a successful empty selection only after initialization resolves', async () => {
+    const init = Promise.withResolvers<WorkspaceView | undefined>()
+    const b = bench({ configureWorkspaces: (workspaces) => {
+      workspaces.initializeDefault.mockImplementation(() => init.promise)
+    } })
+    b.sessions.list.set(sessionState())
+    b.workspaces.list.set(workspaceState())
+    expect(b.uiWorkspace.initialSelection.getSnapshot()).toBe('pending')
+    init.resolve(undefined)
+    await vi.waitFor(() => { expect(b.uiWorkspace.initialSelection.getSnapshot()).toBe('ready') })
+  })
+})
