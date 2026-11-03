@@ -349,14 +349,15 @@ describe('dsh-doc skill consolidation', () => {
     }
   })
 
-  it('maps package README kinds to their documentation standards', () => {
-    const files = packageReadmes()
-    expect(files.length).toBeGreaterThan(0)
+  const packageReadmeFiles = packageReadmes()
 
-    for (const file of files) {
-      const metadata = readFrontmatter(file)
-      expect(packageReadmeMetadataErrors(file, metadata), file).toEqual([])
-    }
+  it('discovers a non-empty package README corpus', () => {
+    expect(packageReadmeFiles.length).toBeGreaterThan(0)
+  })
+
+  it.each(packageReadmeFiles)('maps package README kinds to their documentation standards: %s', (file) => {
+    const metadata = readFrontmatter(file)
+    expect(packageReadmeMetadataErrors(file, metadata), file).toEqual([])
   })
 
   it('maps persistence transition records to their dedicated document kind', () => {
@@ -402,11 +403,9 @@ describe('dsh-doc skill consolidation', () => {
     }
   })
 
-  it('keeps every package README on the summary, contents, and Dev Note skeleton', () => {
-    for (const file of packageReadmes().filter(file => file.split('/').length === 4)) {
-      const source = readFileSync(resolve(root, file), 'utf8')
-      expect(packageReadmeStructureErrors(file, source), file).toEqual([])
-    }
+  it.each(packageReadmeFiles.filter(file => file.split('/').length === 4))('keeps every package README on the summary, contents, and Dev Note skeleton: %s', (file) => {
+    const source = readFileSync(resolve(root, file), 'utf8')
+    expect(packageReadmeStructureErrors(file, source), file).toEqual([])
   })
 
   it('rejects redundant fields and a kind that does not match the README position', () => {
