@@ -120,6 +120,8 @@ interface SdkAssertions {
   waitForProviderTitle?: boolean
   /** Final response required from a completed turn before updating goldens. */
   expectedFinalResponse?: string
+  /** Exact terminal reasons for an intentionally failed recorded turn followed by recovery. */
+  expectedTurnReasons?: readonly ('error' | 'completed')[]
   /** Environment overrides passed to the runtime subprocess. */
   environment?: Readonly<Record<string, string>>
   /** A separate DSH SDK child whose persisted session joins the evidence. */
@@ -203,6 +205,11 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   'session-title-stability': { waitForProviderTitle: true },
   'dynamic-tool-updates': {
     expectedFinalResponse: 'DONE',
+  },
+  'failure-admission-wake': {
+    expectedTurnReasons: ['error', 'completed', 'completed'],
+    patches: [fileURLToPath(new URL('./failure-admission-wake/runtime.cordis.yml', import.meta.url))],
+    expectedFinalResponse: 'EXPLICIT_OK',
   },
   'tool-scheduler-recovery': {
     patches: [fileURLToPath(new URL('./tool-scheduler-recovery/runtime.cordis.yml', import.meta.url))],
@@ -824,6 +831,8 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   })
   const [parentFixture, ...childFixtures] = replayFixtures
   const actions = sdkActions(primaryFixture, assertions.replayStandaloneCommands === true)
+    // Turn 2 belongs to the hook's queued input; only turns 1 and 3 are SDK sends.
+    .filter(action => scenario.name !== 'failure-admission-wake' || action.kind !== 'turn' || action.turn !== 2)
   const resumeReplayFile = scenario.name === 'session-resume' && !recording
     ? join(patchRoot, 'resume-replay.json') : undefined
   const prepareTurnReplay = async (turn: number): Promise<void> => {
@@ -913,6 +922,8 @@ async function runScenario(scenario: CorpusScenario): Promise<{
     const completionSubscription = scenario.name === 'subagent-continuable'
       ? harness.client.subscribeSessionTree(sessionId)
       : undefined
+    const failureSubscription = scenario.name === 'failure-admission-wake'
+      ? harness.client.subscribeSessionTree(sessionId) : undefined
     const observe = (notification: HarnessNotification): void => {
       observedMethods.add(notification.method)
       if (notification.method !== 'subagent.started') return
@@ -994,6 +1005,38 @@ async function runScenario(scenario: CorpusScenario): Promise<{
           result = outcome
         }
         results.push(result)
+        if (scenario.name === 'failure-admission-wake') {
+          // RunResult can precede automatic queued work; wait for the whole driver without waking it.
+          await harness.client.request('session/wait', { sessionId })
+          if (failureSubscription === undefined) throw new Error('missing failure-boundary subscription')
+          const boundary: JsonObject[] = []
+          for (let notification = failureSubscription.tryNext(); notification !== undefined; notification = failureSubscription.tryNext()) {
+            const event = notificationEvent(notification)
+            if (event !== undefined) boundary.push(event)
+          }
+          if (results.length === 1) {
+            expect(result.finishReason).toBe('error')
+            expect(boundary.filter(event => event.type === 'turn/end')).toMatchObject([
+              { data: { turn: 1, reason: { kind: 'error' } } },
+            ])
+            expect(boundary.some(event => event.type === 'assistant/attempt' || event.type === 'assistant/message')).toBe(false)
+            expect(boundary.filter(event => event.type === 'agent/inbox/spliced'
+              && (event.data as JsonObject).target === 'next-turn').at(-1)).toMatchObject({
+              data: { start: 0, inserted: [{ content: [{ type: 'text', text: 'QUEUED_AFTER_FAILURE' }] }] },
+            })
+          } else {
+            expect(result.finalResponse, JSON.stringify({finishReason:result.finishReason,boundary:boundary.filter(event => ['turn/end','assistant/message'].includes(String(event.type)))})).toBe('EXPLICIT_OK')
+            expect(boundary.filter(event => event.type === 'turn/end')).toMatchObject([
+              { data: { turn: 2, reason: { kind: 'completed' } } },
+              { data: { turn: 3, reason: { kind: 'completed' } } },
+            ])
+            expect(boundary.filter(event => event.type === 'assistant/message')).toMatchObject([
+              { data: { message: { content: [{ type: 'text', text: 'QUEUED_OK' }] } } },
+              { data: { message: { content: [{ type: 'text', text: 'EXPLICIT_OK' }] } } },
+            ])
+            expect(boundary.some(event => event.type === 'assistant/attempt')).toBe(false)
+          }
+        }
         if (titleSubscription !== undefined) {
           expect(result.events.some(event => event.type === 'session/title-llm-request'),
             'automatic title requests start after the foreground turn ends').toBe(false)
@@ -1051,6 +1094,7 @@ async function runScenario(scenario: CorpusScenario): Promise<{
     } finally {
       subscription.close()
       completionSubscription?.close()
+      failureSubscription?.close()
       titleSubscription?.close()
     }
     await harness.close()
@@ -1615,7 +1659,11 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         const turnEnds = records(parent.content).filter(record => record.type === 'turn/end')
         const expectedTurns = records(replayContents[0]!).filter(record => record.type === 'turn/end')
         expect(turnEnds, `${scenario.name}: completed turns`).toHaveLength(expectedTurns.length)
-        for (const turnEnd of turnEnds) expect(turnEnd).toMatchObject({ data: { reason: { kind: 'completed' } } })
+        if (assertions.expectedTurnReasons !== undefined) {
+          expect(turnEnds.map(record => ((record.data as JsonObject).reason as JsonObject).kind)).toEqual(assertions.expectedTurnReasons)
+        } else {
+          for (const turnEnd of turnEnds) expect(turnEnd).toMatchObject({ data: { reason: { kind: 'completed' } } })
+        }
       }
 
       let expectedContents = retained && !refreshing

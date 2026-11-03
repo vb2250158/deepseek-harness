@@ -1154,3 +1154,57 @@ describe('Agent.cancel()', () => {
     await ctx.fiber.dispose()
   })
 })
+
+
+describe('failure admission wake ownership', () => {
+  it('leaves a queued follow-up idle after admitted input fails until an explicit wake', async () => {
+    const adapter = new MockAdapter([textResponse('queued response'), textResponse('explicit response')])
+    const ctx = await harness(adapter)
+    try {
+      const agent = await ctx.agentLoop.create(SessionId('failed-admitted-follow-up'), { provider: 'mock', model: 'mock' })
+      ctx.on('agent/request-context-ready', ({ turn }, next) => {
+        if (turn === 1) {
+          agent.inbox.append('next-turn', createUserMessage({ content: [{ type: 'text', text: 'queued' }], source: { kind: 'user' } }))
+          throw new Error('request failed after admission')
+        }
+        return next()
+      })
+      send(agent, 'first')
+      await agent.whenIdle()
+      expect(adapter.requests).toHaveLength(0)
+      expect(userTexts(agent)).toEqual(['first'])
+      expect(agent.inbox.nextTurn).toHaveLength(1)
+      send(agent, 'explicit')
+      await agent.whenIdle()
+      expect(userTexts(agent)).toEqual(['first', 'queued', 'explicit'])
+      expect(adapter.requests).toHaveLength(2)
+      expect([...agent.inbox.nextTurn, ...agent.inbox.nextStep]).toHaveLength(0)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('replays an unsent follow-up once when preparation fails before admission', async () => {
+    const adapter = new MockAdapter([textResponse('queued response')])
+    const ctx = await harness(adapter)
+    try {
+      const agent = await ctx.agentLoop.create(SessionId('failed-before-admission'), { provider: 'mock', model: 'mock' })
+      ctx.on('agent/pre-step', ({ turn }, next) => {
+        if (turn === 1) {
+          agent.inbox.append('next-turn', createUserMessage({ content: [{ type: 'text', text: 'queued' }], source: { kind: 'user' } }))
+          throw new Error('preparation failed before admission')
+        }
+        return next()
+      })
+      send(agent, 'not admitted')
+      await agent.whenIdle()
+      expect(userTexts(agent)).toEqual(['queued'])
+      expect(adapter.requests).toHaveLength(1)
+      expect([...agent.inbox.nextTurn, ...agent.inbox.nextStep]).toHaveLength(0)
+      expect(agent.session.snapshotEvents().flatMap(event => event.type === 'turn/end' ? [event.data.reason.kind] : []))
+        .toEqual(['error', 'completed'])
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+})

@@ -60,7 +60,7 @@ type Phase =
     lastTurn: number
     wakeRequested: PendingWake
   }
-  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: PendingWake; continueWithoutInput: boolean }
+  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: PendingWake; continueWithoutInput: boolean; admittedUserMessage: boolean }
 
 type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
 
@@ -260,8 +260,8 @@ export class ReactLoopAgent implements Agent {
    */
   private wakeDriver(continueWithoutInput = false): void {
     if (this.phase.kind !== 'idle') {
-      // A live driver normally claims this input; a failed one leaves the
-      // explicit wake for convergence. Non-waking context never sets it.
+      // A live driver normally claims this input; a failure before admission
+      // replays it at convergence. Cancellation and maintenance defer the wake.
       const reason = abortedCancelCause(this.phase.abort.signal)
       if (reason?.kind !== 'disposed') {
         this.phase.wakeRequested = this.phase.kind === 'maintenance' || this.phase.abort.signal.aborted ? 'deferred' : 'live'
@@ -277,6 +277,7 @@ export class ReactLoopAgent implements Agent {
       step: 0,
       wakeRequested: 'none',
       continueWithoutInput,
+      admittedUserMessage: false,
     })
     this.loopCtx.agents.withInitiator(this, () => this.kick()).then(driver.resolve, driver.reject)
   }
@@ -286,6 +287,12 @@ export class ReactLoopAgent implements Agent {
     do {
       await (activity = this.activityDone)
     } while (activity !== this.activityDone)
+  }
+
+  /** Append one user message and record successful admission for failure replay. */
+  private appendUserMessage(message: UserMessage): void {
+    this.session.append('user/message', message, { surfaceOp: 'append' })
+    if (this.phase.kind === 'running') this.phase.admittedUserMessage = true
   }
 
   /** Report one failure at its live boundary, then preserve it for driver containment. */
@@ -303,14 +310,15 @@ export class ReactLoopAgent implements Agent {
       while (await this.turn()) {}
     } catch (_error: unknown) {
       // Reported failures and cancellation are contained at the driver boundary.
-      failed = this.phase.kind === 'running' && !this.phase.abort.signal.aborted && this.phase.turn > initialTurn
+      failed = this.phase.kind === 'running' && !this.phase.abort.signal.aborted
+        && this.phase.turn > initialTurn && !this.phase.admittedUserMessage
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
-        // A non-cancelled failure can leave a waking message behind its terminal
-        // boundary. Replay it once idle instead of requiring another send.
+        // Replay an unsent input after pre-admission failure. Once any user
+        // message was logged, failure waits for a new wake; deferred wakes survive.
         if (this.inbox.hasPending && (wakeRequested === 'deferred'
           || (failed && (wakeRequested === 'live' || this.inbox.nextTurn.length > 0)))) this.wakeDriver()
       }
@@ -374,6 +382,7 @@ export class ReactLoopAgent implements Agent {
     const phase = this.phase
     const { signal } = phase.abort
     signal.throwIfAborted()
+    phase.admittedUserMessage = false
     const turn = phase.turn + 1
     try {
       this.session.append('turn/start', { turn })
@@ -508,16 +517,16 @@ export class ReactLoopAgent implements Agent {
         for (const message of decision.messages) {
           if (message.source.kind === 'runtime-context') {
             if (context !== undefined && !contextAdmitted) {
-              this.session.append('user/message', context, { surfaceOp: 'append' })
+              this.appendUserMessage(context)
               contextAdmitted = true
             }
           } else {
-            this.session.append('user/message', message, { surfaceOp: 'append' })
+            this.appendUserMessage(message)
           }
         }
       }
       if (context !== undefined && !contextAdmitted) {
-        this.session.append('user/message', context, { surfaceOp: 'append' })
+        this.appendUserMessage(context)
       }
       firstAttempt = false
       const request = await this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal, () => {
@@ -525,7 +534,7 @@ export class ReactLoopAgent implements Agent {
           inHistory: preparedCall?.systemPromptUpdate === 'in-history', startsSeries: true,
         })) this.session.append('system/message', { turn, step, message }, intent)
         const restored = this.runtimeContext.project(joinContextSections(sections), sections)
-        if (restored !== undefined) this.session.append('user/message', restored, { surfaceOp: 'append' })
+        if (restored !== undefined) this.appendUserMessage(restored)
       })
       const live = new AssistantStreamAttempt(
         this.session.id,

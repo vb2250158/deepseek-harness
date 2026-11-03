@@ -1,0 +1,7 @@
+version: 1
+scenario: failure-admission-wake
+profile: sdk
+composition: sdk-default
+recording: authored
+header:
+  class: sdk-default

@@ -1,0 +1,3 @@
+- insert:
+    - id: failure-before-admission-fixture
+      name: './failure-before-admission.mjs'

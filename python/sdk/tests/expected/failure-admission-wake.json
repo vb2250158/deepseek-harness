@@ -1,0 +1,43 @@
+{
+  "afterAdmission": {
+    "afterFirstRun": {
+      "turnReasons": [
+        "error"
+      ],
+      "userTexts": [
+        "FAIL_AFTER_ADMISSION"
+      ],
+      "assistantTexts": []
+    },
+    "persistedSession": {
+      "turnReasons": [
+        "error",
+        "completed",
+        "completed"
+      ],
+      "userTexts": [
+        "FAIL_AFTER_ADMISSION",
+        "QUEUED_AFTER_FAILURE",
+        "EXPLICIT_WAKE"
+      ],
+      "assistantTexts": [
+        "QUEUED_OK",
+        "EXPLICIT_OK"
+      ]
+    }
+  },
+  "beforeAdmission": {
+    "persistedSession": {
+      "turnReasons": [
+        "error",
+        "completed"
+      ],
+      "userTexts": [
+        "QUEUED_AFTER_FAILURE"
+      ],
+      "assistantTexts": [
+        "QUEUED_OK"
+      ]
+    }
+  }
+}

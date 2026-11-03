@@ -671,3 +671,93 @@ def test_resumed_permission_survives_different_launch_defaults(tmp_path: Path) -
         _assert_request_permission(request, "read-only", "ask")
         assert resumed.harness.config.env["DSH_PERMISSION_MODE"] == "danger-full-access"
     assert _permission_facts(_read_events(resumed.logs)) == saved
+
+def _admission_projection(events: list[dict]) -> dict:
+    """Project ordinary user input, while retaining runtime-context events in the real log."""
+    return {
+        "turnReasons": [event["data"]["reason"]["kind"] for event in _of_type(events, "turn/end")],
+        "userTexts": ["\n".join(_text_blocks(event["data"]["content"]))
+                      for event in _of_type(events, "user/message") if event["data"]["source"]["kind"] == "user"],
+        "assistantTexts": ["\n".join(_text_blocks(event["data"]["message"]["content"])) for event in _of_type(events, "assistant/message")],
+    }
+
+
+def _admission_expected() -> dict:
+    return json.loads((Path(__file__).parent / "expected/failure-admission-wake.json").read_text(encoding="utf-8"))
+
+
+def _wait_admission_completions(next_notification: Callable[[], Notification], count: int) -> list[int]:
+    """Observe the queued turns through the public stream, without attributing them to run()."""
+    turns = []
+    while len(turns) < count:
+        notification = next_notification()
+        if notification.method != "session.event" or notification.payload.get("sessionId") != _SESSION_ID:
+            continue
+        event = notification.payload.get("event")
+        if isinstance(event, dict) and event.get("type") == "turn/end" and event["data"]["reason"]["kind"] == "completed":
+            turns.append(event["data"]["turn"])
+    return turns
+
+
+def test_failure_after_admission_keeps_queued_input_until_explicit_wake(tmp_path: Path) -> None:
+    # The same public hook fixture is also driven by the TypeScript recorded corpus.
+    patch = Path(__file__).resolve().parents[3] / "snapshots/sdk/failure-admission-wake/runtime.cordis.yml"
+    expected = _admission_expected()["afterAdmission"]
+    with _runtime(tmp_path, [_Completion("QUEUED_OK"), _Completion("EXPLICIT_OK")], capture_patch=patch) as runtime:
+        session = runtime.harness.start_session(_SESSION_ID)
+        observer = runtime.harness.client.subscribe_session_notifications(_SESSION_ID)
+        try:
+            failed = runtime.call(session.run, "FAIL_AFTER_ADMISSION")
+            assert isinstance(failed, RunResult)
+            assert failed.finish_reason == "error"
+            assert not failed.final_response
+            _wait_activity(runtime, session)
+            assert runtime.model.captured() == [], "failure must not automatically dispatch the queued input"
+            assert _admission_projection(failed.events) == expected["afterFirstRun"]
+            assert not _of_type(failed.events, "assistant/attempt")
+
+            # Prompt submission is the existing explicit wake; it does not replace the waiting input.
+            resumed = runtime.call(session.run, "EXPLICIT_WAKE")
+            assert isinstance(resumed, RunResult)
+            assert resumed.finish_reason == "completed"
+            assert runtime.call(_wait_admission_completions, observer.next, 2) == [2, 3]
+            _wait_activity(runtime, session)
+            requests = runtime.model.captured()
+            assert len(requests) == 2
+            first_texts, second_texts = [_request_texts(request) for request in requests]
+            assert "QUEUED_AFTER_FAILURE" in first_texts
+            assert "EXPLICIT_WAKE" not in first_texts
+            assert "EXPLICIT_WAKE" in second_texts
+        except BaseException:
+            # Closing the owned client wakes a blocked observer before its worker is joined.
+            runtime.harness.close()
+            raise
+        finally:
+            observer.close()
+    # Closing settles the real writer; this differs from the live logical log above.
+    assert _admission_projection(_read_events(runtime.logs)) == expected["persistedSession"]
+
+
+def test_failure_before_admission_reenters_queued_input_without_explicit_wake(tmp_path: Path) -> None:
+    patch = Path(__file__).parent / "fixtures/failure-before-admission.cordis.yml"
+    expected = _admission_expected()["beforeAdmission"]
+    with _runtime(tmp_path, [_Completion("QUEUED_OK")], capture_patch=patch) as runtime:
+        session = runtime.harness.start_session(_SESSION_ID)
+        observer = runtime.harness.client.subscribe_session_notifications(_SESSION_ID)
+        try:
+            result = runtime.call(session.run, "FAIL_BEFORE_ADMISSION")
+            assert isinstance(result, RunResult)
+            assert result.finish_reason == "error"
+            assert not result.final_response
+            assert runtime.call(_wait_admission_completions, observer.next, 1) == [2]
+            _wait_activity(runtime, session)
+            [request] = runtime.model.captured()
+            texts = _request_texts(request)
+            assert "QUEUED_AFTER_FAILURE" in texts
+            assert "FAIL_BEFORE_ADMISSION" not in texts
+        except BaseException:
+            runtime.harness.close()
+            raise
+        finally:
+            observer.close()
+    assert _admission_projection(_read_events(runtime.logs)) == expected["persistedSession"]
