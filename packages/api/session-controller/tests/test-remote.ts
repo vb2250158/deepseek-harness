@@ -11,7 +11,7 @@ import type {
 } from '@deepseek-ai/dsh-attachment'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionProjectionsValue } from '../src/types.ts'
-import {
+import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
@@ -189,6 +189,8 @@ export function testSessionPersistence(
         revision: SessionPersistenceRevision(`test:${header.id}:list`),
       })),
   }
+  adapted.readMetadata = SessionPersistence.prototype.readMetadata.bind(adapted)
+  adapted.listMetadata = SessionPersistence.prototype.listMetadata.bind(adapted)
   if (persistence.stat === undefined) {
     adapted.stat = async (
       sessionId: SessionId,

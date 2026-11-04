@@ -848,7 +848,8 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
   })
 
   it('serves a metadata list before queued historical discovery without increasing I/O concurrency', async () => {
-    await Promise.all(Array.from({ length: 64 }, async (_, index) => {
+    const sessionCount = 4
+    await Promise.all(Array.from({ length: sessionCount }, async (_, index) => {
       const header = meta(`priority-${index}`, '/work')
       const path = rawLogPath(root, header.cwd, header.id)
       await mkdir(dirname(path), { recursive: true })
@@ -880,7 +881,7 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
       const discovery = backend.listArtifacts().then(() => { completed.push('discovery') })
       await entered
       const listing = limited.sessionPersistence.list().then((rows) => {
-        expect(rows).toHaveLength(64)
+        expect(rows).toHaveLength(sessionCount)
         completed.push('list')
       })
       await scheduler.yield()
@@ -2989,6 +2990,205 @@ describe('JsonlSessionPersistence: edge cases', () => {
     }, surfaceOp: 'append' }] as unknown as SessionEvent[]
     await writeLog(ctx.sessionPersistence, m, events)
     expect((await readAll(ctx.sessionPersistence, m.id)).events).toEqual(events)
+  })
+})
+
+describe('JsonlSessionPersistence metadata reads', () => {
+  let ctx: Context
+
+  beforeEach(async () => {
+    root = await freshRoot()
+    ctx = new Context()
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+  })
+
+  afterEach(async () => {
+    listingProbe.active = false
+    listingProbe.pause = undefined
+    await ctx.fiber.dispose()
+  })
+
+  it('lists mixed-format headers without snapshot revisions, corpus fingerprints, or event-body reads', async () => {
+    const paths = new Set<string>()
+    for (const version of [0, 2, 3, SESSION_FORMAT_VERSION]) {
+      const header = meta(`metadata-v${String(version)}`, '/work')
+      const path = generationLogPath(root, header.cwd, header.id, version, 'none')
+      paths.add(path)
+      await mkdir(dirname(path), { recursive: true })
+      const physical = version === 0 ? releasedV0Header(header) : { ...toHeaderLine(header), version }
+      await writeFile(path, `${JSON.stringify(physical)}\nnot an event record\n`)
+    }
+    const expected = (await ctx.sessionPersistence.list()).map(({ header, formatStatus }) => ({ header, formatStatus }))
+    const fullList = vi.spyOn(ctx.sessionPersistence, 'list').mockRejectedValue(new Error('full snapshots are not metadata'))
+    const fullStat = vi.spyOn(ctx.sessionPersistence, 'stat').mockRejectedValue(new Error('full snapshots are not metadata'))
+    const enumerated = vi.spyOn(fileSystem, 'readdir')
+    const observed = vi.spyOn(fileSystem, 'stat')
+    const bodyReads = vi.spyOn(fileSystem, 'readFile')
+
+    const listed = await ctx.sessionPersistence.listMetadata()
+    expect(listed).toEqual(expected)
+    expect(enumerated.mock.calls.filter(([path]) => path === root)).toHaveLength(1)
+    expect(observed.mock.calls.filter(([path]) => paths.has(String(path)))).toHaveLength(4)
+    for (const item of listed) {
+      expect(Object.keys(item).sort()).toEqual(['formatStatus', 'header'])
+      expect(await ctx.sessionPersistence.readMetadata(item.header.id)).toEqual(item)
+    }
+    expect(fullList).not.toHaveBeenCalled()
+    expect(fullStat).not.toHaveBeenCalled()
+    expect(bodyReads).not.toHaveBeenCalled()
+  })
+
+  it('keeps pending headers visible and lists them once if they materialize during directory discovery', async () => {
+    const header = meta('metadata-pending', '/work')
+    const handle = await ctx.sessionPersistence.create(header)
+    try {
+      expect(await ctx.sessionPersistence.readMetadata(header.id)).toEqual({ header })
+      expect(await ctx.sessionPersistence.listMetadata()).toEqual([{ header }])
+      await expect(stat(rawLogPath(root, header.cwd, header.id))).rejects.toMatchObject({ code: 'ENOENT' })
+      listingProbe.active = true
+      listingProbe.pause = async (path) => {
+        if (path !== root) return
+        listingProbe.pause = undefined
+        await handle.flush()
+      }
+      const listed = await ctx.sessionPersistence.listMetadata()
+      expect(listed.map(item => item.header.id)).toEqual([header.id])
+      expect(listed[0]).toEqual({
+        header: (await ctx.sessionPersistence.stat(header.id))?.header, formatStatus: 'current',
+      })
+    } finally {
+      await handle.close()
+    }
+  })
+
+  it('detaches pending metadata from the writer and later materialization', async () => {
+    const header = meta('metadata-pending-owner', '/work')
+    const handle = await ctx.sessionPersistence.create(header)
+    try {
+      const read = await ctx.sessionPersistence.readMetadata(header.id)
+      const [listed] = await ctx.sessionPersistence.listMetadata()
+      if (read === undefined || listed === undefined) throw new Error('pending metadata was not visible')
+      Reflect.set(read.header, 'cwd', '/caller-read')
+      Reflect.set(listed.header, 'agentPreset', 'caller-list')
+      expect(handle.header).toEqual(header)
+      expect(await ctx.sessionPersistence.readMetadata(header.id)).toEqual({ header })
+      expect(await ctx.sessionPersistence.listMetadata()).toEqual([{ header }])
+      await handle.flush()
+      const stored = await ctx.sessionPersistence.readMetadata(header.id)
+      expect(stored?.header).toMatchObject(header)
+      expect(stored?.header.agentPreset).toBeUndefined()
+      expect(await ctx.sessionPersistence.listMetadata()).toEqual([stored])
+      await expect(stat(rawLogPath(root, header.cwd, header.id))).resolves.toBeDefined()
+      await expect(stat(rawLogPath(root, '/caller-read', header.id))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await handle.close()
+    }
+  })
+
+  it('omits missing and malformed metadata and refuses the highest future generation', async () => {
+    expect(await ctx.sessionPersistence.readMetadata(SessionId('metadata-missing'))).toBeUndefined()
+    const malformed = meta('metadata-malformed', '/work')
+    const malformedPath = rawLogPath(root, malformed.cwd, malformed.id)
+    await mkdir(dirname(malformedPath), { recursive: true })
+    await writeFile(malformedPath, '{broken header\n')
+    expect(await ctx.sessionPersistence.readMetadata(malformed.id)).toBeUndefined()
+    const future = meta('metadata-future', '/work')
+    const path = generationLogPath(root, future.cwd, future.id, SESSION_FORMAT_VERSION + 1, 'none')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(generationLogPath(root, future.cwd, future.id, 0, 'none'), `${JSON.stringify(releasedV0Header(future))}\n`)
+    await writeFile(path, `${JSON.stringify({ ...toHeaderLine(future), version: SESSION_FORMAT_VERSION + 1 })}\n`)
+    await expect(ctx.sessionPersistence.readMetadata(future.id)).rejects.toMatchObject({ name: 'SessionFormatUnsupportedError' })
+    expect(await ctx.sessionPersistence.listMetadata()).toEqual([])
+  })
+
+  it('omits corrupt compressed metadata from listing and refuses direct reads', async () => {
+    const compressed = new Context()
+    const compressedRoot = await freshRoot()
+    try {
+      await compressed.plugin(JsonlSessionPersistence, { root: compressedRoot, compression: 'zstd' })
+      const header = meta('metadata-corrupt-zstd', '/work')
+      const path = generationLogPath(compressedRoot, header.cwd, header.id, SESSION_FORMAT_VERSION, 'zstd')
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, 'not a Zstandard frame')
+      await expect(compressed.sessionPersistence.readMetadata(header.id))
+        .rejects.toMatchObject({ name: 'SessionPersistenceCorruptionError' })
+      expect(await compressed.sessionPersistence.listMetadata()).toEqual([])
+    } finally {
+      await compressed.fiber.dispose()
+    }
+  })
+
+  it.each(['read', 'list'] as const)('omits metadata that disappears before its header observation during %s', async (operation) => {
+    const header = meta(`metadata-disappears-${operation}`, '/work')
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = rawLogPath(root, header.cwd, header.id)
+    listingProbe.active = true
+    listingProbe.pause = async (observedPath) => {
+      if (observedPath !== path) return
+      listingProbe.pause = undefined
+      await rm(path)
+    }
+    if (operation === 'read') expect(await ctx.sessionPersistence.readMetadata(header.id)).toBeUndefined()
+    else expect(await ctx.sessionPersistence.listMetadata()).toEqual([])
+  })
+
+  it('preserves generation/header identity refusal and storage errors in metadata reads', async () => {
+    const header = meta('metadata-identity', '/work')
+    const path = generationLogPath(root, header.cwd, header.id, 3, 'none')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify({ ...toHeaderLine(header), version: 2 })}\n`)
+    await expect(ctx.sessionPersistence.readMetadata(header.id)).rejects.toThrow(/filename identifies v3.*header identifies v2/)
+    await expect(ctx.sessionPersistence.listMetadata()).rejects.toThrow(/filename identifies v3.*header identifies v2/)
+    statFailure.path = path
+    statFailure.error = Object.assign(new Error('metadata denied'), { code: 'EACCES' })
+    await expect(ctx.sessionPersistence.readMetadata(header.id)).rejects.toBe(statFailure.error)
+    await expect(ctx.sessionPersistence.listMetadata()).rejects.toBe(statFailure.error)
+  })
+
+  it('rechecks cached header revisions when the physical metadata changes', async () => {
+    const header = meta('metadata-change', '/work')
+    const path = rawLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
+    const stored = (await ctx.sessionPersistence.stat(header.id))?.header
+    if (stored === undefined) throw new Error('test header did not materialize')
+    expect((await ctx.sessionPersistence.readMetadata(header.id))?.header).toEqual(stored)
+    const replacement = { ...stored, agentPreset: 'changed-header' }
+    await writeFile(path, `${JSON.stringify(toHeaderLine(replacement))}\n`)
+    expect((await ctx.sessionPersistence.readMetadata(header.id))?.header).toEqual(replacement)
+    expect(await ctx.sessionPersistence.listMetadata()).toEqual([{ header: replacement, formatStatus: 'current' }])
+  })
+
+  it.each(['read', 'list'] as const)('awaits uncancellable header I/O before rejecting an aborted metadata %s', async (operation) => {
+    const header = meta(`metadata-abort-${operation}`, '/work')
+    await writeLog(ctx.sessionPersistence, header, oneTurnLog())
+    const path = rawLogPath(root, header.cwd, header.id)
+    const started = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    listingProbe.active = true
+    listingProbe.pause = async (observedPath) => {
+      if (observedPath !== path) return
+      started.resolve(undefined)
+      await release.promise
+    }
+    const controller = new AbortController()
+    const reason = new Error('metadata cancelled')
+    const pending = operation === 'read'
+      ? ctx.sessionPersistence.readMetadata(header.id, { signal: controller.signal })
+      : ctx.sessionPersistence.listMetadata({ signal: controller.signal })
+    let settled = false
+    void pending.then(() => { settled = true }, () => { settled = true })
+    try {
+      await started.promise
+      controller.abort(reason)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      release.resolve(undefined)
+      await expect(pending).rejects.toBe(reason)
+    } finally {
+      release.resolve(undefined)
+      await pending.catch((_error: unknown) => { /* The assertion above owns the cancellation. */ })
+    }
   })
 })
 

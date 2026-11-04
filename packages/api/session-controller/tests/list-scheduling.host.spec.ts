@@ -5,7 +5,7 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
+import { filterSessionResults, type SessionRecord, type SessionResultFilter } from '@deepseek-ai/dsh-session-query'
 import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -90,6 +90,10 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   const listSessions = vi.fn(async (_signal?: AbortSignal) => records)
   class ListingSource extends Service {
     readonly listSessions = listSessions
+    async filterSessions(filters: readonly SessionResultFilter[], signal?: AbortSignal): Promise<SessionRecord[]> {
+      signal?.throwIfAborted()
+      return filterSessionResults(records, filters)
+    }
     constructor(sourceCtx: Context) { super(sourceCtx, 'sessionQuery') }
   }
   let source = await ctx.plugin(ListingSource)
@@ -115,6 +119,24 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
 }
 
 describe('Session-list pages', () => {
+  it.each<Phase>(['live', 'cold'])('reads a %s target without waiting for or repeating the initial catalog scan', async (phase) => {
+    const h = await harness([{ id: 'current', phase }, { id: 'older', phase: 'cold' }], 0)
+    const records = await h.listSessions()
+    h.listSessions.mockClear()
+    const gate = Promise.withResolvers<undefined>()
+    h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
+    const page = h.list.page({ paged: true }, pagePolicy)
+    try {
+      const selected = await h.list.selected([SessionId('current')])
+      expect(h.listSessions).toHaveBeenCalledTimes(1)
+      expect(selected.map(row => row.sessionId)).toEqual(['current'])
+      expect(h.ctx.sessions.list()).toHaveLength(phase === 'live' ? 1 : 0)
+    } finally {
+      gate.resolve(undefined)
+      await page
+    }
+  })
+
   it('discards discovery and continuations when the query service is replaced', async () => {
     const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
@@ -204,6 +226,19 @@ describe('Session-list pages', () => {
     const selected = await h.list.selected([SessionId('a'), SessionId('b'), SessionId('missing')])
     expect(selected.map(row => row.sessionId)).toEqual(['b'])
     expect(h.ctx.sessions.list()).toEqual([])
+  })
+
+  it('rejects cancelled selected metadata before checking visibility or querying storage', async () => {
+    const h = await harness([{ id: 'hidden', phase: 'cold' }], 0)
+    const allows = vi.spyOn(h.ctx.remoteAccess, 'allows').mockReturnValue(false)
+    const query = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
+    const controller = new AbortController()
+    const reason = new Error('cancel selected metadata')
+    controller.abort(reason)
+    await expect(h.list.selected([SessionId('hidden')], controller.signal)).rejects.toBe(reason)
+    expect(allows).not.toHaveBeenCalled()
+    expect(query).not.toHaveBeenCalled()
+    expect(h.listSessions).not.toHaveBeenCalled()
   })
   it('filters restricted Sessions before paging and rechecks retained pages', async () => {
     const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)

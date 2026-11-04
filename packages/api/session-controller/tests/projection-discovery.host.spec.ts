@@ -71,6 +71,35 @@ async function harness(withPersistence = true) {
 
 type Harness = Awaited<ReturnType<typeof harness>>
 
+describe('exact metadata selections', () => {
+  it('reads only authorized current headers without listing or opening their logs', async () => {
+    const fixture = await harness()
+    const target = await stored(fixture, SessionId('selected-current'))
+    const denied = await stored(fixture, SessionId('selected-denied'))
+    vi.spyOn(fixture.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== denied.header.id)
+    const metadata = vi.spyOn(fixture.ctx.sessionPersistence, 'readMetadata')
+    const stat = vi.spyOn(fixture.ctx.sessionPersistence, 'stat').mockRejectedValue(new Error('must not compute a snapshot revision'))
+    const open = vi.spyOn(fixture.ctx.sessionPersistence, 'open').mockRejectedValue(new Error('must not open history'))
+    const rows = await fixture.controller.list({ sessionIds: [target.header.id, denied.header.id] }, new AbortController().signal)
+    expect(rows.items.map(row => row.sessionId)).toEqual([target.header.id])
+    expect(metadata.mock.calls.map(([id]) => id)).toEqual([target.header.id])
+    expect(stat).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+    expect(fixture.ctx.sessions.list()).toEqual([])
+  })
+
+  it('preserves omission of future headers while keeping valid targets', async () => {
+    const fixture = await harness()
+    const valid = await stored(fixture, SessionId('selected-valid'))
+    const future = await stored(fixture, SessionId('selected-future'), {}, SESSION_FORMAT_VERSION + 1)
+    const absent = await fixture.controller.list({ sessionIds: [future.header.id] }, new AbortController().signal)
+    const rows = await fixture.controller.list({ sessionIds: [valid.header.id] }, new AbortController().signal)
+    expect(absent.items).toEqual([])
+    expect(rows.items.map(row => row.sessionId)).toEqual([valid.header.id])
+    expect(await readFile(future.path, 'utf8')).toBe(future.bytes)
+  })
+})
+
 async function stored(
   fixture: Harness,
   id: SessionId,

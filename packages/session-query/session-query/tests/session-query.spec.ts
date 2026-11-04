@@ -7,6 +7,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { SessionEvent, SessionHeader, SessionId as SessionIdType } from '@deepseek-ai/dsh-session'
 import SessionPersistence, {
   SessionPersistenceCorruptionError,
+  SessionFormatUnsupportedError,
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
@@ -204,6 +205,259 @@ const cancellableSessionListings = [
     run: (ctx: Context, signal: AbortSignal) => ctx.sessionQuery.filterSessions([], signal),
   },
 ] as const
+
+describe('exact Session metadata', () => {
+  it('applies every id, workspace and availability clause after exact discovery', async () => {
+    TestPersistence.reset([
+      { meta: header('outside-second-id', 1, { cwd: '/allowed' }), events: [] },
+      { meta: header('included', 2, { cwd: '/allowed' }), events: [] },
+      { meta: header('outside-workspace', 3, { cwd: '/other' }), events: [] },
+    ])
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      ctx.sessions.create(SessionId('not-persisted'), { meta: { createdAt: 4, cwd: '/allowed' } })
+      const stat = vi.spyOn(ctx.sessionPersistence, 'stat')
+      const rows = await ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: ['outside-second-id', 'included', 'outside-workspace', 'not-persisted'].map(SessionId) },
+        { kind: 'id', values: [SessionId('included')] },
+        { kind: 'cwd', values: ['/allowed'] },
+        { kind: 'availability', values: ['persisted'] },
+      ])
+      expect(rows.map(row => row.header.id)).toEqual(['included'])
+      await expect(ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: [SessionId('outside-second-id'), SessionId('outside-workspace')] },
+        { kind: 'id', values: [SessionId('included')] },
+      ])).resolves.toEqual([])
+      await expect(ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: [SessionId('included')] }, { kind: 'cwd', values: ['/other'] },
+      ])).resolves.toEqual([])
+      await expect(ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: [SessionId('included')] }, { kind: 'availability', values: ['live'] },
+      ])).resolves.toEqual([])
+      expect(stat.mock.calls.map(([id]) => id)).toEqual(['included', 'included', 'included', 'included'])
+      expect(TestPersistence.listCalls).toBe(0)
+      expect(TestPersistence.readCalls).toEqual([])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('keeps multi-target discovery on one corpus listing without individual stats', async () => {
+    TestPersistence.reset([
+      { meta: header('older', 1), events: [] },
+      { meta: header('newer-b', 3), events: [] },
+      { meta: header('newer-a', 3), events: [] },
+      { meta: header('not-requested', 4), events: [] },
+    ])
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const stat = vi.spyOn(ctx.sessionPersistence, 'stat')
+      const rows = await ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: ['older', 'newer-b', 'newer-a', 'newer-b'].map(SessionId) },
+      ])
+      expect(rows.map(row => row.header.id)).toEqual(['newer-a', 'newer-b', 'older'])
+      expect(TestPersistence.listCalls).toBe(1)
+      expect(stat).not.toHaveBeenCalled()
+      expect(TestPersistence.readCalls).toEqual([])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('preserves an empty-id request pre-abort reason without metadata I/O', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const stat = vi.spyOn(ctx.sessionPersistence, 'stat')
+      const reason = new Error('empty metadata request already cancelled')
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [] }], AbortSignal.abort(reason))).rejects.toBe(reason)
+      expect(TestPersistence.listCalls).toBe(0)
+      expect(stat).not.toHaveBeenCalled()
+      expect(TestPersistence.readCalls).toEqual([])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('returns no records for conflicting singleton clauses without metadata I/O', async () => {
+    TestPersistence.reset([{ meta: header('first'), events: [] }, { meta: header('second'), events: [] }])
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const stat = vi.spyOn(ctx.sessionPersistence, 'stat')
+      await expect(ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: [SessionId('first'), SessionId('first')] },
+        { kind: 'id', values: [SessionId('second')] },
+      ])).resolves.toEqual([])
+      expect(TestPersistence.listCalls).toBe(0)
+      expect(stat).not.toHaveBeenCalled()
+      expect(TestPersistence.readCalls).toEqual([])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it.each([false, true])('rechecks a Session attached during stat and preserves header compatibility (conflict=%s)', async (conflict) => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    const started = Promise.withResolvers<undefined>()
+    const gate = Promise.withResolvers<undefined>()
+    try {
+      await ctx.plugin(TestPersistence)
+      const durable = header('attached-during-stat', 4, { cwd: '/same' })
+      vi.spyOn(ctx.sessionPersistence, 'stat').mockImplementation(async () => {
+        started.resolve(undefined)
+        await gate.promise
+        return { header: durable, revision: SessionPersistenceRevision('metadata') }
+      })
+      const pending = ctx.sessionQuery.filterSessions([{ kind: 'id', values: [durable.id] }])
+      await started.promise
+      const live = ctx.sessions.create(durable.id, { meta: { createdAt: conflict ? 5 : 4, cwd: '/same' } })
+      gate.resolve(undefined)
+      if (conflict) {
+        await expect(pending).rejects.toEqual(expectCode('SESSION_QUERY_SOURCE_CONFLICT'))
+      } else {
+        const rows = await pending
+        expect(rows).toEqual([{ header: live.header, live: true, persisted: true, formatStatus: 'current' }])
+        expect(rows[0]!.header).not.toBe(live.header)
+        expect(rows[0]!.header).not.toBe(durable)
+        Reflect.set(rows[0]!.header, 'createdAt', 99)
+        expect(live.header.createdAt).toBe(4)
+        expect(durable.createdAt).toBe(4)
+      }
+      expect(TestPersistence.listCalls).toBe(0)
+      expect(TestPersistence.readCalls).toEqual([])
+    } finally { gate.resolve(undefined); await ctx.fiber.dispose() }
+  })
+
+  it('uses the replacement persistence service for the next exact read', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      const first = await ctx.plugin(TestPersistence)
+      const firstIdentity = ctx.sessionPersistence.identity
+      const oldStat = vi.spyOn(ctx.sessionPersistence, 'stat').mockResolvedValue({
+        header: header('replacement-metadata', 1), revision: SessionPersistenceRevision('before'),
+      })
+      const read = () => ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId('replacement-metadata')] }])
+      expect((await read())[0]?.header.createdAt).toBe(1)
+      await first.dispose()
+      await ctx.plugin(TestPersistence)
+      expect(ctx.sessionPersistence.identity).not.toBe(firstIdentity)
+      const newStat = vi.spyOn(ctx.sessionPersistence, 'stat').mockResolvedValue({
+        header: header('replacement-metadata', 2), revision: SessionPersistenceRevision('after'),
+      })
+      expect((await read())[0]?.header.createdAt).toBe(2)
+      expect(oldStat).toHaveBeenCalledTimes(1)
+      expect(newStat).toHaveBeenCalledExactlyOnceWith(SessionId('replacement-metadata'), undefined)
+      expect(TestPersistence.listCalls).toBe(0)
+      expect(TestPersistence.readCalls).toEqual([])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('stats a duplicated singleton without reading unrelated headers or history', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      for (let i = 0; i < 1320; i++) {
+        const meta = header(`metadata-${i}`, i)
+        TestPersistence.entries.set(meta.id, { meta, events: eventLog() })
+      }
+      const stat = vi.spyOn(ctx.sessionPersistence, 'stat')
+      const ids = [SessionId('metadata-1319'), SessionId('metadata-1319')]
+      const rows = await ctx.sessionQuery.filterSessions([{ kind: 'id', values: ids }])
+      expect(rows.map(row => row.header.id)).toEqual(['metadata-1319'])
+      expect(stat.mock.calls.map(([id]) => id)).toEqual(['metadata-1319'])
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId('missing')] }])).resolves.toEqual([])
+      expect(TestPersistence.listCalls).toBe(0)
+      expect(TestPersistence.readCalls).toEqual([])
+      Reflect.set(rows[0]!.header, 'createdAt', 0)
+      expect(TestPersistence.entries.get(SessionId('metadata-1319'))?.meta.createdAt).toBe(1319)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('preserves live precedence, availability and conflicting-header refusal', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const live = ctx.sessions.create(SessionId('shared-metadata'), { meta: { createdAt: 4 } })
+      TestPersistence.entries.set(live.id, { meta: structuredClone(live.header), events: [] })
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [live.id] }])).resolves.toEqual([
+        { header: live.header, live: true, persisted: true, formatStatus: 'current' },
+      ])
+      TestPersistence.entries.get(live.id)!.meta = { ...live.header, createdAt: 9 }
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [live.id] }])).rejects.toEqual(expectCode('SESSION_QUERY_SOURCE_CONFLICT'))
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('keeps other targets when a header is corrupt or unsupported, and preserves format status', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      vi.spyOn(ctx.sessionPersistence, 'stat').mockImplementation(async (id) => {
+        if (id === 'future') throw new SessionFormatUnsupportedError('future metadata')
+        if (id === 'corrupt') throw new SessionPersistenceCorruptionError('invalid metadata', {})
+        return { header: header(id), revision: SessionPersistenceRevision('metadata'), formatStatus: 'migration-required' }
+      })
+      for (const id of ['future', 'corrupt']) {
+        await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId(id)] }])).resolves.toEqual([])
+      }
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId('valid')] }]))
+        .resolves.toEqual([{ header: header('valid'), live: false, persisted: true, formatStatus: 'migration-required' }])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('rejects a stat response belonging to another requested identity', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      vi.spyOn(ctx.sessionPersistence, 'stat').mockResolvedValue({
+        header: header('second'), revision: SessionPersistenceRevision('metadata'),
+      })
+      await expect(ctx.sessionQuery.filterSessions([
+        { kind: 'id', values: [SessionId('first'), SessionId('second')] }, { kind: 'id', values: [SessionId('first')] },
+      ]))
+        .rejects.toEqual(expectCode('SESSION_QUERY_SOURCE_CONFLICT'))
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('forwards cancellation and rejects after an uncooperative metadata read settles', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const started = Promise.withResolvers<undefined>()
+      const gate = Promise.withResolvers<undefined>()
+      const controller = new AbortController()
+      const reason = new Error('cancel metadata')
+      vi.spyOn(ctx.sessionPersistence, 'stat').mockImplementation(async (_id, options) => {
+        expect(options?.signal).toBe(controller.signal)
+        started.resolve(undefined)
+        await gate.promise
+        return undefined
+      })
+      const pending = ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId('metadata')] }], controller.signal)
+      await started.promise
+      controller.abort(reason)
+      gate.resolve(undefined)
+      await expect(pending).rejects.toBe(reason)
+      expect(TestPersistence.listCalls).toBe(0)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('preserves pre-abort and storage failures without treating them as missing targets', async () => {
+    TestPersistence.reset()
+    const ctx = await liveContext()
+    try {
+      await ctx.plugin(TestPersistence)
+      const stat = vi.spyOn(ctx.sessionPersistence, 'stat')
+      const reason = new Error('already cancelled')
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId('metadata')] }], AbortSignal.abort(reason))).rejects.toBe(reason)
+      expect(stat).not.toHaveBeenCalled()
+      stat.mockRejectedValue(new Error('storage offline'))
+      await expect(ctx.sessionQuery.filterSessions([{ kind: 'id', values: [SessionId('metadata')] }])).rejects.toEqual(expectCode('SESSION_QUERY_PERSISTENCE_FAILED'))
+    } finally { await ctx.fiber.dispose() }
+  })
+})
 
 interface CancellableExactRead {
   readonly name: 'traceSession' | 'traceEvent' | 'readEvent'

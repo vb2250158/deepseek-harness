@@ -96,6 +96,8 @@ Historical body preparation completes the parent catalog through [V3→V4](../se
 
 Header scans retain validated headers only while their selected file revision is unchanged. Generation selections are reused while the containing directory's device, inode, size, modification time, and change time match; changed directories are re-enumerated, and selections from disappeared directories are evicted. File revisions and storage identity are still checked on every header-cache hit, and returned metadata is detached. Changed, removed, malformed, or newly superseded files cannot reuse a previous header. Historical child-membership validation avoids repeated first-frame reads and unchanged directory enumerations; revision checks remain proportional to the corpus.
 
+`readMetadata(id)` and `listMetadata()` return selected headers and format classifications without computing snapshot revisions, sizes, or historical corpus fingerprints. They reuse the same validated header reader and pending-Session visibility; physical header and directory revisions are still checked. Revision consumers continue to use `stat` and `list`.
+
 Historical `stat` and `list` revisions require metadata work proportional to the root’s Session count. Fresh body preparation scans all selected headers and decodes direct-child bodies; memo reuse still scans membership and checks revisions. Read-only access never publishes an upgrade, so cold processes and evicted preparations repeat that work. Current V4 body reads and revisions avoid the historical corpus scan. See the [measured costs and diagnostic command](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md#catalog-scan-measurements).
 
 -----

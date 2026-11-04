@@ -289,7 +289,26 @@ export abstract class SessionQueryEngine extends Service {
     filters: readonly SessionResultFilter[],
     signal?: AbortSignal,
   ): Promise<SessionRecord[]> {
-    return filterSessionResults(await this._corpus.listSessions(signal), filters)
+    signal?.throwIfAborted()
+    let target: SessionId | undefined
+    for (const filter of filters) {
+      if (filter.kind !== 'id') continue
+      const ids = new Set(filter.values)
+      if (ids.size === 0) return []
+      if (ids.size === 1) {
+        for (const id of ids) {
+          if (target !== undefined && target !== id) return []
+          target = id
+        }
+      }
+    }
+    let records: SessionRecord[]
+    if (target === undefined) records = await this._corpus.listSessions(signal)
+    else {
+      const record = await this._corpus.readSessionRecord(target, signal)
+      records = record === undefined ? [] : [record]
+    }
+    return filterSessionResults(records, filters)
   }
 
   private async _filterEvents(

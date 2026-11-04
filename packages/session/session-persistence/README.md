@@ -35,16 +35,20 @@ The seam ships the [JSONL](../session-persistence-jsonl/README.md) backend: one 
 
 Snapshots may include `modifiedAt`, the physical artifact modification time in Unix epoch milliseconds. It is absent for unmaterialized sessions or backends without cheap file metadata; it is neither an event timestamp nor a revision token.
 
-With a backend mounted, five service methods address stored sessions:
+With a backend mounted, service methods address stored sessions:
 
 ```text
 const handle = await ctx.sessionPersistence.create(header)     // store a new session, take write ownership
 const handle = await ctx.sessionPersistence.open(id, 'write')  // claim single-writer ownership of an existing session
 const reader = await ctx.sessionPersistence.open(id, 'read')   // observe without ownership
+const metadata = await ctx.sessionPersistence.readMetadata(id) // header + optional formatStatus, without a log read
+const headers = await ctx.sessionPersistence.listMetadata()    // metadata per visible stored session, without revisions
 const snap = await ctx.sessionPersistence.stat(id)             // header + revision (+ eventCount / sizeBytes / modifiedAt) without a log read
 const all = await ctx.sessionPersistence.list()                // one snapshot per visible stored session
 await ctx.sessionPersistence.flush()                           // backend-wide durability barrier over every active write handle
 ```
+
+`readMetadata` and `listMetadata` return only `header` and optional `formatStatus`, without event logs, ownership, revisions, or physical artifact details. Use them for catalog and metadata filtering; retain `stat` and `list` when a consumer compares revisions or reads artifact metadata. The service's concrete defaults project the existing snapshots. Backends can override these methods to avoid computing unused revision information while preserving header visibility, cancellation, and error behavior.
 
 Service-level `flush()` drains every active write handle's routed events and materializes its session, exactly as each handle's own `flush` would; failures aggregate per session as an `AggregateError` without abandoning the sweep, and a handle closed mid-sweep counts as flushed because close itself drains durably.
 

@@ -2746,7 +2746,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'modelCatalog\') modelCatalog(): Promise<ModelCatalog>',
-        description: 'Describe every currently routable model for Host-generation selectors.',
+        description: 'Describe currently routable models, sharing only concurrent reads with the same default.',
         parameters: [],
         returns: 'provider-grouped models, the deployment default, and isolated provider failures.',
       },
@@ -2937,6 +2937,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
         returns: 'resolution once every write handle active at the call has flushed.',
         throws: ['{AggregateError} naming each session whose flush failed; the remaining handles still flush.'],
+      },
+      {
+        signature: 'async readMetadata(id: SessionId, options?: SessionPersistenceStatOptions): Promise<SessionPersistenceMetadata | undefined>',
+        description: 'Read one stored header without opening its event log or taking ownership. Backends may override this snapshot projection to avoid revision work.',
+        parameters: [{ name: 'id', description: 'the stored session to observe.' }, { name: 'options', description: 'optional cancellation forwarded to the backend.' }],
+        returns: 'detached metadata, or undefined when the session does not exist.',
+      },
+      {
+        signature: 'async listMetadata(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceMetadata[]>',
+        description: 'List stored headers without opening event logs or taking ownership. Backends may override this snapshot projection to avoid revision work.',
+        parameters: [{ name: 'options', description: 'optional cancellation forwarded to the backend.' }],
+        returns: 'one detached metadata value per stored session, in no promised order.',
       },
       {
         signature: 'abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<SessionPersistenceSnapshot | undefined>',
@@ -8657,6 +8669,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionPersistenceListOptions',
     declaration: 'export interface SessionPersistenceListOptions {\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'SessionPersistenceMetadata',
+    declaration: 'export type SessionPersistenceMetadata = Pick<SessionPersistenceSnapshot, \'header\' | \'formatStatus\'>;',
   },
   {
     name: 'SessionPersistenceOpenOptions',

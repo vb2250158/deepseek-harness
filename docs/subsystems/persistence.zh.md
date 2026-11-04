@@ -337,7 +337,12 @@ interface SessionPersistenceSnapshot {
 }
 ```
 
-可选的 `eventCount`/`sizeBytes` 字段仍是供明确需要它们的 consumer 使用的低成本 backend observation。Session 列表不借助这两个字段打开冷日志，只读取 header 与经过 identity 校验的 projection cache hint，因此 cache 或 Session format 升级不会把启动变成 body scan。
+```ts type-equiv
+/** Header-only observation without a log revision or physical artifact details. */
+type SessionPersistenceMetadata = Pick<SessionPersistenceSnapshot, 'header' | 'formatStatus'>
+```
+
+目录展示与 header 筛选通过 `readMetadata`/`listMetadata` 读取 `SessionPersistenceMetadata`；依赖修订值的读取方仍使用 `stat`/`list`。快照中可选的 `eventCount`/`sizeBytes` 字段仍是供有需要的消费方使用的后端观测值。会话列表读取 header 与经过身份校验的投影缓存提示，不打开冷日志。
 
 ## 后端
 
@@ -402,6 +407,23 @@ abstract open(id: SessionId, access: SessionAccess, options?: SessionPersistence
  *   remaining handles still flush.
  */
 abstract flush(): Promise<void>
+
+/**
+ * Read one stored header without opening its event log or taking ownership.
+ * Backends may override this snapshot projection to avoid revision work.
+ * @param id - the stored session to observe.
+ * @param options - optional cancellation forwarded to the backend.
+ * @returns detached metadata, or undefined when the session does not exist.
+ */
+async readMetadata(id: SessionId, options?: SessionPersistenceStatOptions): Promise<SessionPersistenceMetadata | undefined>
+
+/**
+ * List stored headers without opening event logs or taking ownership.
+ * Backends may override this snapshot projection to avoid revision work.
+ * @param options - optional cancellation forwarded to the backend.
+ * @returns one detached metadata value per stored session, in no promised order.
+ */
+async listMetadata(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceMetadata[]>
 
 /**
  * Observe one stored session without reading its event log or taking

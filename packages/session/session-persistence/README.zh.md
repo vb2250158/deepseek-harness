@@ -35,16 +35,20 @@ seam 随产品交付 [JSONL](../session-persistence-jsonl/README.zh.md) 后端�
 
 ### 服务提供什么
 
-挂载后端后，五个服务方法寻址已存储会话：
+挂载后端后，服务方法寻址已存储会话：
 
 ```text
 const handle = await ctx.sessionPersistence.create(header)     // store a new session, take write ownership
 const handle = await ctx.sessionPersistence.open(id, 'write')  // claim single-writer ownership of an existing session
 const reader = await ctx.sessionPersistence.open(id, 'read')   // observe without ownership
+const metadata = await ctx.sessionPersistence.readMetadata(id) // header + optional formatStatus, without a log read
+const headers = await ctx.sessionPersistence.listMetadata()    // metadata per visible stored session, without revisions
 const snap = await ctx.sessionPersistence.stat(id)             // header + revision (+ eventCount / sizeBytes / modifiedAt) without a log read
 const all = await ctx.sessionPersistence.list()                // one snapshot per visible stored session
 await ctx.sessionPersistence.flush()                           // backend-wide durability barrier over every active write handle
 ```
+
+`readMetadata` 与 `listMetadata` 只返回 `header` 和可选的 `formatStatus`，不返回事件日志、所有权、修订值或物理文件信息。目录展示和元数据筛选使用这两个方法；比较修订值或读取文件信息的消费方仍使用 `stat` 与 `list`。服务的具体默认实现从现有快照投影这些字段。后端可以覆盖这两个方法，省去未被使用的修订信息计算，同时保持 header 可见性、取消与错误行为。
 
 服务级 `flush()` 排空每个活跃写句柄已路由的事件并把其会话实体化，效果与各句柄自己的 `flush` 完全相同；失败按会话聚合为一个 `AggregateError` 而不中途放弃清扫，清扫途中被关闭的句柄视同已 flush，因为 close 本身会持久排空。
 

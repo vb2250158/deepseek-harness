@@ -910,7 +910,7 @@ inspect( sessionId: SessionId, signal?: AbortSignal, ): Promise<SessionInspectio
 @Remote async initializeDefaultModel(): Promise<void>
 
 /**
- * Describe every currently routable model for Host-generation selectors.
+ * Describe currently routable models, sharing only concurrent reads with the same default.
  * @returns provider-grouped models, the deployment default, and isolated provider failures.
  */
 @Remote('modelCatalog') modelCatalog(): Promise<ModelCatalog>

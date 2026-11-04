@@ -29,7 +29,7 @@ import {
   type SessionHandleReadResult,
   type SessionLocation, type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
-  type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
+  type SessionPersistenceMetadata, type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
@@ -581,6 +581,49 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     signal?.throwIfAborted()
     return snapshots
+  }
+
+  /**
+   * Read one selected header without building a revision-bearing snapshot.
+   * @param id - stored Session identity.
+   * @param options - cancellation for header discovery.
+   * @returns header metadata, or undefined when the selected artifact has no readable header.
+   */
+  override async readMetadata(
+    id: SessionId,
+    options?: SessionPersistenceStatOptions,
+  ): Promise<SessionPersistenceMetadata | undefined> {
+    options?.signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    options?.signal?.throwIfAborted()
+    const pending = this.tracker.pendingOf(id)
+    if (pending !== undefined) return { header: { ...pending.header } }
+    const selected = await this.findLog(id, options?.signal)
+    if (selected === undefined) return undefined
+    return this.readGenerationHeader(selected, id, options?.signal)
+  }
+
+  /**
+   * List selected headers without final snapshot stats or historical corpus fingerprints.
+   * @param options - cancellation for directory and header discovery.
+   * @returns one header observation per visible Session, in no promised order.
+   */
+  override async listMetadata(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceMetadata[]> {
+    const signal = options?.signal
+    signal?.throwIfAborted()
+    const pending = [...this.tracker.pendingEntries()]
+    const artifacts = await this.listArtifacts(signal, LIST_METADATA_PRIORITY)
+    const listed = new Set<SessionId>()
+    const metadata: SessionPersistenceMetadata[] = []
+    for (const artifact of artifacts) {
+      listed.add(artifact.header.id)
+      metadata.push({ header: artifact.header, formatStatus: artifact.formatStatus })
+    }
+    for (const [id, entry] of pending) {
+      if (!listed.has(id)) metadata.push({ header: { ...entry.header } })
+    }
+    signal?.throwIfAborted()
+    return metadata
   }
 
   // --- handle-facing storage internals (package-private via the handle class below) ---

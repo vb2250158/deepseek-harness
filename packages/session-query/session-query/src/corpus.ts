@@ -3,7 +3,8 @@
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type { Session, SessionEvent, SessionHeader, SessionId , SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
-import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistenceMetadata } from '@deepseek-ai/dsh-session-persistence'
+import { SessionFormatUnsupportedError, SessionPersistenceCorruptionError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionRecord } from './types.ts'
 import { SessionQueryError } from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'
@@ -62,7 +63,7 @@ export class SessionCorpus {
   async listSessions(signal?: AbortSignal): Promise<SessionRecord[]> {
     signal?.throwIfAborted()
     const persistence = this._persistence
-    const persisted = persistence === undefined ? [] : await listPersisted(persistence, signal)
+    const persisted = persistence === undefined ? [] : await listPersistedMetadata(persistence, signal)
     signal?.throwIfAborted()
     const records = new Map<SessionId, SessionRecord>()
     for (const { header, formatStatus } of persisted) {
@@ -87,6 +88,50 @@ export class SessionCorpus {
   }
 
   /**
+   * Read one exact metadata target without listing the logical corpus or opening event logs.
+   * @param sessionId - logical identity to observe.
+   * @param signal - cancellation forwarded to the persistence metadata read.
+   * @returns a cloned live-preferred record, or undefined when no readable target exists.
+   */
+  async readSessionRecord(sessionId: SessionId, signal?: AbortSignal): Promise<SessionRecord | undefined> {
+    signal?.throwIfAborted()
+    const persistence = this._persistence
+    let persisted: SessionPersistenceMetadata | undefined
+    if (persistence !== undefined) {
+      try {
+        persisted = await persistence.readMetadata(sessionId, signal === undefined ? undefined : { signal })
+      } catch (error: unknown) {
+        signal?.throwIfAborted()
+        // Metadata listings omit unreadable headers; preserve that behavior for exact selections.
+        if (!(error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError)) {
+          throw new SessionQueryError(
+            `session persistence metadata read failed: ${errorMessage(error)}`,
+            'SESSION_QUERY_PERSISTENCE_FAILED',
+            { cause: error },
+          )
+        }
+      }
+    }
+    signal?.throwIfAborted()
+    if (persisted !== undefined && persisted.header.id !== sessionId) {
+      throw new SessionQueryError(
+        `session source headers conflict for session "${sessionId}"`,
+        'SESSION_QUERY_SOURCE_CONFLICT',
+      )
+    }
+    const live = this._ctx.sessions.get(sessionId)
+    if (live !== undefined) {
+      if (persisted !== undefined) assertSessionHeadersCompatible(live.header, persisted.header)
+      return { header: structuredClone(live.header), live: true,
+        persisted: persisted !== undefined, formatStatus: 'current' }
+    } else if (persisted !== undefined) {
+      return { header: structuredClone(persisted.header), live: false, persisted: true,
+        ...(persisted.formatStatus === undefined ? {} : { formatStatus: persisted.formatStatus }) }
+    }
+    return undefined
+  }
+
+  /**
    * Load one logical source, preferring a detached live snapshot.
    *
    * A known live target never consults persistence, so an optional backend's
@@ -105,7 +150,7 @@ export class SessionCorpus {
     }
     const persistence = this._persistence
     if (persistence === undefined) throw notFound(sessionId)
-    const listed = (await listPersisted(persistence, signal)).find(snapshot => snapshot.header.id === sessionId)
+    const listed = (await listPersistedMetadata(persistence, signal)).find(snapshot => snapshot.header.id === sessionId)
     signal?.throwIfAborted()
     if (listed === undefined) throw notFound(sessionId)
     const loaded = await inspectPersisted(persistence, sessionId, signal)
@@ -163,9 +208,9 @@ export class SessionCorpus {
       return orderedResults(ids, resolved)
     }
 
-    let persisted: readonly SessionPersistenceSnapshot[]
+    let persisted: readonly SessionPersistenceMetadata[]
     try {
-      persisted = await listPersisted(persistence, signal)
+      persisted = await listPersistedMetadata(persistence, signal)
       signal?.throwIfAborted()
     } catch (error: unknown) {
       if (signal?.aborted) signal.throwIfAborted()
@@ -261,12 +306,12 @@ function orderedResults<Value>(
   return ids.map(sessionId => resolved.get(sessionId) as LogicalProjectionResult<Value>)
 }
 
-async function listPersisted(
+async function listPersistedMetadata(
   persistence: SessionPersistence,
   signal?: AbortSignal,
-): Promise<readonly SessionPersistenceSnapshot[]> {
+): Promise<readonly SessionPersistenceMetadata[]> {
   try {
-    return await persistence.list(signal === undefined ? undefined : { signal })
+    return await persistence.listMetadata(signal === undefined ? undefined : { signal })
   } catch (error: unknown) {
     if (signal?.aborted) signal.throwIfAborted()
     throw new SessionQueryError(

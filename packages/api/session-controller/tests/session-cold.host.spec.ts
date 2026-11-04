@@ -20,7 +20,7 @@ import type { Agent, Inbox } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import AttachmentStore from '@deepseek-ai/dsh-attachment'
 import type { SessionPromptRequest, SessionRequestId } from '../src/types.ts'
-import {
+import SessionPersistence, {
   SessionPersistenceRevision,
   type SessionPersistenceSnapshot,
   type SessionHandle, SessionAccess,
@@ -98,7 +98,11 @@ describe('sessions.list cold merge', () => {
       const list = vi.fn(async () => snapshots)
       const stat = vi.fn()
       const open = vi.fn()
-      ctx.provide('sessionPersistence', { list, stat, open } as never)
+      const persistence = { list, stat, open }
+      ctx.provide('sessionPersistence', {
+        ...persistence,
+        listMetadata: SessionPersistence.prototype.listMetadata.bind(persistence),
+      } as never)
       const remote = await createSessionTestRemote(ctx, {
         defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
         cwd: '/tmp',

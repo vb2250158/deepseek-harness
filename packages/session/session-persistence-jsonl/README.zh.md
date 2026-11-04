@@ -96,6 +96,8 @@ kind: "package-reference"
 
 Header 扫描仅在所选文件修订不变时复用已验证的 header。目录的设备、inode、大小、修改时间和变更时间均一致时复用 generation 选择；目录变化时重新枚举，目录消失后淘汰其选择缓存。每次命中 header 缓存仍检查文件修订和存储身份，并返回独立的元数据对象。变更、删除、损坏或被新 generation 取代的文件不能复用旧 header。历史子成员校验因此减少重复首帧读取和未变目录的枚举；修订检查仍与会话总数成正比。
 
+`readMetadata(id)` 与 `listMetadata()` 返回所选 header 和格式分类，不计算快照修订号、大小或历史全库指纹。它们复用同一已验证的 header 读取与待落盘 Session 可见性，仍检查实际 header 和目录修订。依赖修订号的消费者继续使用 `stat` 与 `list`。
+
 历史格式的 `stat` 与 `list` 修订号需要与根目录 Session 数量成正比的元数据工作。首次正文准备扫描所有所选 header 并解码直属子正文；复用准备缓存仍扫描成员集合并检查修订。只读访问从不发布升级，因此冷进程与被淘汰的准备缓存会重复这些工作。当前 V4 正文读取和修订号避开历史全库扫描。见[实测成本与诊断命令](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md#catalog-scan-measurements)。
 
 -----

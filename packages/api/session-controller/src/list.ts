@@ -276,12 +276,13 @@ export class ApiSessionList {
    * @returns matching visible summaries, omitting missing or inaccessible identities.
    */
   async selected(sessionIds: readonly SessionId[], signal?: AbortSignal): Promise<SessionSummary[]> {
-    const requested = new Set(sessionIds)
+    signal?.throwIfAborted()
+    const requested = new Set(sessionIds.filter(id => this.ctx.remoteAccess.allows({ kind: 'session', id })))
     if (requested.size === 0) return []
     const cached = this.discovery
     const records = cached !== undefined && cached.expiresAt > performance.now()
       && sessionIds.every(id => cached.records.some(record => record.header.id === id))
-      ? cached.records : await this.ctx.sessionQuery.listSessions(signal)
+      ? cached.records : await this.ctx.sessionQuery.filterSessions([{ kind: 'id', values: [...requested] }], signal)
     const items: SessionSummary[] = []
     for (const record of records) {
       signal?.throwIfAborted()

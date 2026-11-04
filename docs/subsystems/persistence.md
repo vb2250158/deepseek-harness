@@ -337,7 +337,12 @@ interface SessionPersistenceSnapshot {
 }
 ```
 
-The optional `eventCount`/`sizeBytes` fields remain cheap backend observations for consumers that explicitly need them. Session listing does not use either field to open cold logs: it reads headers plus identity-checked projection-cache hints only, so a cache or Session-format upgrade never turns startup into a body scan.
+```ts type-equiv
+/** Header-only observation without a log revision or physical artifact details. */
+type SessionPersistenceMetadata = Pick<SessionPersistenceSnapshot, 'header' | 'formatStatus'>
+```
+
+Catalog and header-filtering consumers use `readMetadata`/`listMetadata` for `SessionPersistenceMetadata`; revision-based readers retain `stat`/`list`. The optional snapshot `eventCount`/`sizeBytes` fields remain backend observations for consumers that need them. Session listing reads headers plus identity-checked projection-cache hints without opening cold logs.
 
 ## The backend
 
@@ -402,6 +407,23 @@ abstract open(id: SessionId, access: SessionAccess, options?: SessionPersistence
  *   remaining handles still flush.
  */
 abstract flush(): Promise<void>
+
+/**
+ * Read one stored header without opening its event log or taking ownership.
+ * Backends may override this snapshot projection to avoid revision work.
+ * @param id - the stored session to observe.
+ * @param options - optional cancellation forwarded to the backend.
+ * @returns detached metadata, or undefined when the session does not exist.
+ */
+async readMetadata(id: SessionId, options?: SessionPersistenceStatOptions): Promise<SessionPersistenceMetadata | undefined>
+
+/**
+ * List stored headers without opening event logs or taking ownership.
+ * Backends may override this snapshot projection to avoid revision work.
+ * @param options - optional cancellation forwarded to the backend.
+ * @returns one detached metadata value per stored session, in no promised order.
+ */
+async listMetadata(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceMetadata[]>
 
 /**
  * Observe one stored session without reading its event log or taking

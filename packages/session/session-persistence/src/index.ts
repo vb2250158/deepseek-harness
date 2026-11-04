@@ -72,6 +72,9 @@ export interface SessionPersistenceSnapshot {
   readonly location?: SessionLocation
 }
 
+/** Header-only observation without a log revision or physical artifact details. */
+export type SessionPersistenceMetadata = Pick<SessionPersistenceSnapshot, 'header' | 'formatStatus'>
+
 /** Options for {@link SessionPersistence.create}. */
 export interface SessionPersistenceCreateOptions {
   /** Optional cancellation observed before backend work starts. */
@@ -190,6 +193,34 @@ export abstract class SessionPersistence extends Service {
    *   remaining handles still flush.
    */
   abstract flush(): Promise<void>
+
+  /**
+   * Read one stored header without opening its event log or taking ownership.
+   * Backends may override this snapshot projection to avoid revision work.
+   * @param id - the stored session to observe.
+   * @param options - optional cancellation forwarded to the backend.
+   * @returns detached metadata, or undefined when the session does not exist.
+   */
+  async readMetadata(id: SessionId, options?: SessionPersistenceStatOptions): Promise<SessionPersistenceMetadata | undefined> {
+    const snapshot = await this.stat(id, options)
+    return snapshot === undefined ? undefined : {
+      header: snapshot.header,
+      ...(snapshot.formatStatus === undefined ? {} : { formatStatus: snapshot.formatStatus }),
+    }
+  }
+
+  /**
+   * List stored headers without opening event logs or taking ownership.
+   * Backends may override this snapshot projection to avoid revision work.
+   * @param options - optional cancellation forwarded to the backend.
+   * @returns one detached metadata value per stored session, in no promised order.
+   */
+  async listMetadata(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceMetadata[]> {
+    return (await this.list(options)).map(({ header, formatStatus }) => ({
+      header,
+      ...(formatStatus === undefined ? {} : { formatStatus }),
+    }))
+  }
 
   /**
    * Observe one stored session without reading its event log or taking

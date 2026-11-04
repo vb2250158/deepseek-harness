@@ -18,6 +18,7 @@ import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { agentPresetProjectionDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import SessionPersistence from '@deepseek-ai/dsh-session-persistence'
 import type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
@@ -618,8 +619,10 @@ describe('session.list projections column', () => {
       const header = session.header
       await owner.dispose()
       expect(ctx.sessions.get(id)).toBeUndefined()
+      const persistence = { list: async () => [{ header, revision: 'test:cold-host-state:1' }] }
       ctx.provide('sessionPersistence', {
-        list: async () => [{ header, revision: 'test:cold-host-state:1' }],
+        ...persistence,
+        listMetadata: SessionPersistence.prototype.listMetadata.bind(persistence),
       } as never)
 
       const response = await gateway.list(request({}))
