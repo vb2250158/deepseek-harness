@@ -46,6 +46,8 @@ Build the same upstream revision on each computer before installing external plu
 
 ## Community and support
 
+This maintenance fork validates the source Web target declared in [tested-environment.json](tested-environment.json), which lists the host, operating system, Node, package-manager versions, and the separately observed production version. It does not maintain a backward-version or cross-platform test matrix. See the [fork testing policy](docs/testing.md); reports and community pull requests for other environments are reviewed as concrete cases.
+
 - Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
 - Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
 - Join <a href="https://discord.gg/4MrtZUhpxg">DeepSeek Harness Discord community</a>.

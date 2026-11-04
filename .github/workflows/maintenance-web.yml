@@ -1,0 +1,85 @@
+name: Maintained Web environment
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    if: github.repository != 'deepseek-ai/deepseek-harness'
+    name: Declared Windows Web environment
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+      NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the declared test target
+        id: target
+        run: |
+          $target = Get-Content tested-environment.json -Raw | ConvertFrom-Json
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($target.host.version -ne $package.version) { throw 'Update the declared host version with package.json' }
+          if (-not $target.scope.onlyDeclaredTarget -or $target.scope.compatibilityMatrix) { throw 'This workflow verifies one declared environment' }
+          if ($target.runtime.platform -ne 'win32' -or $target.runtime.arch -ne 'x64' -or $target.host.profile -ne 'web') { throw 'This runner is the Windows x64 Web target' }
+          "node=$($target.runtime.node)" >> $env:GITHUB_OUTPUT
+          "pnpm=$($target.runtime.pnpm)" >> $env:GITHUB_OUTPUT
+          "npm=$($target.runtime.npm)" >> $env:GITHUB_OUTPUT
+          "Host version: $($target.host.version)" >> $env:GITHUB_STEP_SUMMARY
+          "Source commit: $env:GITHUB_SHA" >> $env:GITHUB_STEP_SUMMARY
+          "CI image: windows-2025 (the local reference machine is listed separately in tested-environment.json)" >> $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ steps.target.outputs.node }}
+
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: ${{ steps.target.outputs.pnpm }}
+          run_install: false
+          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Select the declared npm version
+        run: npm install --global npm@${{ steps.target.outputs.npm }} --no-fund --no-audit
+
+      - name: Verify the selected runtime versions
+        run: |
+          $target = Get-Content tested-environment.json -Raw | ConvertFrom-Json
+          if ((node --version).TrimStart('v').Trim() -ne $target.runtime.node) { throw 'Node does not match tested-environment.json' }
+          if ((pnpm --version).Trim() -ne $target.runtime.pnpm) { throw 'pnpm does not match tested-environment.json' }
+          if ((npm --version).Trim() -ne $target.runtime.npm) { throw 'npm does not match tested-environment.json' }
+          "Node: $($target.runtime.node); pnpm: $($target.runtime.pnpm); npm: $($target.runtime.npm)" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Install the current source dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build current JavaScript and Web assets
+        run: pnpm run build:artifacts --profile official
+
+      - name: Check the current source types
+        run: pnpm run build:check
+
+      - name: Check the current source style
+        run: pnpm run lint:contracts-ready
+
+      - name: Check current profile resolution
+        run: pnpm exec vitest run packages/boot/app-boot/tests/profile-resolution.spec.ts
+
+      - name: Start and stop the current Web profile
+        run: pnpm run test:expected apps/cli/tests/profiles/web/tests/web-default-isolation.expected.e2e.ts apps/cli/tests/profiles/web/tests/web-best-effort-startup.expected.e2e.ts

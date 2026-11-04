@@ -2,7 +2,7 @@
 
 English | [中文](testing.zh.md)
 
-Test tiers and the rules for meaningful results. Commands live in root [AGENTS.md](../AGENTS.md); linked Agent Notes carry the rationale.
+This maintenance fork validates only [tested-environment.json](../tested-environment.json). Tiers below describe upstream options; [maintenance policy](../.agents/skills/dsh-maintenance/SKILL.md#固定环境测试标准) defines the current Web target and community review.
 
 ## Tiers
 

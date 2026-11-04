@@ -2,7 +2,7 @@
 
 [English](testing.md) | 中文
 
-本文说明测试层级及保持测试结果有意义的规则。命令见根目录 [AGENTS.md](../AGENTS.md)；相关 Agent Note 承载设计动机。
+本维护 fork 只验证 [tested-environment.json](../tested-environment.json) 声明的环境。下文层级说明上游可用检查；[维护策略](../.agents/skills/dsh-maintenance/SKILL.md#固定环境测试标准)规定当前 Web 目标与社区反馈的评审方式。
 
 ## 层级
 

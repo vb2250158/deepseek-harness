@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "checkedOn": "2026-11-04",
+  "host": {
+    "version": "0.2.2-alpha.3",
+    "repository": "https://github.com/vb2250158/deepseek-harness",
+    "source": "repository checkout under test",
+    "revisionEvidence": "Git commit recorded by the verification run",
+    "profile": "web",
+    "entry": "pnpm dsh web"
+  },
+  "runtime": {
+    "platform": "win32",
+    "arch": "x64",
+    "referenceWindowsVersion": "10.0.22631",
+    "node": "24.15.0",
+    "nodeAbi": "137",
+    "pnpm": "11.28.5",
+    "npm": "11.12.1"
+  },
+  "scope": {
+    "onlyDeclaredTarget": true,
+    "compatibilityMatrix": false,
+    "products": ["source-web"],
+    "otherEnvironments": "Review concrete community reports and pull requests when received"
+  },
+  "ci": {
+    "runner": "windows-2025",
+    "hostRevision": "current checkout commit reported in the workflow summary",
+    "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
+  },
+  "candidateVerification": {
+    "sourceWeb": "passed",
+    "pluginCombination": {
+      "ds-bot": "0.2.7-rabi.1",
+      "dsh-pet": "0.4.1-fork.4"
+    },
+    "coverage": ["isolated startup", "HTTP and authentication", "plugin loading", "session creation and history", "served artifact bytes", "normal shutdown"],
+    "productionInstalled": false
+  },
+  "productionAtLastVerification": {
+    "hostVersion": "0.2.2-alpha.2",
+    "profile": "web",
+    "mode": "source",
+    "pluginVersions": {
+      "ds-bot": "0.2.6-rabi.1",
+      "dsh-pet": "0.4.1-fork.3"
+    },
+    "checkedOn": "2026-11-04",
+    "note": "Historical observation; read the running host before deployment. Candidate verification does not establish production installation."
+  }
+}
