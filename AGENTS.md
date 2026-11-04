@@ -6,6 +6,8 @@ DeepSeek Harness is an all-plugin Cordis agent harness. Read [docs/architecture.
 
 每日维护心跳、环境或插件更新同步、插件修复与上游 PR、维护分支及磁盘清理，读取项目技能 [dsh-maintenance](.agents/skills/dsh-maintenance/SKILL.md)，再按任务读取其中的参考。该项目流程按用户要求由本仓库维护；其它共用技能仍走既有共享入口。本机绑定和运行状态保存在仓库外，技能中的插件修复授权及验证要求适用于本项目。
 
+维护交付以本机绑定的实际运行入口为准。源码 Web 环境使用官方源码入口和必要的 Host、Client、Web 编译；完整安装包及其它产品形态按明确需求处理，具体范围见上述技能。
+
 ## Pre-stable APIs and released Session data
 
 Public APIs are pre-stable; update every consumer. Follow [version/status](docs/session-format-status.md) and [type acknowledgements](docs/cookbook/reviewing-persistence-type-changes.md). [Adjacent migration](.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) may add a version-named successor while preserving committed generations as immutable history; runtime compatibility follows the declared reader policy. SQLite uses monotonic `SCHEMA_VERSION`.
