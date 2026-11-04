@@ -26,6 +26,9 @@ import { buildModelCatalog, hasProviderApiKey } from '../src/catalog.ts'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { createSessionTestController, createSessionTestRemote } from './test-remote.ts'
+import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
+import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 
 function request<P>(payload: P): P {
   return payload
@@ -931,4 +934,146 @@ it.each([new Error('catalog disconnected'), 'catalog disconnected'])('reports ca
     await expect(modelAvailable(ctx, { provider: 'deepseek-official', model: 'deepseek-chat' }))
       .rejects.toMatchObject({ code: 'session/model-unavailable', message: 'catalog disconnected' })
   } finally { read.mockRestore(); await ctx.fiber.dispose() }
+})
+
+describe('concurrent model catalog reads', () => {
+  async function catalogHarness() {
+    const { ctx } = await harness()
+    onTestFinished(() => ctx.fiber.dispose())
+    const adapter = new CatalogAdapter('Delayed', [{ provider: 'delayed', id: 'one', name: 'One' }])
+    ctx.llm.registerAdapter(['delayed'], adapter)
+    let selection: ModelSelection = { provider: 'delayed', model: 'one' }
+    const controller = await createSessionTestController(ctx, {
+      defaultModelSelection: () => selection,
+      cwd: '/tmp',
+    })
+    return { ctx, adapter, controller, select: (next: ModelSelection) => { selection = next } }
+  }
+
+  it('shares provider work only while a read is pending and releases the settled result', async () => {
+    const { ctx, adapter, controller } = await catalogHarness()
+    const gate = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const list = vi.spyOn(adapter, 'listModels').mockReturnValueOnce(gate.promise)
+    const resolve = vi.spyOn(adapter, 'resolveModel')
+    const firstView = ctx.extend({}).get('sessionController')
+    const secondView = ctx.extend({}).get('sessionController')
+    if (firstView === undefined || secondView === undefined) throw new Error('expected controller views')
+    const first = firstView.modelCatalog()
+    const second = secondView.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(1)
+    gate.resolve([{ provider: 'delayed', id: 'one', name: 'One' }])
+    const [left, right] = await Promise.all([first, second])
+    expect(right).toEqual(left)
+    expect(resolve).toHaveBeenCalledTimes(1)
+    await controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries a provider after a shared partial failure instead of caching its failure', async () => {
+    const { adapter, controller } = await catalogHarness()
+    const gate = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const list = vi.spyOn(adapter, 'listModels').mockReturnValueOnce(gate.promise)
+    const first = controller.modelCatalog()
+    const second = controller.modelCatalog()
+    gate.reject(new Error('temporarily unavailable'))
+    const failed = await first
+    expect(await second).toEqual(failed)
+    expect(failed.failures).toContainEqual({ id: 'delayed', name: 'Delayed', message: 'temporarily unavailable' })
+    const recovered = await controller.modelCatalog()
+    expect(recovered.groups.find(group => group.id === 'delayed')?.models).toHaveLength(1)
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('releases a rejected catalog build so the next request can recover', async () => {
+    const { ctx, controller } = await catalogHarness()
+    const list = vi.spyOn(ctx.llm, 'listProviders').mockImplementationOnce(() => { throw new Error('registry unavailable') })
+    const first = controller.modelCatalog()
+    const second = controller.modelCatalog()
+    await expect(Promise.all([first, second])).rejects.toThrow('registry unavailable')
+    expect(list).toHaveBeenCalledTimes(1)
+    await expect(controller.modelCatalog()).resolves.toHaveProperty('groups')
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    { provider: 'delayed', model: 'different' },
+    { provider: 'delayed', model: 'one', reasoningEffort: ReasoningEffortId('high') },
+    { provider: 'different', model: 'one' },
+  ])('keeps the captured default for overlapping different selections: %j', async (next) => {
+    const { adapter, controller, select } = await catalogHarness()
+    const old = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const current = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const list = vi.spyOn(adapter, 'listModels').mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const first = controller.modelCatalog()
+    select(next)
+    const second = controller.modelCatalog()
+    old.resolve([])
+    expect((await first).default).toEqual({ provider: 'delayed', model: 'one' })
+    const third = controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(2)
+    current.resolve([])
+    for (const value of await Promise.all([second, third])) expect(value.default).toEqual(next)
+  })
+
+  const invalidations = [
+    { name: 'provider registry', emit: (ctx: Context) => { ctx.emit('llm/adapters-updated') } },
+    { name: 'provider models', emit: (ctx: Context) => { ctx.emit('llm/models-updated', 'delayed') } },
+    { name: 'settings', emit: (ctx: Context) => { ctx.emit('settings/document-updated', 'fixture' as SettingsNamespace, 1) } },
+    { name: 'credential record', emit: (ctx: Context) => { ctx.emit('credentials/record-updated', credentialKey('fixture', 'record')) } },
+    { name: 'credential reference', emit: (ctx: Context) => { ctx.emit('credentials/reference-updated', credentialRef('FIXTURE_KEY')) } },
+  ]
+  it.each(invalidations)('separates reads after $name changes and ignores an old finally', async ({ emit }) => {
+    const { ctx, adapter, controller } = await catalogHarness()
+    const old = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const current = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const list = vi.spyOn(adapter, 'listModels').mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const first = controller.modelCatalog()
+    emit(ctx)
+    const second = controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(2)
+    old.resolve([])
+    await first
+    const third = controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(2)
+    current.resolve([])
+    await Promise.all([second, third])
+  })
+
+  it('does not re-publish a read invalidated synchronously by provider code', async () => {
+    const { ctx, adapter, controller } = await catalogHarness()
+    const old = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const current = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const list = vi.spyOn(adapter, 'listModels').mockImplementationOnce(() => {
+      ctx.emit('llm/models-updated', 'delayed')
+      return old.promise
+    }).mockReturnValueOnce(current.promise)
+    const first = controller.modelCatalog()
+    const second = controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(2)
+    old.resolve([])
+    await first
+    const third = controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(2)
+    current.resolve([])
+    await Promise.all([second, third])
+  })
+
+  it('releases old controller references without waiting on an uncancellable provider or sharing a new instance', async () => {
+    const before = await catalogHarness()
+    const old = Promise.withResolvers<readonly LlmModelInfo[]>()
+    vi.spyOn(before.adapter, 'listModels').mockReturnValueOnce(old.promise)
+    const first = before.controller.modelCatalog()
+    await before.ctx.fiber.dispose()
+    const after = await catalogHarness()
+    const current = Promise.withResolvers<readonly LlmModelInfo[]>()
+    const list = vi.spyOn(after.adapter, 'listModels').mockReturnValueOnce(current.promise)
+    const second = after.controller.modelCatalog()
+    old.resolve([])
+    await first
+    const third = after.controller.modelCatalog()
+    expect(list).toHaveBeenCalledTimes(1)
+    current.resolve([])
+    await Promise.all([second, third])
+  })
 })

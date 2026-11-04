@@ -35,6 +35,7 @@ import { SessionMediaReferences } from './media-references.ts'
 import { ArchivedSessionGate } from './archived-session-gate.ts'
 import type {
   ModelCatalog,
+  ModelSelection,
   SessionWorkspacePathApplication,
   SessionAddress,
   SessionAttachmentRequest,
@@ -194,6 +195,8 @@ export class SessionController extends TypertRemoteService {
   private readonly canOpenPath: () => boolean
   private readonly listWorkSliceMs: number
   private readonly promotions = new Set<Promise<void>>()
+  private modelCatalogRead: { selection: ModelSelection; promise: Promise<ModelCatalog> } | undefined
+  private modelCatalogGeneration = 0
 
   /**
    * @param ctx - Host context containing the Session capability assembly.
@@ -214,6 +217,16 @@ export class SessionController extends TypertRemoteService {
 
   protected async [Service.init](): Promise<void> {
     const ctx = this.ctx
+    const invalidateModelCatalog = (): void => {
+      this.modelCatalogGeneration++
+      this.modelCatalogRead = undefined
+    }
+    ctx.on('llm/adapters-updated', invalidateModelCatalog)
+    ctx.on('llm/models-updated', invalidateModelCatalog)
+    ctx.on('settings/document-updated', invalidateModelCatalog)
+    ctx.on('credentials/record-updated', invalidateModelCatalog)
+    ctx.on('credentials/reference-updated', invalidateModelCatalog)
+    ctx.effect(() => invalidateModelCatalog, 'session-controller.modelCatalog')
     ctx.typert.resources.register('session', { resolve: resolveSessionResource })
     this.agents = new ApiSessionAgentController(ctx)
     this.agents.initialize()
@@ -387,12 +400,24 @@ export class SessionController extends TypertRemoteService {
   }
 
   /**
-   * Describe every currently routable model for Host-generation selectors.
+   * Describe currently routable models, sharing only concurrent reads with the same default.
    * @returns provider-grouped models, the deployment default, and isolated provider failures.
    */
   @Remote('modelCatalog')
   modelCatalog(): Promise<ModelCatalog> {
-    return buildModelCatalog(this.ctx)
+    const selection = this.ctx.agentDefaultModel.currentSelection()
+    const current = this.modelCatalogRead
+    if (current !== undefined && current.selection.provider === selection.provider
+      && current.selection.model === selection.model && current.selection.reasoningEffort === selection.reasoningEffort) {
+      return current.promise
+    }
+    const generation = this.modelCatalogGeneration
+    const promise = buildModelCatalog(this.ctx, selection).finally(() => {
+      if (this.modelCatalogRead?.promise === promise) this.modelCatalogRead = undefined
+    })
+    // Providers can synchronously publish an invalidation before their first await.
+    if (generation === this.modelCatalogGeneration) this.modelCatalogRead = { selection, promise }
+    return promise
   }
 
   /**
