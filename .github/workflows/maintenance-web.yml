@@ -24,11 +24,13 @@ jobs:
         shell: pwsh
     env:
       DSH_TELEMETRY_DISABLED: '1'
-      NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+
+      - name: Configure the runner-local compile cache
+        run: '"NODE_COMPILE_CACHE=$env:RUNNER_TEMP/node-compile-cache" >> $env:GITHUB_ENV'
 
       - name: Read the declared test target
         id: target
