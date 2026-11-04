@@ -11,7 +11,7 @@ describe('platform fixture directories', () => {
     const manifest = parseSnapshotManifest('version: 1\nprofile: acp\nfixtureVariants:\n  win32: win-x64\n')
     expect(snapshotFixtureDirectory('scenario', manifest, 'win32')).toBe(join('scenario', 'win-x64'))
     expect(snapshotFixtureDirectory('scenario', manifest, 'linux')).toBe('scenario')
-    expect(snapshotFixtureDirectory('scenario', { fixtureVariants: undefined }, 'win32')).toBe('scenario')
+    expect(snapshotFixtureDirectory('scenario', {}, 'win32')).toBe('scenario')
   })
 
   it.each(['../outside', '..', '/absolute', 'C:/outside', 'C:\\outside', 'nested/child', 'nested\\child', ''])('rejects escaping or compound directory %j at the manifest parser', (directory) => {
