@@ -4987,12 +4987,15 @@ describe('PythonPtcRuntime — hostile peer', () => {
     // exception. Linux-only RLIMIT_AS repro; on macOS the value round-trips
     // either way, but the fixture stays within the address space so it is honest.
     //
-    // `maxWallMs` is 180s, not the 20s the memory assertion alone needs: the O(depth)
-    // cursor pulls 6M elements one at a time through Python-level frames, which costs
-    // ~11s on an idle machine and more when the full suite shares a slow hosted runner.
-    // This budget bounds the run without letting that scheduling latency read as a
-    // `timeout` — what this test asserts is the O(depth) memory shape, not a speed claim.
-    const { runtime } = await setup({ maxValueBytes: 20 * 1024 * 1024, addressSpaceMb: 384, maxWallMs: 180_000 })
+    // Wall and CPU budgets are 180s, not the 20s the memory assertion alone needs: the
+    // O(depth) cursor pulls 6M elements one at a time through Python-level frames, which
+    // costs ~11s on an idle machine and more when the full suite shares a slow hosted
+    // runner. The default 60s CPU limit fired there as `timeout`. These budgets bound the
+    // run without letting that latency read as a logic failure — the assertion is the
+    // O(depth) memory shape, not a speed claim.
+    const { runtime } = await setup({
+      maxValueBytes: 20 * 1024 * 1024, addressSpaceMb: 384, maxWallMs: 180_000, cpuSeconds: 180,
+    })
     const result = await runtime.run(runtime.resolve({ program: 'return [0] * 6_000_000', bindings: [] }))
     expect(result.error).toBeUndefined()
     expect(Array.isArray(result.value)).toBe(true)
