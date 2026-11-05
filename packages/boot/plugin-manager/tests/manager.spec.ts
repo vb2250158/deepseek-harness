@@ -29,7 +29,11 @@ import { parse, parseDocument } from 'yaml'
 import { isolateGitCommandLineConfig } from './git-environment.ts'
 
 // These three fixtures run two real package-manager processes; Windows Git prepare alone takes over 7 seconds.
-const REAL_PACKAGE_PROCESS_TIMEOUT_MS = process.platform === 'win32' ? 30000 : 5000
+const laneTestBudget = Number(process.env.DSH_COVERAGE_TEST_TIMEOUT_MS)
+const REAL_PACKAGE_PROCESS_TIMEOUT_MS = Math.max(
+  process.platform === 'win32' ? 30000 : 5000,
+  Number.isSafeInteger(laneTestBudget) && laneTestBudget > 0 ? laneTestBudget : 0,
+)
 
 // These cases install through real Git and pnpm, so the host's command-line configuration group must not reach their children.
 let restoreGitCommandLineConfig: () => void

@@ -7,7 +7,9 @@ import { describe, expect, it } from 'vitest'
 import { gatesForMode } from '../run-gates.ts'
 
 const root = resolve(import.meta.dirname, '../..')
-const masterPush = "github.event_name == 'push' && github.ref == 'refs/heads/master'"
+const hostedRepository = "github.repository == 'deepseek-ai/deepseek-harness'"
+const masterPush = `${hostedRepository} && github.event_name == 'push' && github.ref == 'refs/heads/master'`
+const pullRequest = `${hostedRepository} && github.event_name == 'pull_request'`
 const runtimeBuilder = './.github/workflows/build-exe-for-python-sdk.yml'
 
 interface Job {
@@ -45,7 +47,7 @@ function evaluateCondition(expression: string, cancelled: boolean, results: stri
     always: () => true,
     contains: (values: string[], value: string) => values.includes(value),
     results,
-    github: { event_name: event },
+    github: { event_name: event, repository: 'deepseek-ai/deepseek-harness' },
   }, { timeout: 1000 }) as boolean
 }
 
@@ -78,7 +80,7 @@ describe('master-only platform scheduling', () => {
     const pr = workflow('ci-python.yml')
     expect(Object.keys(pr.on)).toEqual(['pull_request'])
     expect(pr.jobs['python-runtime']).toMatchObject({
-      if: "github.event_name == 'pull_request'",
+      if: pullRequest,
       uses: runtimeBuilder,
       with: { ci: true, targets: 'node24-linux-x64,node24-win-x64' },
     })
@@ -88,7 +90,7 @@ describe('master-only platform scheduling', () => {
     expect(aggregate.needs).toContain('python-runtime')
     expect(aggregate.needs).not.toContain('windows')
     expect(aggregate.needs!.every(id => id in pr.jobs)).toBe(true)
-    expect(aggregate.if).toBe("${{ !cancelled() && github.event_name == 'pull_request' }}")
+    expect(aggregate.if).toBe(`\${{ !cancelled() && ${pullRequest} }}`)
     expect(aggregate.steps).toContainEqual(expect.objectContaining({
       if: "contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')",
     }))
@@ -127,7 +129,7 @@ describe('master-only platform scheduling', () => {
     const master = workflow('ci-master.yml')
     const wine = master.jobs.windows!
     expect(wine).toMatchObject({
-      if: "(github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && inputs.suite == 'wine')",
+      if: `(${masterPush}) || (github.event_name == 'workflow_dispatch' && inputs.suite == 'wine')`,
       'runs-on': 'ubuntu-latest',
     })
     expect(wine.needs).toBeUndefined()
