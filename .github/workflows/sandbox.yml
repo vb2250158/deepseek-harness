@@ -59,7 +59,9 @@ jobs:
             runner: landlock
           - os: ubuntu-24.04-arm
             runner: landlock
-          - os: macos-latest
+          # Hosted macos-latest (arm64) was not acquired after repeated attempts.
+          # Intel macOS still provides sandbox-exec for this evidence run.
+          - os: macos-15-intel
             runner: seatbelt
     name: sandbox e2e (${{ matrix.runner }}, ${{ matrix.os }})
     runs-on: >-
@@ -146,7 +148,8 @@ jobs:
   unit-darwin:
     if: github.repository == 'deepseek-ai/deepseek-harness' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/cursor/fix-sandbox-darwin-unit-ac25'
     name: unit tests (darwin parity, macos-latest)
-    runs-on: macos-latest
+    # Hosted macos-latest (arm64) was not acquired after repeated attempts.
+    runs-on: macos-15-intel
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1
