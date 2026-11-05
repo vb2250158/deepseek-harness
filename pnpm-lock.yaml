@@ -244,6 +244,9 @@ importers:
       publint:
         specifier: ^0.3.24
         version: 0.3.24
+      resedit:
+        specifier: 1.7.2
+        version: 1.7.2
       semver:
         specifier: ^7.8.5
         version: 7.8.5

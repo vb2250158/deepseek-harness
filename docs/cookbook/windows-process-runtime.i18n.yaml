@@ -1,0 +1,7 @@
+# Bilingual-pair consistency record for windows-process-runtime.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/cookbook/windows-process-runtime.md
+/windows-process-names-and-icons:
+  en: a8f4b7278201453d
+  zh: 21e0c395b858e27e
