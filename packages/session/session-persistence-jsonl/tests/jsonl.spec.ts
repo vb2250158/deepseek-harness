@@ -1420,7 +1420,7 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
       .rejects.toThrow(/released v0 physical header lacks required member "type"/)
   })
 
-  it('tracks a disappearing corpus member and propagates its storage faults in historical revisions', async () => {
+  it('ignores unrelated corpus disappearance but propagates storage faults in historical revision discovery', async () => {
     const parent = meta('corpus-revision-parent', '/work')
     const child = meta('corpus-revision-child', '/work')
     for (const header of [parent, child]) {
@@ -1433,7 +1433,7 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     statFailure.error = Object.assign(new Error('member disappeared'), { code: 'ENOENT' })
     const missing = await ctx.sessionPersistence.stat(parent.id)
     expect(missing).toBeDefined()
-    expect(missing?.revision).not.toBe(present?.revision)
+    expect(missing?.revision).toBe(present?.revision)
     expect((await ctx.sessionPersistence.stat(parent.id))?.revision).toBe(missing?.revision)
     statFailure.error = Object.assign(new Error('member denied'), { code: 'EACCES' })
     await expect(ctx.sessionPersistence.stat(parent.id)).rejects.toBe(statFailure.error)
@@ -2207,84 +2207,106 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     expect(aggregate?.errors).toEqual([failure])
   })
 
-  it('omits a listed artifact removed after discovery', async () => {
+  it('omits a listed artifact removed after directory discovery', async () => {
     const m = meta('vanishing-snapshot')
     await writeLog(ctx.sessionPersistence, m, oneTurnLog())
-    const persistence = ctx.sessionPersistence as unknown as {
-      listArtifacts(): Promise<Array<{ header: SessionHeader; path: string }>>
+    const target = rawLogPath(root, m.cwd, m.id)
+    listingProbe.active = true
+    listingProbe.pause = async (path) => {
+      if (path !== target) return
+      listingProbe.pause = undefined
+      await rm(target)
     }
-    const listArtifacts = persistence.listArtifacts.bind(persistence)
-    const discovery = vi.spyOn(persistence, 'listArtifacts').mockImplementation(async () => {
-      const artifacts = await listArtifacts()
-      await rm(artifacts[0]!.path)
-      return artifacts
+    try { await expect(ctx.sessionPersistence.list()).resolves.toEqual([]) }
+    finally { listingProbe.active = false; listingProbe.pause = undefined }
+  })
+
+  it('surfaces non-ENOENT storage failures during listing', async () => {
+    const m = meta('snapshot-stat-failure')
+    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
+    statFailure.path = rawLogPath(root, m.cwd, m.id)
+    statFailure.error = Object.assign(new Error('snapshot denied'), { code: 'EACCES' })
+    await expect(ctx.sessionPersistence.list()).rejects.toBe(statFailure.error)
+  })
+
+  it('reads a captured historical batch without rediscovering the persistence root', async () => {
+    const ids = [meta('scoped-first'), meta('scoped-second')]
+    for (const header of ids) {
+      const source = historicalLogPath(root, header.cwd, header.id)
+      await mkdir(dirname(source), { recursive: true })
+      await writeFile(source, `${JSON.stringify(releasedV0Header(header))}\n`)
+    }
+    await ctx.sessionPersistence.withReadScope(async (scope) => {
+      listingProbe.active = true
+      listingProbe.pause = async (path) => {
+        if (path === root) throw new Error('scoped reads must not rediscover the whole root')
+      }
+      try {
+        for (const header of ids) expect((await scope.read(header.id)).events).toEqual([])
+      } finally {
+        listingProbe.active = false
+        listingProbe.pause = undefined
+      }
     })
-
-    await expect(ctx.sessionPersistence.list()).resolves.toEqual([])
-    discovery.mockRestore()
   })
 
-  it('surfaces non-ENOENT stat failures during listing', async () => {
-    const persistence = ctx.sessionPersistence as unknown as {
-      listArtifacts(): Promise<Array<{ header: SessionHeader; path: string }>>
+  it('owns JSONL discovery until cancelled filesystem work settles on provider disposal', async () => {
+    const provider = ctx.sessionPersistence
+    const entered = Promise.withResolvers<undefined>()
+    const resume = Promise.withResolvers<undefined>()
+    const callback = vi.fn(async () => {})
+    listingProbe.active = true
+    listingProbe.pause = async (path) => {
+      if (path !== root) return
+      listingProbe.pause = undefined
+      entered.resolve(undefined)
+      await resume.promise
     }
-    const discovery = vi.spyOn(persistence, 'listArtifacts').mockResolvedValue([{
-      header: meta('snapshot-stat-failure'),
-      path: `${root}\0snapshot-stat-failure`,
-    }])
-
-    await expect(ctx.sessionPersistence.list()).rejects.toThrow(/null bytes/)
-    discovery.mockRestore()
+    const pass = provider.withReadScope(callback)
+    void pass.catch(() => {})
+    await entered.promise
+    const stopping = ctx.fiber.dispose()
+    resume.resolve(undefined)
+    try {
+      await stopping
+      await expect(pass).rejects.toMatchObject({ name: 'AbortError' })
+      expect(callback).not.toHaveBeenCalled()
+      expect(listingProbe.inFlight).toBe(0)
+    } finally {
+      listingProbe.active = false
+      listingProbe.pause = undefined
+    }
   })
 
-  it('forwards list cancellation and awaits in-flight discovery cleanup', async () => {
-    const persistence = ctx.sessionPersistence as unknown as {
-      listArtifacts(signal?: AbortSignal): Promise<Array<{ header: SessionHeader; path: string }>>
-    }
-    const started = Promise.withResolvers<AbortSignal>()
+  it.each(['directory', 'file'] as const)('awaits uncancellable %s I/O cleanup before rejecting a cancelled list', async (kind) => {
+    const m = meta('snapshot-stat-cancellation')
+    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
+    const target = kind === 'file' ? rawLogPath(root, m.cwd, m.id) : root
+    const started = Promise.withResolvers<undefined>()
     const cleanup = Promise.withResolvers<undefined>()
-    vi.spyOn(persistence, 'listArtifacts').mockImplementation(async (signal) => {
-      if (signal === undefined) throw new Error('expected list signal')
-      started.resolve(signal)
+    listingProbe.active = true
+    listingProbe.pause = async (path) => {
+      if (path !== target) return
+      listingProbe.pause = undefined
+      started.resolve(undefined)
       await cleanup.promise
-      return []
-    })
-    const reason = new Error('JSONL list discovery cancelled')
+    }
+    const reason = new Error('JSONL discovery cancelled')
     const controller = new AbortController()
     const pending = ctx.sessionPersistence.list({ signal: controller.signal })
-    expect(await started.promise).toBe(controller.signal)
     let settled = false
-    void pending.then(
-      () => { settled = true },
-      () => { settled = true },
-    )
-
+    void pending.then(() => { settled = true }, () => { settled = true })
+    await started.promise
     controller.abort(reason)
     await Promise.resolve()
     expect(settled).toBe(false)
-
     cleanup.resolve(undefined)
     await expect(pending).rejects.toBe(reason)
+    expect(listingProbe.inFlight).toBe(0)
+    listingProbe.active = false
+    listingProbe.pause = undefined
   })
 
-  it('checks cancellation after an uncancellable list stat settles', async () => {
-    const m = meta('snapshot-stat-cancellation')
-    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
-    const persistence = ctx.sessionPersistence as unknown as {
-      listArtifacts(signal?: AbortSignal): Promise<Array<{ header: SessionHeader; path: string }>>
-    }
-    const discovery = vi.spyOn(persistence, 'listArtifacts').mockResolvedValue([{
-      header: m,
-      path: rawLogPath(root, m.cwd, m.id),
-    }])
-    const reason = new Error('JSONL list stat cancelled')
-    const controller = new AbortController()
-    const pending = ctx.sessionPersistence.list({ signal: controller.signal })
-    queueMicrotask(() => { controller.abort(reason) })
-
-    await expect(pending).rejects.toBe(reason)
-    expect(discovery.mock.calls[0]?.[0]).toBe(controller.signal)
-  })
 })
 
 describe('JsonlSessionPersistence: scanLog unit', () => {

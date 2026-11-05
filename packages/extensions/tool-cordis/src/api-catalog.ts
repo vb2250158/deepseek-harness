@@ -2962,6 +2962,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'options', description: 'optional cancellation.' }],
         returns: 'one snapshot per stored session.',
       },
+      {
+        signature: 'async withReadScope<T>( callback: (scope: SessionPersistenceReadScope) => Promise<T>, options?: SessionPersistenceListOptions, ): Promise<T>',
+        description: 'Run a bounded read pass and cancel outstanding reads when its callback ends. The default implementation uses live handles, validating each listed revision before and after its read; it promises no cross-Session atomic snapshot. Backends may capture selected sources instead, deferring later additions to the next pass.',
+        parameters: [{ name: 'callback', description: 'consumer of the pass; await every read it needs.' }, { name: 'options', description: 'cancellation for discovery, the callback, and its reads.' }],
+        returns: 'the callback result after outstanding reads have settled.',
+      },
     ],
   },
   {
@@ -8677,6 +8683,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionPersistenceOpenOptions',
     declaration: 'export interface SessionPersistenceOpenOptions {\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'SessionPersistenceReadScope',
+    declaration: 'export interface SessionPersistenceReadScope {\n    readonly consistency: \'live\' | \'selected-sources\';\n    readonly observedAt: number;\n    readonly snapshots: readonly SessionPersistenceSnapshot[];\n    readonly omittedSourceCount: number;\n    read(id: SessionId, options?: SessionPersistenceOpenOptions): Promise<SessionInspection>;\n}',
   },
   {
     name: 'SessionPersistenceRevision',

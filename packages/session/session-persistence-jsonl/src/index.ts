@@ -23,6 +23,7 @@ import PQueue from 'p-queue'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
+  SessionPersistenceReadScopeChangedError,
   SessionAlreadyExistsError, SessionPersistenceNotFoundError,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
@@ -30,6 +31,7 @@ import {
   type SessionLocation, type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceMetadata, type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
+  type SessionPersistenceReadScope,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
@@ -116,6 +118,20 @@ export interface Config {
 interface GenerationHeader {
   readonly header: SessionHeader
   readonly formatStatus: NonNullable<SessionPersistenceSnapshot['formatStatus']>
+}
+
+/** Selected physical source and the header trusted at the captured identity. */
+interface CapturedGeneration {
+  readonly selected: ResolvedJsonlGeneration
+  readonly identity: JsonlPhysicalIdentity
+  readonly metadata: GenerationHeader | undefined
+}
+
+/** Metadata-only dependency index, owned by one observation or read pass. */
+interface CapturedSources {
+  readonly sources: readonly CapturedGeneration[]
+  readonly children: ReadonlyMap<SessionId, readonly CapturedGeneration[]>
+  readonly unclassifiedRevision: string
 }
 
 /** One stored event graph whose producer has established immutable sharing. */
@@ -270,7 +286,7 @@ function waitWithAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<
   /* v8 ignore next -- requireStoredLog synchronously rechecks the signal immediately before waiting. */
   if (signal.aborted) return Promise.reject(abortError(signal))
   return new Promise<T>((resolve, reject) => {
-    const stopWaiting = (): void => {
+    const stopWaiting = (): (void) => {
       reject(abortError(signal))
     }
     signal.addEventListener('abort', stopWaiting, { once: true })
@@ -513,14 +529,16 @@ class JsonlSessionPersistence extends SessionPersistence {
     if (selected === undefined) return undefined
     const metadata = await this.readGenerationHeader(selected, id, options?.signal)
     if (metadata === undefined) return undefined
+    if (selected.sourceVersion < SESSION_FORMAT_VERSION) {
+      const captured = await this.captureSources(options?.signal, LIST_METADATA_PRIORITY)
+      return this.capturedSnapshots(captured).find(snapshot => snapshot.header.id === id)
+    }
     try {
       const identity = await stat(selected.sourcePath, { bigint: true })
       options?.signal?.throwIfAborted()
       return {
         ...metadata,
-        revision: selected.sourceVersion < SESSION_FORMAT_VERSION
-          ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal, LIST_METADATA_PRIORITY)}`)
-          : fileRevision(identity),
+        revision: fileRevision(identity),
         sizeBytes: Number(identity.size),
         modifiedAt: Number(identity.mtimeMs),
         location: { kind: 'jsonl', path: selected.sourcePath },
@@ -546,41 +564,93 @@ class JsonlSessionPersistence extends SessionPersistence {
     // append lands mid-scan is then still in this snapshot (its artifact may
     // predate the scan), so create-to-list visibility never has a hole.
     const pending = [...this.tracker.pendingEntries()]
-    const artifacts = await this.listArtifacts(signal, LIST_METADATA_PRIORITY)
-    const corpusRevision = artifacts.some(artifact => artifact.sourceVersion < SESSION_FORMAT_VERSION)
-      ? await this.historicalCorpusRevision(signal, LIST_METADATA_PRIORITY) : undefined
-    const statted = settledValues(await settleLimited(this.listQueue, artifacts, async (artifact) => {
-      signal?.throwIfAborted()
-      try {
-        const identity = await stat(artifact.path, { bigint: true })
-        signal?.throwIfAborted()
-        return { artifact, identity }
-      } catch (error: unknown) {
-        signal?.throwIfAborted()
-        if (!isENOENT(error)) throw error
-        return undefined
-      }
-    }, LIST_METADATA_PRIORITY))
-    for (const entry of statted) {
-      if (entry === undefined) continue
-      const { artifact, identity } = entry
-      listed.add(artifact.header.id)
-      snapshots.push({
-        header: artifact.header,
-        formatStatus: artifact.formatStatus,
-        revision: artifact.sourceVersion < SESSION_FORMAT_VERSION
-          ? SessionPersistenceRevision(`${fileRevision(identity)}:${corpusRevision}`)
-          : fileRevision(identity),
-        sizeBytes: Number(identity.size),
-        modifiedAt: Number(identity.mtimeMs),
-        location: { kind: 'jsonl', path: artifact.path },
-      })
+    const captured = await this.captureSources(signal, LIST_METADATA_PRIORITY)
+    for (const snapshot of this.capturedSnapshots(captured)) {
+      listed.add(snapshot.header.id)
+      snapshots.push(snapshot)
     }
     for (const [id, entry] of pending) {
       if (!listed.has(id)) snapshots.push({ header: entry.header, revision: entry.revision })
     }
     signal?.throwIfAborted()
     return snapshots
+  }
+
+  /**
+   * Capture selected generations and child membership once for a read-only pass.
+   * Later additions belong to the next pass; changes to participating sources reject.
+   * @param callback - scope consumer; reads never publish historical successors.
+   * @param options - optional cancellation for discovery and scoped reads.
+   * @returns the callback result after scope cleanup.
+   */
+  override async withReadScope<T>(
+    callback: (scope: SessionPersistenceReadScope) => Promise<T>,
+    options?: SessionPersistenceListOptions,
+  ): Promise<T> {
+    return this.runReadScope(async (discoverySignal) => {
+      const pending = new Map(this.tracker.pendingEntries())
+      const captured = await this.captureSources(discoverySignal, LIST_METADATA_PRIORITY)
+      const snapshots = this.capturedSnapshots(captured)
+      const sources = new Map(captured.sources.flatMap(source => source.metadata === undefined
+        ? [] : [[source.metadata.header.id, source] as const]))
+      for (const [id, entry] of pending) {
+        if (!sources.has(id)) snapshots.push({ header: entry.header, revision: entry.revision })
+      }
+      return { consistency: 'selected-sources', snapshots,
+        omittedSourceCount: captured.sources.filter(source => source.metadata === undefined).length,
+        read: async (id, signal) => {
+          try {
+            const source = sources.get(id)
+            if (source === undefined) {
+              const entry = pending.get(id)
+              if (entry === undefined) throw new SessionPersistenceNotFoundError(id)
+              if (this.tracker.pendingOf(id)?.revision !== entry.revision) throw new SessionPersistenceReadScopeChangedError(id)
+              return { meta: entry.header, inheritedEventCount: entry.inheritedEventCount, events: [] }
+            }
+            const children = captured.children.get(id) ?? []
+            const participating = [source, ...children]
+            const validate = async (): Promise<void> => {
+              for (const member of participating) await this.validateCapturedSource(id, member, signal)
+            }
+            await validate()
+            let stored: StoredLog
+            if (source.selected.sourceVersion < SESSION_FORMAT_VERSION) {
+              stored = await this.prepareStoredMigration(id, source.selected, signal, {
+                sources: children.flatMap(child => child.metadata === undefined
+                  ? [] : [{ header: child.metadata.header, path: child.selected.sourcePath }]),
+                validate,
+              })
+            } else {
+              const current = await readStableJsonlFile(source.selected.sourcePath, signal)
+              if (fileRevision(current.identity) !== fileRevision(source.identity)) throw new SessionPersistenceReadScopeChangedError(id)
+              stored = await this.decodeStoredLog(
+                source.selected.sourcePath, id, current.bytes, fileRevision(current.identity), signal, false,
+              )
+            }
+            await validate()
+            return { meta: stored.meta, inheritedEventCount: stored.inheritedEventCount, events: stored.events }
+          } catch (error: unknown) {
+            signal.throwIfAborted()
+            if (error instanceof JsonlGenerationSourceChangedError) throw new SessionPersistenceReadScopeChangedError(id)
+            throw error
+          }
+        },
+      }
+    }, callback, options?.signal)
+  }
+
+  /** Validate only one participating directory's selected generation and file identity. */
+  private async validateCapturedSource(id: SessionId, source: CapturedGeneration, signal: AbortSignal): Promise<void> {
+    const selected = await this.resolveGenerationInDirectory(dirname(source.selected.sourcePath), signal)
+    if (selected?.sourcePath !== source.selected.sourcePath) throw new SessionPersistenceReadScopeChangedError(id)
+    try {
+      const identity = await stat(source.selected.sourcePath, { bigint: true })
+      if (fileRevision(identity) !== fileRevision(source.identity)) throw new SessionPersistenceReadScopeChangedError(id)
+    } catch (error: unknown) {
+      if (isENOENT(error)) throw new SessionPersistenceReadScopeChangedError(id)
+      throw error
+    }
+    signal.throwIfAborted()
   }
 
   /**
@@ -651,7 +721,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         }
         this.migrationPreparations.set(id, preparation)
         const created = preparation
-        const release = (): void => {
+        const release = (): (void) => {
           created.settled = true
           if (this.migrationPreparations.get(id) === created) {
             this.migrationPreparations.delete(id)
@@ -768,17 +838,23 @@ class JsonlSessionPersistence extends SessionPersistence {
     id: SessionId,
     selected: ResolvedJsonlGeneration,
     signal: AbortSignal,
+    captured?: {
+      readonly sources: readonly { readonly header: SessionHeader; readonly path: string }[]
+      readonly validate: () => Promise<void>
+    },
   ): Promise<PreparedStoredLog> {
     let prepared: Awaited<ReturnType<typeof prepareJsonlMigration>>
     let validateRelatedSources: () => Promise<void>
     try {
-      const sources = await this.listDirectChildSources(id, signal)
+      const sources = captured?.sources ?? await this.listDirectChildSources(id, signal)
       const related = await prepareCatalogFacts(id, sources, this.compression, signal)
       for (const failure of related.failures) {
         this.ctx.logger.warn(`${this.name}: session "${id}" catalog retained a child with unknown descriptor (raw log: ${failure.path}): ${String(failure.error)}`)
       }
       const membership = sources.map(source => source.path).sort()
-      validateRelatedSources = this.relatedSourceValidation(id, membership, related.validate, signal)
+      validateRelatedSources = captured === undefined
+        ? this.relatedSourceValidation(id, membership, related.validate, signal)
+        : async () => { await captured.validate(); await related.validate() }
       prepared = await prepareJsonlMigration({
         sourcePath: selected.sourcePath,
         sourceVersion: selected.sourceVersion,
@@ -818,7 +894,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       revision: fileRevision(prepared.sourceIdentity),
       publication: { source: selected, value: prepared },
     }
-    this.memoizeStoredLog(id, stored)
+    if (captured === undefined) this.memoizeStoredLog(id, stored)
     return stored
   }
 
@@ -859,7 +935,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         { kind: 'jsonl', path: selected.sourcePath },
       )
     }
-    if (error instanceof JsonlGenerationSourceChangedError) return error
+    if (error instanceof JsonlGenerationSourceChangedError || error instanceof SessionPersistenceReadScopeChangedError) return error
     if (error instanceof SessionFormatUnsupportedError
       || error instanceof SessionPersistenceCorruptionError
       || isErrnoException(error)
@@ -897,6 +973,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     buffer: Buffer,
     revision: PersistenceRevision,
     signal?: AbortSignal,
+    memoize = true,
   ): Promise<CurrentStoredLog> {
     let parsed: {
       meta: SessionHeader
@@ -946,7 +1023,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       ...freezeStoredEvents(events),
       revision,
     }
-    this.memoizeStoredLog(expectedId, stored)
+    if (memoize) this.memoizeStoredLog(expectedId, stored)
     return stored
   }
 
@@ -1207,22 +1284,73 @@ class JsonlSessionPersistence extends SessionPersistence {
     return results
   }
 
-  /** Historical logical events depend on the corpus, including members with unreadable headers. */
-  private async historicalCorpusRevision(signal?: AbortSignal, priority = 0): Promise<string> {
-    const paths = (await this.listGenerations(signal, priority)).map(source => source.sourcePath).sort()
-    const entries = settledValues(await settleLimited(this.listQueue, paths, async (path) => {
+  /** Capture selected identities and build direct-child dependencies in one discovery pass. */
+  private async captureSources(signal?: AbortSignal, priority = 0): Promise<CapturedSources> {
+    signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    const generations = await this.listGenerations(signal, priority)
+    const paths = new Set(generations.map(source => source.sourcePath))
+    for (const path of this.generationHeaders.keys()) {
+      if (!paths.has(path)) this.generationHeaders.delete(path)
+    }
+    const captured = settledValues(await settleLimited(this.listQueue, generations, async (selected) => {
       signal?.throwIfAborted()
+      let identity: JsonlPhysicalIdentity
       try {
-        return { path, revision: fileRevision(await stat(path, { bigint: true })) }
+        identity = await stat(selected.sourcePath, { bigint: true })
       } catch (error: unknown) {
         if (!isENOENT(error)) throw error
-        return { path, revision: 'missing' }
+        return undefined
       }
+      let metadata: GenerationHeader | undefined
+      try {
+        metadata = await this.readGenerationHeader(selected, undefined, signal, identity)
+      } catch (error: unknown) {
+        if (!(error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError)) throw error
+      }
+      return { selected, identity, metadata }
     }, priority))
-    const hash = createHash('sha256')
-    for (const { path, revision } of entries) hash.update(JSON.stringify([path, revision]))
+    const sources: CapturedGeneration[] = []
+    const children = new Map<SessionId, CapturedGeneration[]>()
+    const ids = new Set<SessionId>()
+    const unclassified: CapturedGeneration[] = []
+    for (const source of captured) {
+      if (source === undefined) continue
+      sources.push(source)
+      const header = source.metadata?.header
+      if (header === undefined) { unclassified.push(source); continue }
+      if (ids.has(header.id)) throw new Error(`duplicate JSONL session id "${header.id}" appears in multiple project directories`)
+      ids.add(header.id)
+      if (header.origin === 'subagent' && header.parentSession !== undefined) {
+        const siblings = children.get(header.parentSession) ?? []
+        siblings.push(source)
+        children.set(header.parentSession, siblings)
+      }
+    }
     signal?.throwIfAborted()
+    return { sources, children, unclassifiedRevision: this.sourceFingerprint(unclassified) }
+  }
+
+  /** Hash physical identities in stable path order, without retaining decoded events. */
+  private sourceFingerprint(sources: readonly CapturedGeneration[]): string {
+    const hash = createHash('sha256')
+    for (const source of [...sources].sort((left, right) => left.selected.sourcePath.localeCompare(right.selected.sourcePath))) {
+      hash.update(JSON.stringify([source.selected.sourcePath, fileRevision(source.identity)]))
+    }
     return hash.digest('hex')
+  }
+
+  /** Produce instance-local tokens from each source's actual migration dependencies. */
+  private capturedSnapshots(captured: CapturedSources): SessionPersistenceSnapshot[] {
+    return captured.sources.flatMap((source) => {
+      if (source.metadata === undefined) return []
+      const { selected, identity, metadata } = source
+      const revision = selected.sourceVersion < SESSION_FORMAT_VERSION
+        ? SessionPersistenceRevision(`${fileRevision(identity)}:${this.sourceFingerprint(captured.children.get(metadata.header.id) ?? [])}:${captured.unclassifiedRevision}`)
+        : fileRevision(identity)
+      return [{ ...metadata, revision, sizeBytes: Number(identity.size), modifiedAt: Number(identity.mtimeNs / 1_000_000n),
+        location: { kind: 'jsonl' as const, path: selected.sourcePath } }]
+    })
   }
 
   private async listArtifacts(
@@ -1269,10 +1397,11 @@ class JsonlSessionPersistence extends SessionPersistence {
     selected: ResolvedJsonlGeneration,
     expectedId?: SessionId,
     signal?: AbortSignal,
+    capturedIdentity?: JsonlPhysicalIdentity,
   ): Promise<GenerationHeader | undefined> {
     let revision: PersistenceRevision
     try {
-      revision = fileRevision(await stat(selected.sourcePath, { bigint: true }))
+      revision = fileRevision(capturedIdentity ?? await stat(selected.sourcePath, { bigint: true }))
     } catch (error: unknown) {
       signal?.throwIfAborted()
       if (!isENOENT(error)) throw error

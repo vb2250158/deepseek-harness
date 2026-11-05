@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { SessionId, type SessionHeader } from '@deepseek-ai/dsh-session'
-import { SessionFormatUnsupportedError, SessionPersistenceCorruptionError } from '@deepseek-ai/dsh-session-persistence'
+import { SessionFormatUnsupportedError, SessionPersistenceCorruptionError, SessionPersistenceReadScopeChangedError } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { generationLogPath } from '../src/format.ts'
 import { prepareCatalogFacts } from '../src/catalog-migration.ts'
+import * as catalogMigration from '../src/catalog-migration.ts'
+import { JsonlGenerationSourceChangedError } from '../src/generation.ts'
 import { compressZstdFrame } from '../src/zstd.ts'
 
 const roots: string[] = []
@@ -115,6 +117,116 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
     expect((await f.ctx.sessionPersistence.list()).find(row => row.header.id === f.parent)?.revision).toBe(added)
     await f.write('child', [f.descriptor, { type: 'feedback/record', seq: 1, time: 3, data: {} }], true)
     expect(await revision()).not.toBe(added)
+  })
+
+  it('keeps historical revisions stable when an unrelated trusted source changes', async () => {
+    const f = await fixture()
+    const first = (await f.ctx.sessionPersistence.stat(f.parent))!.revision
+    await f.write('unrelated', [], false, 4)
+    await f.write('unrelated', [{ type: 'feedback/record', seq: 0, time: 3, data: {} }], false, 4)
+    expect((await f.ctx.sessionPersistence.stat(f.parent))!.revision).toBe(first)
+    expect((await f.ctx.sessionPersistence.list()).find(row => row.header.id === f.parent)?.revision).toBe(first)
+  })
+
+  it('captures child membership for one read scope without contaminating ordinary opens', async () => {
+    const f = await fixture()
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      expect(scope.consistency).toBe('selected-sources')
+      await f.write('child', [f.descriptor], true)
+      expect((await scope.read(f.parent)).events).toEqual([])
+      expect(await f.read()).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child' } }])
+      expect((await scope.read(f.parent)).events).toEqual([])
+    })
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      expect((await scope.read(f.parent)).events).toMatchObject([{ type: 'subagent/catalog', data: { childId: 'child' } }])
+    })
+  })
+
+  it.each(['replace-parent', 'replace-child', 'delete-child', 'new-parent-generation', 'opaque-child'] as const)(
+    'rejects participating source changes in a read scope: %s', async (change) => {
+      const f = await fixture()
+      const child = await f.write('child', [f.descriptor], true)
+      await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+        if (change === 'replace-parent') await f.write(f.parent, [{ type: 'feedback/record', seq: 0, time: 3, data: {} }])
+        else if (change === 'replace-child') await f.write('child', [f.descriptor, { type: 'feedback/record', seq: 1, time: 3, data: {} }], true)
+        else if (change === 'delete-child') await rm(child)
+        else if (change === 'new-parent-generation') await f.write(f.parent, [], false, 4)
+        else await f.write('child', [], true, 5)
+        await expect(scope.read(f.parent)).rejects.toThrow(/changed/)
+      })
+    },
+  )
+
+  it('releases read scopes and forwards caller cancellation without cancelling later readers', async () => {
+    const f = await fixture()
+    let readAfterRelease: (() => Promise<unknown>) | undefined
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      readAfterRelease = () => scope.read(f.parent)
+      const controller = new AbortController()
+      const reason = new Error('caller cancelled')
+      controller.abort(reason)
+      await expect(scope.read(f.parent, { signal: controller.signal })).rejects.toBe(reason)
+      expect((await scope.read(f.parent)).events).toEqual([])
+    })
+    await expect(readAfterRelease!()).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(f.ctx.sessionPersistence.withReadScope(async () => {}, { signal: AbortSignal.abort(new Error('pass cancelled')) }))
+      .rejects.toThrow('pass cancelled')
+    expect(await f.read()).toEqual([])
+  })
+
+  it('reports opaque sources without inventing readable Session identities', async () => {
+    const f = await fixture()
+    await f.write('child', [], true, 5)
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      expect(scope.omittedSourceCount).toBe(1)
+      expect(scope.snapshots.map(row => row.header.id)).toEqual([f.parent])
+      expect((await scope.read(f.parent)).events).toEqual([])
+    })
+  })
+
+  it('preserves changed-source classification when a parent changes during historical preparation', async () => {
+    const f = await fixture()
+    const prepare = catalogMigration.prepareCatalogFacts
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      vi.spyOn(catalogMigration, 'prepareCatalogFacts').mockImplementationOnce(async (...args) => {
+        const facts = await prepare(...args)
+        await f.write(f.parent, [{ type: 'feedback/record', seq: 0, time: 2, data: {} }])
+        return facts
+      })
+      await expect(scope.read(f.parent)).rejects.toBeInstanceOf(SessionPersistenceReadScopeChangedError)
+    })
+  })
+
+  it('translates generation drift only for scoped reads and preserves arbitrary abort reasons', async () => {
+    const f = await fixture()
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      vi.spyOn(catalogMigration, 'prepareCatalogFacts').mockRejectedValueOnce(new JsonlGenerationSourceChangedError('synthetic-source'))
+      await expect(scope.read(f.parent)).rejects.toBeInstanceOf(SessionPersistenceReadScopeChangedError)
+      const controller = new AbortController()
+      const reason = new Error('cancelled inside historical preparation')
+      vi.spyOn(catalogMigration, 'prepareCatalogFacts').mockImplementationOnce(async () => {
+        controller.abort(reason)
+        throw reason
+      })
+      await expect(scope.read(f.parent, { signal: controller.signal })).rejects.toBe(reason)
+    })
+    expect(await f.read()).toEqual([])
+  })
+
+  it('reads current generations without publishing and rejects in-flight caller cancellation', async () => {
+    const f = await fixture()
+    await f.write(f.parent, [{ type: 'feedback/record', seq: 0, time: 1, data: {} }], false, 4)
+    await f.ctx.sessionPersistence.withReadScope(async (scope) => {
+      expect((await scope.read(f.parent)).events).toHaveLength(1)
+      const controller = new AbortController()
+      const read = scope.read(f.parent, { signal: controller.signal })
+      const reason = new Error('current scoped read cancelled')
+      controller.abort(reason)
+      await expect(read).rejects.toBe(reason)
+      await f.write(f.parent, [], false, 4)
+      await expect(scope.read(f.parent)).rejects.toThrow('changed')
+    })
+    expect(await f.read()).toEqual([])
   })
 
   it('reports malformed native catalog data without migration terminology', async () => {
@@ -248,7 +360,8 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
       childId: 'child', childCreatedAt: 2, mode: 'continuable', label: 'old child',
     } }])
     const child = await f.ctx.sessionPersistence.open(SessionId('child'), 'read')
-    try { expect((await child.read()).events).toEqual(events) } finally { await child.close() }
+    const canonical = version === 2 ? [{ ...f.descriptor, data: { ...data, version: 3 } }] : events
+    try { expect((await child.read()).events).toEqual(canonical) } finally { await child.close() }
   })
 
   it.each(['missing', 'unknown', 'multiple'] as const)('publishes the parent without invented %s child discovery information', async (kind) => {

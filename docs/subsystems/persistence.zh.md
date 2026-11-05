@@ -344,6 +344,8 @@ type SessionPersistenceMetadata = Pick<SessionPersistenceSnapshot, 'header' | 'f
 
 目录展示与 header 筛选通过 `readMetadata`/`listMetadata` 读取 `SessionPersistenceMetadata`；依赖修订值的读取方仍使用 `stat`/`list`。快照中可选的 `eventCount`/`sizeBytes` 字段仍是供有需要的消费方使用的后端观测值。会话列表读取 header 与经过身份校验的投影缓存提示，不打开冷日志。
 
+`SessionPersistenceReadScope` 的生命周期限于回调：`consistency` 区分实时读取和已选来源集合，`observedAt` 记录来源发现时间，`omittedSourceCount` 报告已知不可读 header。`read(id)` 返回经过校验的 `SessionInspection`，不获取写所有权。来源变化会拒绝读取；范围释放或取消时排空未完成读取。这不构成跨文件原子快照，详见[服务说明](../../packages/session/session-persistence/README.zh.md)。
+
 ## 后端
 
 随产品交付的 provider 实现抽象 `SessionPersistence` 约定（`create`/`open`/`stat`/`list`，逐会话 `SessionHandle` 承载 `read`/`append`/`flush`/`close`，全程可选支持取消），并通过共享的持久化契约套件：
@@ -447,6 +449,17 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Run a bounded read pass and cancel outstanding reads when its callback ends.
+ * The default implementation uses live handles, validating each listed revision
+ * before and after its read; it promises no cross-Session atomic snapshot.
+ * Backends may capture selected sources instead, deferring later additions to the next pass.
+ * @param callback - consumer of the pass; await every read it needs.
+ * @param options - cancellation for discovery, the callback, and its reads.
+ * @returns the callback result after outstanding reads have settled.
+ */
+async withReadScope<T>( callback: (scope: SessionPersistenceReadScope) => Promise<T>, options?: SessionPersistenceListOptions, ): Promise<T>
 ```
 
 Types: [SessionId](core.zh.md)

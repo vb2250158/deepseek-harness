@@ -11,6 +11,7 @@ import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@
 import type { SessionHandle, SessionAccess } from './handle.ts'
 import type { SessionLocation } from './errors.ts'
 import type { SessionPersistenceRevision } from './revision.ts'
+import { SessionPersistenceNotFoundError } from './errors.ts'
 
 // Re-export the metadata vocabulary so Consumers import it from the Service Definition.
 export type { SessionHeader } from '@deepseek-ai/dsh-session'
@@ -103,6 +104,41 @@ export interface SessionStorageMetadata {
 export interface SessionInspection extends SessionStorageMetadata {
   /** Contiguous validated events from seq 0. */
   readonly events: readonly SessionEvent[]
+}
+
+/** One bounded read pass; selected sources are not a cross-file atomic snapshot. */
+export interface SessionPersistenceReadScope {
+  /** Live reads, or a backend-captured set of selected physical sources. */
+  readonly consistency: 'live' | 'selected-sources'
+  /** Wall-clock time at which this pass finished discovering its source set. */
+  readonly observedAt: number
+  /** Detached observations for this pass, using instance-local revision tokens. */
+  readonly snapshots: readonly SessionPersistenceSnapshot[]
+  /** Known sources omitted because their headers were unreadable; absence then cannot prove deletion. */
+  readonly omittedSourceCount: number
+  /**
+   * Read the complete logical log without taking write ownership. Changed sources reject.
+   * @param id - Session listed in this scope.
+   * @param options - optional cancellation, combined with scope cancellation.
+   * @returns validated storage metadata and events, including the inherited prefix.
+   */
+  read(id: SessionId, options?: SessionPersistenceOpenOptions): Promise<SessionInspection>
+}
+
+/** A scoped source changed before its read completed; retry in a new pass. */
+export class SessionPersistenceReadScopeChangedError extends Error {
+  constructor(readonly id: SessionId) {
+    super(`session "${id}": read scope source changed; start a new read pass`)
+    this.name = 'SessionPersistenceReadScopeChangedError'
+  }
+}
+
+/** Backend discovery and reader, retained only until the owning read pass ends. */
+interface ReadScopeSource {
+  readonly consistency: SessionPersistenceReadScope['consistency']
+  readonly snapshots: readonly SessionPersistenceSnapshot[]
+  readonly omittedSourceCount: number
+  read(id: SessionId, signal: AbortSignal): Promise<SessionInspection>
 }
 
 /** Options for {@link SessionPersistence.open}. */
@@ -244,6 +280,97 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Run a bounded read pass and cancel outstanding reads when its callback ends.
+   * The default implementation uses live handles, validating each listed revision
+   * before and after its read; it promises no cross-Session atomic snapshot.
+   * Backends may capture selected sources instead, deferring later additions to the next pass.
+   * @param callback - consumer of the pass; await every read it needs.
+   * @param options - cancellation for discovery, the callback, and its reads.
+   * @returns the callback result after outstanding reads have settled.
+   */
+  async withReadScope<T>(
+    callback: (scope: SessionPersistenceReadScope) => Promise<T>,
+    options?: SessionPersistenceListOptions,
+  ): Promise<T> {
+    return this.runReadScope(async (discoverySignal) => {
+      const snapshots = await this.list({ signal: discoverySignal })
+      const revisions = new Map(snapshots.map(snapshot => [snapshot.header.id, snapshot.revision]))
+      return { consistency: 'live', snapshots, omittedSourceCount: 0,
+        read: async (id, signal) => {
+          const revision = revisions.get(id)
+          if (revision === undefined) throw new SessionPersistenceNotFoundError(id)
+          if ((await this.stat(id, { signal }))?.revision !== revision) throw new SessionPersistenceReadScopeChangedError(id)
+          const handle = await this.open(id, 'read', { signal })
+          try {
+            const { events } = await handle.read(0, undefined, { signal })
+            if ((await this.stat(id, { signal }))?.revision !== revision) throw new SessionPersistenceReadScopeChangedError(id)
+            return { meta: handle.header, inheritedEventCount: handle.inheritedEventCount, events }
+          } finally {
+            await handle.close()
+          }
+        },
+      }
+    }, callback, options?.signal)
+  }
+
+  /**
+   * Own discovery and read cancellation without retaining decoded logs between reads.
+   * @param discover - backend discovery and reader using the combined scope/caller signal.
+   * @param callback - scope consumer.
+   * @param signal - optional caller cancellation.
+   * @returns the callback's result after cleanup.
+   */
+  protected async runReadScope<T>(
+    discover: (signal: AbortSignal) => Promise<ReadScopeSource>,
+    callback: (scope: SessionPersistenceReadScope) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const controller = new AbortController()
+    const scopeSignal = signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal])
+    const pending = new Set<Promise<SessionInspection>>()
+    let discovery: Promise<ReadScopeSource> | undefined
+    const release = this.ctx.effect(() => async () => {
+      controller.abort()
+      await Promise.allSettled(discovery === undefined ? [...pending] : [discovery, ...pending])
+    })
+    try {
+      scopeSignal.throwIfAborted()
+      discovery = Promise.resolve().then(() => discover(scopeSignal))
+      const source = await discovery
+      scopeSignal.throwIfAborted()
+      const scope: SessionPersistenceReadScope = {
+        consistency: source.consistency, observedAt: Date.now(), snapshots: source.snapshots,
+        omittedSourceCount: source.omittedSourceCount,
+        read(id, options) {
+          const readSignal = options?.signal === undefined ? scopeSignal : AbortSignal.any([scopeSignal, options.signal])
+          const operation = (async () => {
+            readSignal.throwIfAborted()
+            try {
+              const result = await source.read(id, readSignal)
+              readSignal.throwIfAborted()
+              return result
+            } catch (error: unknown) {
+              readSignal.throwIfAborted()
+              throw error
+            }
+          })()
+          pending.add(operation)
+          void operation.then(() => pending.delete(operation), () => pending.delete(operation))
+          return operation
+        },
+      }
+      const result = await callback(scope)
+      scopeSignal.throwIfAborted()
+      return result
+    } catch (error: unknown) {
+      scopeSignal.throwIfAborted()
+      throw error
+    } finally {
+      await release()
+    }
+  }
 }
 
 export default SessionPersistence

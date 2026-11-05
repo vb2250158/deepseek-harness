@@ -344,6 +344,8 @@ type SessionPersistenceMetadata = Pick<SessionPersistenceSnapshot, 'header' | 'f
 
 Catalog and header-filtering consumers use `readMetadata`/`listMetadata` for `SessionPersistenceMetadata`; revision-based readers retain `stat`/`list`. The optional snapshot `eventCount`/`sizeBytes` fields remain backend observations for consumers that need them. Session listing reads headers plus identity-checked projection-cache hints without opening cold logs.
 
+`SessionPersistenceReadScope` is callback-scoped: `consistency` distinguishes live reads from captured selected sources, `observedAt` timestamps source discovery, and `omittedSourceCount` reports known unreadable headers. Its `read(id)` returns a validated `SessionInspection`, never write ownership. Source changes reject; scope release or cancellation drains outstanding reads. This is not a cross-file atomic snapshot; see the [service reference](../../packages/session/session-persistence/README.md).
+
 ## The backend
 
 The shipped provider implements the abstract `SessionPersistence` contract (`create`/`open`/`stat`/`list`, with per-session `SessionHandle`s carrying `read`/`append`/`flush`/`close` and optional cancellation throughout) and passes the shared persistence contract suite:
@@ -447,6 +449,17 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Run a bounded read pass and cancel outstanding reads when its callback ends.
+ * The default implementation uses live handles, validating each listed revision
+ * before and after its read; it promises no cross-Session atomic snapshot.
+ * Backends may capture selected sources instead, deferring later additions to the next pass.
+ * @param callback - consumer of the pass; await every read it needs.
+ * @param options - cancellation for discovery, the callback, and its reads.
+ * @returns the callback result after outstanding reads have settled.
+ */
+async withReadScope<T>( callback: (scope: SessionPersistenceReadScope) => Promise<T>, options?: SessionPersistenceListOptions, ): Promise<T>
 ```
 
 Types: [SessionId](core.md)

@@ -88,7 +88,9 @@ kind: "package-reference"
 
 已实体化的 `stat` 与 `list` 快照在转换后的逻辑 `header` 之外，通过 `formatStatus` 保留格式 catalog 的头部分类。它们还包含选中物理 generation 的 `location: { kind: 'jsonl', path }`。只读准备不会改变所选历史版本；发布后继之后，状态才变为 `current`。尚未实体化的待定 Session 省略 `formatStatus` 与 `location`。
 
-`open(id, 'read'|'write')` 选择最高规范 generation。当前格式输入走普通快速路径。对于历史输入，只读 open 会单遍解码并迁移源、校验当前逻辑结果，然后在不发布后继的情况下返回。写 open 会在可用时复用按 revision 为键的 preparation，否则执行同一套 preparation，再按有界分片编码同目录临时文件、在 Worker Thread 中校验、复查源修订，并在返回前以不覆盖方式发布当前后继。源保持逐字节不变。如果源在 preparation 后发生变化，该次写 open 会失败，已经返回给读方的逻辑历史不会被替换；后续写 open 会针对新的 revision 重新执行 preparation。后端在 memo 化前冻结已解码的 event graph，并在此时将其标记为 `shared-frozen`；每个嵌套对象和数组都会冻结，句柄读取和 slice 即使为空也保留该状态。只有尚未实体化的 pending 空日志报告 `detached`。`stat(id)` 与 `list()` 只选择并转换最高 generation 的 header，不读取事件行，也不启动迁移；快照携带所选文件的 `sizeBytes` 与尽力而为的修订号。当前格式修订号标识该文件；历史格式修订号还包含持久化根目录中所选文件的指纹，因此子日志变化会使缓存的逻辑事件失效。指纹只读取文件系统元数据；无关变化也会保守地使历史修订号失效。一次 `list()` 为其历史条目共用一个全库指纹。选择 `compression: 'none'` 后，日志是外部读取方可直接消费的换行分隔文本；压缩默认值必须经后端读取。
+`withReadScope` 每轮只发现一次已选代际与直接子会话关系，读取之间仅保留 header、来源路径和物理身份。每次范围内读取在解码前后核对自身与实际直接子来源的最高代际及物理身份；来源被替换、删除或出现更高代际时拒绝读取，避免把旧修订值与新事件混用。发现后新增的子会话留待下一轮。无法读取的 header 计入历史修订值的保守见证与 `omittedSourceCount`。范围内 preparation 不进入普通打开缓存，也不发布后继；普通 `open` 保持最新关联检查。首次遍历仍读取有变化的历史正文；修订值未变时只检查元数据。
+
+`open(id, 'read'|'write')` 选择最高规范 generation。当前格式输入走普通快速路径。对于历史输入，只读 open 会单遍解码并迁移源、校验当前逻辑结果，然后在不发布后继的情况下返回。写 open 会在可用时复用按 revision 为键的 preparation，否则执行同一套 preparation，再按有界分片编码同目录临时文件、在 Worker Thread 中校验、复查源修订，并在返回前以不覆盖方式发布当前后继。源保持逐字节不变。如果源在 preparation 后发生变化，该次写 open 会失败，已经返回给读方的逻辑历史不会被替换；后续写 open 会针对新的 revision 重新执行 preparation。后端在 memo 化前冻结已解码的 event graph，并在此时将其标记为 `shared-frozen`；每个嵌套对象和数组都会冻结，句柄读取和 slice 即使为空也保留该状态。只有尚未实体化的 pending 空日志报告 `detached`。`stat(id)` 与 `list()` 只选择并转换最高 generation 的 header，不读取事件行，也不启动迁移；快照携带所选文件的 `sizeBytes` 与尽力而为的修订号。当前格式修订号标识该文件；历史格式修订号还包含真实直接子来源及无法分类的已选文件指纹。指纹只读取文件系统元数据，无关且可读的会话变化不会使历史修订号失效。一次发现构建直接子项索引及无法分类来源的指纹。选择 `compression: 'none'` 后，日志是外部读取方可直接消费的换行分隔文本；压缩默认值必须经后端读取。
 
 校验只有在 Worker 自然以退出码 0 结束后，才接受其成功响应。并发配额一直保留到该次退出；取消或 Worker 错误会先终止并等待 Worker 退出，再使校验失败。
 
@@ -112,7 +114,7 @@ Header 扫描仅在所选文件修订不变时复用已验证的 header。目录
 
 ### 设计理念
 
-该后端拥有自己完整的存储运行时（`src/storage.ts`）：`JsonlSessionHandle` 承载逐句柄修改链、带固定批处理窗口与 single-flight 排空的已路由实时事件缓冲、单调读取与幂等 close；一个 tracker 持有进程内单写者认领、teardown 清扫所遍历的打开句柄集合，以及后端自己的会话监听器所路由进的已创建但未实体化待定会话。解码日志仅由弱引用保留；同一有界 memo 在日志被回收后仍保留成员路径与物理来源校验，淘汰时一并释放这些校验，后续打开会重新准备。历史正文读取共享每个 Session 唯一的一次 Decode/Migrate preparation，按 revision 为键的有界 memo 让紧接的观察到恢复交接复用该解析；backend 在 memo 化前只对每个 event graph 深度冻结一次，因此后续 handle read 无需复制或再次冻结。只有写 open 才发布准备好的后继。本包暴露插件导出与配置类型——具体类是私有的，因此消费方只耦合 `ctx.sessionPersistence`，其可观察行为由共享 seam 测试套件（`runPersistenceContract`/`runLiveWritePathContract`）钉住。物理修订号组合 device、inode、size 与纳秒时间戳，供准备缓存、稳定读取重试及发布检查使用。历史格式的公开修订号还加入所选路径排序后及其物理修订号的 SHA-256 指纹；锁文件与保留但未被选中的代际不参与计算。
+该后端拥有自己完整的存储运行时（`src/storage.ts`）：`JsonlSessionHandle` 承载逐句柄修改链、带固定批处理窗口与 single-flight 排空的已路由实时事件缓冲、单调读取与幂等 close；一个 tracker 持有进程内单写者认领、teardown 清扫所遍历的打开句柄集合，以及后端自己的会话监听器所路由进的已创建但未实体化待定会话。解码日志仅由弱引用保留；同一有界 memo 在日志被回收后仍保留成员路径与物理来源校验，淘汰时一并释放这些校验，后续打开会重新准备。历史正文读取共享每个 Session 唯一的一次 Decode/Migrate preparation，按 revision 为键的有界 memo 让紧接的观察到恢复交接复用该解析；backend 在 memo 化前只对每个 event graph 深度冻结一次，因此后续 handle read 无需复制或再次冻结。只有写 open 才发布准备好的后继。本包暴露插件导出与配置类型——具体类是私有的，因此消费方只耦合 `ctx.sessionPersistence`，其可观察行为由共享 seam 测试套件（`runPersistenceContract`/`runLiveWritePathContract`）钉住。物理修订号组合 device、inode、size 与纳秒时间戳，供准备缓存、稳定读取重试及发布检查使用。历史格式的公开修订号还加入真实直接子来源及无法分类的已选来源的 SHA-256 指纹；无关且可读的会话不再使其失效；锁文件与保留但未被选中的代际不参与计算。
 
 ### 物理编码
 
