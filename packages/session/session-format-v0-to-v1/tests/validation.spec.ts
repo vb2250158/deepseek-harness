@@ -403,12 +403,18 @@ describe('released event and payload inventory', () => {
   it.each([
     { version: 1, provider: 'spawn', label: 'old child' },
     { version: 1, provider: 'p', label: '', agentProvider: 'p', persona: 'x', toolFilter: { allow: ['read'] } },
-    { version: 2, mode: 'one-shot', provider: 'p', label: 'child' },
-    { version: 2, mode: 'continuable', provider: 'p', label: 'child', agentProvider: 'p', agentModel: 'm' },
-    { version: 2, mode: 'continuable', provider: 'p', label: '', agentModel: 'm', toolFilter: { deny: [''] } },
     { version: 3, mode: 'continuable', provider: 'p', label: 'child', agentReasoningEffort: 'high' },
   ])('migrates format v0 subagent descriptor %j unchanged', (data) => {
     expect(restoreV0ToV1(v0Header, [descriptor(data)]).events).toEqual([descriptor(data)])
+  })
+
+  it.each([
+    { version: 2, mode: 'one-shot', provider: 'p', label: 'child' },
+    { version: 2, mode: 'continuable', provider: 'p', label: 'child', agentProvider: 'p', agentModel: 'm' },
+  ])('promotes format v0 subagent descriptor %j to version 3', (data) => {
+    expect(restoreV0ToV1(v0Header, [descriptor(data)]).events).toEqual([
+      descriptor({ ...data, version: 3 }),
+    ])
   })
 
   it.each([
@@ -417,6 +423,7 @@ describe('released event and payload inventory', () => {
     [{ version: 1, provider: 'p', label: 'child', agentReasoningEffort: 'high' }, 'unexpected member "agentReasoningEffort"'],
     [{ version: 2, mode: 'continuable', provider: 'p', label: 'child', agentReasoningEffort: 'high' }, 'unexpected member "agentReasoningEffort"'],
     [{ version: 2, mode: 'one-shot', provider: 'p', persona: 'x' }, 'unexpected member "persona"'],
+    [{ version: 2, mode: 'continuable', provider: 'p', label: '', agentModel: 'm', toolFilter: { deny: [''] } }, 'label must be a non-empty string'],
     [{ version: 3, mode: 'continuable', provider: 'p', label: 'child', agentModel: 'm' }, 'agentProvider and agentModel must be paired'],
   ])('refuses format v0 subagent descriptor %j as malformed', (data, message) => {
     const restore = () => restoreV0ToV1(v0Header, [descriptor(data)])

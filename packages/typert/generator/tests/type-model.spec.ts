@@ -1714,8 +1714,12 @@ describe('FaceModelEmitter', { timeout: 60_000 }, () => {
       '}',
       '',
     ].join('\n'))
+    // Resolved zod declarations name the global URL constructor. This program
+    // keeps types empty and lib at ES2024, which does not declare that constructor.
+    const urlGlobalPath = join(root, 'url-global.d.ts')
+    writeFileSync(urlGlobalPath, 'declare class URL {}\n')
     const program = ts.createProgram({
-      rootNames: [consumerPath, declarationPath, sourceStubPath],
+      rootNames: [consumerPath, declarationPath, sourceStubPath, urlGlobalPath],
       options: {
         strict: true,
         noEmit: true,
