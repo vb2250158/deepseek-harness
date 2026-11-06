@@ -56,11 +56,12 @@
       "ds-bot": "0.2.7-rabi.2",
       "dsh-pet": "0.4.1-fork.3",
       "dsh-waimai": "0.8.40",
-      "dsh-environment-sync": "0.8.1",
+      "dsh-environment-sync": "0.8.3",
       "dsh-usage-analytics": "1.4.3",
-      "dsh-smart-selector": "0.2.2"
+      "dsh-smart-selector": "0.2.2",
+      "dsh-skill-catalog-cache": "0.1.3"
     },
-    "checkedOn": "2026-11-06",
-    "note": "Fresh read-only production observation supplied by the formal lifecycle owner; current rc.1 candidate remains separate and is not installed."
+    "checkedOn": "2026-11-07",
+    "note": "Authenticated runtime readback after the two Host updates; client bytes and existing Session/Bot data are retained. Other source or GUI candidates are not installed."
   }
 }
