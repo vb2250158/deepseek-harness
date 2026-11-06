@@ -27,9 +27,9 @@ export interface WindowsProcessRuntimeIdentity {
   sha256: string
 }
 
-/** Source provenance and unsigned local runtime identities. */
+/** Source file identities and unsigned local runtime copies. */
 export interface WindowsProcessRuntimeReceipt {
-  /** Original Node input, retained for version and provenance checks. */
+  /** Original Node input, retained for version and source-byte checks. */
   source: { path: string; sha256: string; fileVersion: string; copyright: string }
   /** Existing icon input used for every generated role. */
   icon: { path: string; sha256: string }
@@ -52,7 +52,7 @@ function sha256(bytes: Uint8Array): string {
  * Create role-specific Windows executables without changing the source or starting services.
  * Only a written manifest marks a complete output; failed output directories remain for diagnosis.
  * @param options - explicit source executable, icon and new output directory.
- * @returns input provenance and the generated runtime identities.
+ * @returns input file identities and the generated runtime identities.
  * @throws when resource inputs are missing, output already exists, or publication fails.
  */
 export async function prepareWindowsProcessRuntime(options: WindowsProcessRuntimeOptions): Promise<WindowsProcessRuntimeReceipt> {

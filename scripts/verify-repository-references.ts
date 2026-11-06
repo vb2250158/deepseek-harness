@@ -32,12 +32,30 @@ function isMaintained(file: string): boolean {
   return !excludedPrefixes.some(prefix => file.startsWith(prefix))
 }
 
+/** Read the exact deployment source identity; ordinary prose still uses maintained links. */
+function deploymentSourceCommit(file: string, source: string): string | undefined {
+  if (file !== 'tested-environment.json') return undefined
+  let document: unknown
+  try {
+    document = JSON.parse(source)
+  } catch (_error) {
+    // Invalid JSON grants no exception to the reference policy.
+    return undefined
+  }
+  if (typeof document !== 'object' || document === null || !('productionAtLastVerification' in document)) return undefined
+  const deployment = document.productionAtLastVerification
+  if (typeof deployment !== 'object' || deployment === null || !('hostCommit' in deployment)) return undefined
+  return typeof deployment.hostCommit === 'string' && /^[\da-f]{40}$/u.test(deployment.hostCommit)
+    ? deployment.hostCommit
+    : undefined
+}
+
 /**
  * Inspect a maintained source file against known commit identifiers.
  * @param file - Repository-relative path used in diagnostics and exclusions.
  * @param source - File text or a symlink's stored target.
  * @param commits - Lowercase, unambiguous full or abbreviated commit identifiers.
- * @returns One finding per line and reference kind; digests and other Git object types are accepted.
+ * @returns One finding per line and reference kind; digests, other Git object types and the declared deployment identity are accepted.
  * Decimal-only tokens are ignored, including actual commit identifiers.
  */
 export function findRepositoryReferences(
@@ -47,11 +65,13 @@ export function findRepositoryReferences(
 ): RepositoryReference[] {
   if (!isMaintained(file)) return []
   const references: RepositoryReference[] = []
+  const deploymentCommit = deploymentSourceCommit(file, source)
+  const deploymentIdentity = deploymentCommit === undefined ? undefined : new RegExp(`^\\s*"hostCommit"\\s*:\\s*"${deploymentCommit}"\\s*,?\\s*$`, 'u')
   for (const [index, line] of source.split('\n').entries()) {
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
+    if (deploymentIdentity?.test(line) !== true && [...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
       references.push({ file, line: index + 1, kind: 'commit-hash' })
     }
   }

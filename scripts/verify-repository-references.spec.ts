@@ -75,6 +75,40 @@ describe('unique object-name prefix search', () => {
 describe('maintained repository reference policy', () => {
   const numericCommit = String(6_344_383)
 
+  it('retains an exact deployment identity while rejecting the same commit in prose', () => {
+    const commit = 'a'.repeat(40)
+    const source = JSON.stringify({ productionAtLastVerification: { hostCommit: commit }, note: commit }, null, 2)
+    expect(findRepositoryReferences('tested-environment.json', source, new Set([commit]))).toEqual([
+      { file: 'tested-environment.json', line: 5, kind: 'commit-hash' },
+    ])
+  })
+
+  it.each(['other.json', 'docs/tested-environment.json'])('does not exempt deployment-looking fields in %s', (file) => {
+    const commit = 'a'.repeat(40)
+    const source = JSON.stringify({ productionAtLastVerification: { hostCommit: commit } }, null, 2)
+    expect(findRepositoryReferences(file, source, new Set([commit]))).toEqual([
+      { file, line: 3, kind: 'commit-hash' },
+    ])
+  })
+
+  it.each([
+    { observation: { hostCommit: 'a'.repeat(40) } },
+    { productionAtLastVerification: { hostCommit: 'a'.repeat(7) } },
+  ])('rejects unowned or abbreviated source fields', (document) => {
+    const source = JSON.stringify(document, null, 2)
+    expect(findRepositoryReferences('tested-environment.json', source, new Set(['a'.repeat(40), 'a'.repeat(7)]))).toEqual([
+      { file: 'tested-environment.json', line: 3, kind: 'commit-hash' },
+    ])
+  })
+
+  it('rejects a deployment-looking field when the JSON document is invalid', () => {
+    const commit = 'a'.repeat(40)
+    const source = `{\n  "hostCommit": "${commit}"\n`
+    expect(findRepositoryReferences('tested-environment.json', source, new Set([commit]))).toEqual([
+      { file: 'tested-environment.json', line: 2, kind: 'commit-hash' },
+    ])
+  })
+
   it.each([
     ['uv.lock', `artifact = { size = ${numericCommit} }`],
     ['python/sdk/uv.lock', `sdist.size = ${numericCommit}`],
