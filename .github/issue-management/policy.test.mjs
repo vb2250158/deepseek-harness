@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { runInNewContext } from 'node:vm'
 
 import { api, graphql, initializeIssueStartDate, issueSnapshot } from './github.mjs'
 import { auditIssue, initializePullRequestStartDates, repairIssueLabels, runLifecycle } from './lifecycle.mjs'
@@ -990,11 +991,11 @@ test('performs no lifecycle requests for removed signals or title-only edits', a
   assert.deepEqual(fixture.requests, [])
 })
 
-test('keeps trusted preflight before token minting and required policy unconditional', () => {
+test('keeps trusted preflight before token minting and required policy unconditional in its repository', () => {
   const source = readFileSync(new URL('../workflows/issue-policy.yml', import.meta.url), 'utf8')
   const job = source.slice(source.indexOf('  policy:'))
   assert.ok(job.includes('    name: Issue policy'))
-  assert.ok(!job.slice(0, job.indexOf('    steps:')).includes('    if:'))
+  assert.ok(job.includes("    if: github.repository == 'deepseek-harness/deepseek-harness'"))
   assert.ok(source.includes('types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review, review_requested]'))
   const steps = job.split('      - name: ').slice(1)
   assert.equal(steps.length, 4)
@@ -1069,6 +1070,20 @@ test('allocates lifecycle runners only for relevant reviews and PR body edits', 
   assert.ok(beforeSteps.includes("(github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.body != null)"))
   assert.ok(source.includes('ref: ${{ github.event.repository.default_branch }}'))
   assert.ok(source.includes('persist-credentials: false'))
+})
+
+test('runs Issue automation only for its configured repository', () => {
+  const config = JSON.parse(readFileSync(new URL('./config.json', import.meta.url), 'utf8'))
+  const configuredRepository = `${config.organization}/${config.repository}`
+  for (const name of ['issue-policy', 'issue-lifecycle']) {
+    const source = readFileSync(new URL(`../workflows/${name}.yml`, import.meta.url), 'utf8')
+    const expression = source.match(/^    if: (.+(?:\n      .+)*)/m)?.[1].replace(/^>-\s*/, '').trim()
+    assert.ok(expression, name)
+    for (const repository of [configuredRepository, 'example/fork']) {
+      const github = { repository, event_name: 'pull_request', event: { action: 'opened' } }
+      assert.equal(runInNewContext(expression, { github }, { timeout: 1000 }), repository === configuredRepository, name)
+    }
+  }
 })
 
 test('keeps REST headers, null responses, and transport errors unchanged', async (t) => {

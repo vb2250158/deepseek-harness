@@ -54,6 +54,8 @@ PR opening initializes an empty Project `Start Date` for every referenced Issue,
 
 [config.json](config.json) selects the repository, Project, field names, statuses, lifecycle actor, and time zone. The policy reads the Project custom single-select `Priority` field, not a native organization Issue Priority field. Project-local planning fields need no separate organization Issue Fields permission. Maintainers set Project Priority manually; skill guidance that directs edits to native Issue fields does not populate this value. Issue audits remove PR-only kinds and retired label aliases before validating the remaining metadata. There is no field migration or Priority synchronization.
 
+The two Issue workflows run only in the configured repository. Forks skip these repository-specific jobs; they do not query the upstream PR number or mint its Project App token. Keep both workflow repository conditions aligned with `config.json` when adopting this automation elsewhere.
+
 Before removing a legacy organization field, compare every value with its Project value, including archived Project items.
 
 Lifecycle processing is event-driven, not a reconciler. Omitted events do not repair Project state, and concurrent Project mutations have no atomic compare-and-swap. Selective evaluation does not redesign required-check authority or guarantee measured Actions-minute savings. The [archived selective-evaluation decision](../../.agents/notes/archived/process/2026-09-07-selective-issue-policy-evaluation.md) records the trade-offs.
