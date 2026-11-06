@@ -350,7 +350,7 @@ reader.on('line', (line) => {
         const trace = JSON.parse(env.FAKE_NOTIFICATION_TRACE) as { method: string; params: Record<string, unknown> }[]
         for (const notification of trace) notify(notification.method, { ...notification.params, sessionId })
         settledSessions.add(sessionId)
-        respond({ messageId })
+        respond(promptResult(messageId))
         return
       }
       notify('session.status', { sessionId, status: 'running' })

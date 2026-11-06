@@ -411,7 +411,7 @@ describe('CI workflow', () => {
       const cores = jobName === 'windows-native-tests' ? 2 : 16
       expect(evaluateRunsOn(job['runs-on'], { vars: { DSH_CI_FAILOVER_WINDOWS: 'blacksmith' } }))
         .toBe(`blacksmith-${cores}vcpu-windows-2025`)
-      expect(job.if).toBe("github.event_name == 'pull_request'")
+      expect(job.if).toBe("github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'pull_request'")
     }
 
     // windows-build runs the blocking build/site pair.
@@ -511,7 +511,7 @@ describe('CI workflow', () => {
     expect(report?.run).toContain('Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append')
 
     // serial-windows: master-only standby, self-hosted, non-blocking, lives in ci-master.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    expect(serialWindows.if).toBe("github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
     expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
     // Its store must share the ReFS workspace volume for clone; the install
@@ -694,7 +694,7 @@ describe('CI workflow', () => {
       expect(evaluateRunsOn(benchmark['runs-on'], { vars: { DSH_CI_FAILOVER_LINUX: mode } })).toBe('ubuntu-24.04')
     }
     expect(JSON.stringify(benchmark.steps)).not.toContain('DSH_CI_FAILOVER_LINUX')
-    expect(benchmark.if).toBe("github.event_name == 'pull_request'")
+    expect(benchmark.if).toBe("github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'pull_request'")
     expect(benchmark.needs).toBeUndefined()
     expect(benchmark['continue-on-error']).toBeUndefined()
     expect(benchmark.env).toBeUndefined()
@@ -791,13 +791,19 @@ describe('CI workflow', () => {
       ['workflow_dispatch', 'refs/heads/topic', 'larger-runner-benchmark', false],
       ['workflow_dispatch', 'refs/heads/topic', 'consolidated-runner-benchmark', false],
     ] as const) {
-      expect(runInNewContext(wine.if, { github: { event_name: event, ref }, inputs: { suite } }, { timeout: 1000 })).toBe(expected)
+      expect(runInNewContext(wine.if, {
+        github: { event_name: event, ref, repository: 'deepseek-ai/deepseek-harness' },
+        inputs: { suite },
+      }, { timeout: 1000 })).toBe(expected)
     }
     const enabled = Object.entries(master.jobs).filter(([, job]) => {
       if (!isRecord(job)) throw new TypeError('CI master jobs must be objects')
       if (typeof job.if === 'boolean') return job.if
       if (typeof job.if !== 'string') throw new TypeError('CI master jobs must define trigger conditions')
-      return runInNewContext(job.if, { github: { event_name: 'workflow_dispatch', ref: 'refs/heads/topic' }, inputs: { suite: 'wine' } }, { timeout: 1000 }) === true
+      return runInNewContext(job.if, {
+        github: { event_name: 'workflow_dispatch', ref: 'refs/heads/topic', repository: 'deepseek-ai/deepseek-harness' },
+        inputs: { suite: 'wine' },
+      }, { timeout: 1000 }) === true
     }).map(([name]) => name)
     expect(enabled).toEqual(['windows'])
   })
@@ -846,7 +852,7 @@ describe('CI workflow', () => {
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
       // Standby drills remain post-merge work, but share run cancellation.
-      expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      expect(job.if).toBe("github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'")
     }
 
     // Pin the post-merge runtime, Wine, and standby inventory.
@@ -925,7 +931,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: "github.event_name == 'pull_request'",
+      if: "github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'pull_request'",
       name: 'python runtime / release-shaped matrix',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: { targets: 'node24-linux-x64,node24-win-x64', ci: true },
@@ -1152,19 +1158,26 @@ describe('DeepSeek e2e workflow', () => {
     const job = workflowJob(loadWorkflow('.github/workflows/e2e.yml'), 'e2e')
     const expression = job.if
     if (typeof expression !== 'string') throw new TypeError('DeepSeek e2e job must define if')
-    const repository = 'vb2250158/deepseek-harness'
+    const repository = 'deepseek-ai/deepseek-harness'
+    const fork = 'vb2250158/deepseek-harness'
     const decide = (context: Record<string, string>): unknown => {
       const source = expression.replace(/\b(?:github|vars)(?:\.[a-zA-Z_][a-zA-Z_0-9]*)+/g,
         (key: string) => JSON.stringify(context[key] ?? ''))
       return runInNewContext(source, {}, { timeout: 1000 })
     }
-    expect(decide({ 'github.event_name': 'workflow_dispatch', 'github.repository': repository })).toBe(true)
+    expect(decide({ 'github.event_name': 'workflow_dispatch', 'github.repository': fork })).toBe(true)
     expect(decide({
       'github.event_name': 'pull_request',
       'github.repository': repository,
       'github.event.pull_request.head.repo.full_name': repository,
       'github.event.pull_request.user.login': 'maintainer',
     })).toBe(true)
+    expect(decide({
+      'github.event_name': 'pull_request',
+      'github.repository': fork,
+      'github.event.pull_request.head.repo.full_name': fork,
+      'github.event.pull_request.user.login': 'maintainer',
+    })).toBe(false)
     expect(decide({
       'github.event_name': 'pull_request',
       'github.repository': repository,

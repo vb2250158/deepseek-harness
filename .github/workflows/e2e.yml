@@ -61,10 +61,9 @@ jobs:
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'blacksmith'
           && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
     name: e2e
-    # Run on every trusted event. Skip PRs from another repository and
-    # Dependabot PRs, where the secret is withheld — they would otherwise
-    # hard-fail the preflight. Same-repository branch PRs run even when this
-    # repository is itself a fork.
+    # Automatic runs stay on the upstream repository. workflow_dispatch still
+    # runs on this fork. Skip PRs from another repository and Dependabot PRs,
+    # where the secret is withheld — they would otherwise hard-fail the preflight.
     if: >-
       (github.repository == 'deepseek-ai/deepseek-harness' || github.event_name == 'workflow_dispatch')
       && (github.event_name != 'pull_request'
