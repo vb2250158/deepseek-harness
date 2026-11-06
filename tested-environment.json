@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-04",
+  "checkedOn": "2026-11-06",
   "host": {
-    "version": "0.2.2-alpha.3",
+    "version": "0.2.2-rc.1",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "repository checkout under test",
     "revisionEvidence": "Git commit recorded by the verification run",
@@ -21,7 +21,9 @@
   "scope": {
     "onlyDeclaredTarget": true,
     "compatibilityMatrix": false,
-    "products": ["source-web"],
+    "products": [
+      "source-web"
+    ],
     "otherEnvironments": "Review concrete community reports and pull requests when received"
   },
   "ci": {
@@ -30,23 +32,35 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "sourceWeb": "passed",
+    "sourceWeb": "Passed isolated source CLI startup, authenticated index, exact served Client bytes, 1002 synthetic retained-session inventory and selected short/long history reads, and public appExit(0). Browser visual inspection pending.",
     "pluginCombination": {
-      "ds-bot": "0.2.7-rabi.1",
-      "dsh-pet": "0.4.1-fork.4"
+      "dsh-waimai": "0.8.40",
+      "dsh-usage-analytics": "1.4.3"
     },
-    "coverage": ["isolated startup", "HTTP and authentication", "plugin loading", "session creation and history", "served artifact bytes", "normal shutdown"],
-    "productionInstalled": false
+    "coverage": [
+      "418 merged UI tests",
+      "511 Session API, Subagent, Team and V4 admission tests",
+      "325 retained PTC lifecycle tests; one existing skip",
+      "Host and Client aggregate build checks",
+      "1219 bilingual documentation pairs"
+    ],
+    "productionInstalled": false,
+    "note": "Current merged rc.1 source candidate only. Full production plugin composition and browser/native UI acceptance remain separate; previous alpha.3 deployment stays running."
   },
   "productionAtLastVerification": {
-    "hostVersion": "0.2.2-alpha.2",
+    "hostVersion": "0.2.2-alpha.3",
+    "hostCommit": "3ff2154e44fcec3b98e1c529ae9f62b26b20096c",
     "profile": "web",
     "mode": "source",
     "pluginVersions": {
-      "ds-bot": "0.2.6-rabi.1",
-      "dsh-pet": "0.4.1-fork.3"
+      "ds-bot": "0.2.7-rabi.2",
+      "dsh-pet": "0.4.1-fork.3",
+      "dsh-waimai": "0.8.40",
+      "dsh-environment-sync": "0.8.1",
+      "dsh-usage-analytics": "1.4.3",
+      "dsh-smart-selector": "0.2.2"
     },
-    "checkedOn": "2026-11-04",
-    "note": "Historical observation; read the running host before deployment. Candidate verification does not establish production installation."
+    "checkedOn": "2026-11-06",
+    "note": "Fresh read-only production observation supplied by the formal lifecycle owner; current rc.1 candidate remains separate and is not installed."
   }
 }
