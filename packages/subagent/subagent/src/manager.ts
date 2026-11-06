@@ -118,6 +118,8 @@ type MaterializeInputs = MaterializeBase & (
  */
 interface Materialization {
   readonly root: Agent
+  readonly childId: SessionId | undefined
+  readonly creatorId: SessionId | undefined
   readonly settled: Promise<void>
   readonly controller: AbortController
 }
@@ -292,6 +294,35 @@ export class SubagentManager {
   }
 
   /**
+   * Release selected direct-child epochs without closing their parent's tree.
+   * @param parent - exact live creator authorizing the complete selection.
+   * @param childIds - direct-child identities; completed catalog entries are no-ops.
+   * @returns after captured startup and cleanup settle.
+   */
+  async drainChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void> {
+    const root = this.rootOf(parent)
+    const selected = new Set(childIds)
+    const catalog = new Set(this.host.catalogOf(parent.session).map(child => child.id))
+    const pending = [...this.materializations].filter(item => item.childId !== undefined && selected.has(item.childId))
+    const targets: Activation[] = []
+    for (const childId of selected) {
+      const activation = this.resident.get(childId)
+      const starting = pending.filter(item => item.childId === childId)
+      if (childId === parent.id
+        || activation !== undefined && (activation.root !== root || activation.ancestors.at(-1) !== parent.id)
+        || starting.some(item => item.root !== root || item.creatorId !== undefined && item.creatorId !== parent.id)
+        || activation === undefined && !catalog.has(childId) && !starting.some(item => item.creatorId === parent.id)) {
+        throw new SubagentError('selected teardown requires the exact direct parent of every child', 'UNAUTHORIZED')
+      }
+      if (activation !== undefined) targets.push(activation)
+    }
+    for (const item of pending) item.controller.abort()
+    const disposal = this.disposeRoots(targets, 'scoped activation(s)')
+    const [disposed] = await Promise.allSettled([disposal, ...pending.map(item => item.settled)])
+    if (disposed.status === 'rejected') throw disposed.reason
+  }
+
+  /**
    * Start one continuable background child and resolve at initial inbox acceptance.
    * Every earlier failure disposes any created handle and rolls back Activation
    * and its capacity slot without returning either id.
@@ -324,9 +355,9 @@ export class SubagentManager {
     path: string | undefined,
   ): Promise<SubagentActivation & { messageId: MessageId }> {
     const parent = spec.parent
+    const childId = spec.childId ?? brandString<SessionId>(randomUUID())
     return this.trackStartup(ancestry.root, spec.signal, async (signal) => {
       const persistence = spec.delivery === 'caller' ? this.ctx.get('sessionPersistence') : this.requirePersistence()
-      const childId = spec.childId ?? brandString<SessionId>(randomUUID())
       this.assertChildIdAvailable(childId)
       const childDepth = resolveChildDepth(parent, spec.maxDepth)
       // Snapshot before any await: invalid descriptor JSON rejects the call
@@ -411,7 +442,7 @@ export class SubagentManager {
         )
       })
       return { ...this.receipt(established), childId, messageId }
-    })
+    }, childId, parent.id)
   }
 
   /**
@@ -717,12 +748,15 @@ export class SubagentManager {
   }
 
   /** Keep subagent tree shutdown and host waits joined to preparation, publication, and rollback. */
-  private trackStartup<T>(root: Agent, signal: AbortSignal, start: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private trackStartup<T>(
+    root: Agent, signal: AbortSignal, start: (signal: AbortSignal) => Promise<T>,
+    childId?: SessionId, creatorId?: SessionId,
+  ): Promise<T> {
     this.assertAdmitting(root)
     signal.throwIfAborted()
     const settled = Promise.withResolvers<void>()
     const controller = new AbortController()
-    const materialization: Materialization = { root, settled: settled.promise, controller }
+    const materialization: Materialization = { root, childId, creatorId, settled: settled.promise, controller }
     this.materializations.add(materialization)
     return start(AbortSignal.any([signal, controller.signal])).catch((error: unknown) => {
       if (error instanceof Error && error.name === 'AbortError') this.assertAdmitting(root)
@@ -1293,7 +1327,7 @@ export class SubagentManager {
         throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
       }
       return activation
-    })
+    }, childId, creatorId)
   }
 
   /** Admit a materialized child, commit its creation fact, and release it on failure. */

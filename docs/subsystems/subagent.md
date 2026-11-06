@@ -558,6 +558,20 @@ async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, s
 async drainDescendants(parents: readonly Agent[]): Promise<void>
 
 /**
+ * Stop selected direct children and await their exact current execution cleanup.
+ * Validate every target before cancellation. Completed direct catalog entries
+ * are no-ops; unknown, foreign, and indirect children reject the whole selection.
+ * Only already-admitted known-id startup and current residency epochs are joined;
+ * later resumes, other children, descendants, and root admission remain independent.
+ * @param parent - exact live direct creator authorizing the selection.
+ * @param childIds - child Session ids to release, deduplicated before disposal.
+ * @returns after selected startup rolls back and all captured cleanup settles.
+ * @throws {SubagentError} `UNAUTHORIZED` before side effects for an invalid selection,
+ *   or `ACTIVATION_TEARDOWN_FAILED` after every selected cleanup settles.
+ */
+async drainChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>
+
+/**
  * Recursively list reachable parent catalogs in stable pre-order, preserving
  * each catalog's event order. Each row carries its catalog parent and depth;
  * external children are leaves; one-shot and unknown-mode children remain

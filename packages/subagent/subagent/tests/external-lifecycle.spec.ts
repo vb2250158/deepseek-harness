@@ -37,6 +37,72 @@ function run(id: string, result: Promise<SubagentResult>, dispose = () => Promis
 }
 
 describe('external activation ownership', () => {
+  it('releases selected direct children once, preserving siblings and later parent admission', async () => {
+    const results = [0, 1, 2].map(() => Promise.withResolvers<SubagentResult>())
+    const disposals = results.map(result => vi.fn(async () => { result.resolve(complete) }))
+    let starts = 0
+    const fixture = await setup(() => {
+      const index = starts++
+      return Promise.resolve(run(`selected-${index}`, results[index]!.promise, disposals[index]))
+    }, 'parent')
+    const ended: string[] = []
+    fixture.ctx.on('subagent/end', (info) => { ended.push(info.id) })
+    const first = await fixture.start()
+    const sibling = await fixture.start()
+    await fixture.ctx.subagents.drainChildren(fixture.parent, [first.childId, first.childId])
+    expect(disposals[0]).toHaveBeenCalledOnce()
+    expect(disposals[1]).not.toHaveBeenCalled()
+    expect(ended).toEqual([first.childId])
+    await fixture.ctx.subagents.drainChildren(fixture.parent, [first.childId])
+    const later = await fixture.start()
+    await sibling.dispose()
+    await later.dispose()
+  })
+
+  it('rejects the whole selection before stopping valid targets when any id has no direct authority', async () => {
+    const result = Promise.withResolvers<SubagentResult>()
+    const disposal = vi.fn(async () => { result.resolve(complete) })
+    const fixture = await setup(() => Promise.resolve(run('owned-selected', result.promise, disposal)))
+    const child = await fixture.start()
+    const foreign = await externalTestParent(fixture.ctx)
+    for (const owner of [foreign, { ...fixture.parent }]) {
+      await expect(fixture.ctx.subagents.drainChildren(owner, [child.childId])).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    }
+    await expect(fixture.ctx.subagents.drainChildren(fixture.parent, [child.childId, SessionId('unknown')]))
+      .rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(disposal).not.toHaveBeenCalled()
+    await child.dispose()
+  })
+
+  it('waits for all selected cleanup failures without selecting a later execution with the same id', async () => {
+    const result = [0, 1, 2].map(() => Promise.withResolvers<SubagentResult>())
+    const cleanup = Promise.withResolvers<undefined>()
+    const entered = Promise.withResolvers<undefined>()
+    const laterDispose = vi.fn(async () => { result[2]!.resolve(complete) })
+    let starts = 0
+    const fixture = await setup(() => {
+      const index = starts++
+      return Promise.resolve(run(index === 0 ? 'slow-selected' : 'reused-selected', result[index]!.promise,
+        index === 0 ? async () => { result[0]!.resolve(complete); entered.resolve(undefined); await cleanup.promise }
+          : index === 1 ? async () => { result[1]!.resolve(complete) } : laterDispose))
+    })
+    try {
+      const first = await fixture.start()
+      const second = await fixture.start()
+      const draining = fixture.ctx.subagents.drainChildren(fixture.parent, [first.childId, second.childId])
+      const rejected = expect(draining).rejects.toMatchObject({ code: 'ACTIVATION_TEARDOWN_FAILED' })
+      await entered.promise
+      await second.result
+      const later = await fixture.start()
+      cleanup.reject(new Error('selected cleanup failed'))
+      await rejected
+      expect(laterDispose).not.toHaveBeenCalled()
+      await later.dispose()
+    } finally {
+      cleanup.resolve(undefined)
+    }
+  })
+
   it('observes admitted startup and reports no children after the execution releases', async () => {
     const entered = Promise.withResolvers<undefined>()
     const published = Promise.withResolvers<SubagentRun>()

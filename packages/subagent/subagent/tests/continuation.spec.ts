@@ -4200,6 +4200,76 @@ describe('SubagentRuntime.interrupt', () => {
     ctx.subagents.interrupt(started.childId, { kind: 'ancestor', agent: parent })
   })
 
+  it('releases selected local input and notifies its parent without stopping siblings or descendants', async () => {
+    const hold = [Promise.withResolvers<undefined>(), Promise.withResolvers<undefined>(), Promise.withResolvers<undefined>()]
+    const adapter = new GatedAdapter([
+      ...hold.map((gate, index) => ({ chunks: textResponse(`selected work ${index}`), gate: gate.promise })),
+      { chunks: textResponse('parent acknowledgement') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    try {
+      const first = await ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'parent' })
+      const child = ctx.agents.get(first.childId)!
+      await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+      const sibling = await ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'caller' })
+      await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
+      const descendant = await ctx.subagents.startActivation({ ...startSpec(child), delivery: 'caller' })
+      await vi.waitFor(() => { expect(adapter.requests).toHaveLength(3) })
+      child.followup(createUserMessage({ content: message('unstarted input'), source: { kind: 'user' } }))
+      expect(child.inbox.nextTurn.length).toBeGreaterThan(0)
+      const cancelSibling = vi.spyOn(ctx.agents.get(sibling.childId)!, 'cancel')
+      const cancelDescendant = vi.spyOn(ctx.agents.get(descendant.childId)!, 'cancel')
+      await expect(ctx.subagents.drainChildren(parent, [first.childId, descendant.childId])).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+      expect(child.status).toBe('running')
+      const draining = ctx.subagents.drainChildren(parent, [first.childId])
+      expect(child.inbox.nextTurn).toHaveLength(0)
+      hold[0]!.resolve(undefined)
+      await draining
+      await parent.whenIdle()
+      expect(ctx.agents.get(first.childId)).toBeUndefined()
+      expect(cancelSibling).not.toHaveBeenCalled()
+      expect(cancelDescendant).not.toHaveBeenCalled()
+      expect(settlementNotices(parent).some(notice => notice.sender === first.childId)).toBe(true)
+      await expect(ctx.subagents.drainChildren(parent, [first.childId])).resolves.toBeUndefined()
+    } finally {
+      for (const gate of hold) gate.resolve(undefined)
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('awaits rollback of an already-admitted selected local startup without closing the root', async () => {
+    const { ctx, parent } = await setup([textResponse('later child')])
+    const agents = managerState(ctx).ownerCtx.agents
+    const create = agents.create.bind(agents)
+    const published = Promise.withResolvers<SessionId>()
+    const release = Promise.withResolvers<undefined>()
+    const createSpy = vi.spyOn(agents, 'create').mockImplementationOnce(async (options) => {
+      const handle = await create(options)
+      published.resolve(handle.agent.id)
+      await release.promise
+      return handle
+    })
+    try {
+      const starting = ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'caller' })
+      const childId = await published.promise
+      let settled = false
+      const draining = ctx.subagents.drainChildren(parent, [childId]).then(() => { settled = true })
+      const rejected = expect(starting).rejects.toMatchObject({ name: 'AbortError' })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      release.resolve(undefined)
+      await rejected
+      await draining
+      expect(ctx.agents.get(childId)).toBeUndefined()
+      const later = await ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'caller' })
+      await later.result
+    } finally {
+      release.resolve(undefined)
+      createSpy.mockRestore()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('accepts an interrupt that lost the race with disposal without signalling twice', async () => {
     const hold = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([{ chunks: textResponse('working'), gate: hold.promise }])
