@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-07",
+  "checkedOn": "2026-11-09",
   "host": {
     "version": "0.2.2-rc.1",
     "repository": "https://github.com/vb2250158/deepseek-harness",
-    "source": "repository checkout under test",
-    "revisionEvidence": "Candidate and installed production source share productionAtLastVerification.hostCommit",
+    "source": "Fixed official-source Web export",
+    "revisionEvidence": "candidateVerification.hostCommit identifies the tested candidate; productionAtLastVerification identifies the separately verified installation",
     "profile": "web",
     "entry": "pnpm dsh web"
   },
@@ -32,43 +32,44 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "sourceWeb": "Passed all 9 source Web build checks, isolated authenticated startup, 16 local-model fixture scenarios, and actual page reply, refresh and persisted-history reads. Subscription media page checks passed 10/10.",
+    "hostCommit": "955ba060b3bfa9908cb3ea4da63ff580f51beb72",
+    "sourceWeb": "Passed current-target focused regressions, command snapshots, required Host/Client/Web builds, complete isolated fixed-plugin startup, authenticated resources and public normal exit. Browser checks covered Media search/filtering and folder retention, Pet voice settings, disabled WorkBuddy commands, and persisted generated UI.",
     "pluginCombination": {
-      "ds-bot": "0.3.0-rabi.2",
-      "dsh-pet": "0.4.5-fork.2",
-      "dsh-plugin-subscriptions": "0.9.12-fork.2",
-      "dsh-waimai": "0.8.40",
-      "dsh-usage-analytics": "1.4.3"
+      "ds-bot": "0.3.0-rabi.3",
+      "dsh-pet": "0.4.5-fork.5",
+      "dsh-media-library": "0.1.4",
+      "dsh-plugin-workbuddy-gateway": "0.4.0"
     },
     "coverage": [
-      "9 Host, Client and Web build checks",
-      "16 isolated fixture scenarios across turns, native tools, typed decisions, guards, Bot scope and PTC v2",
-      "Pet API request persistence, recall, budget rejection and recovery: 6/6",
-      "Subscription media page checks: 10/10",
-      "Real page save/reopen, reply, refreshed history and rendered Mermaid",
-      "DS Bot current-Host regression suite: 2122 passed, 0 failed, 4 explicit platform skips"
+      "Current Windows source-Web target only",
+      "Command conversation activity and previous persisted command semantics",
+      "Pet lifecycle, Media interactions and WorkBuddy command paths",
+      "40-plugin frozen/offline source-Web installation and actual served artifacts",
+      "Generated interface tool execution and browser refresh persistence"
     ],
     "productionInstalled": true,
-    "note": "Candidate checks use isolated local fixtures without production credentials or chat data. Installation and candidate acceptance do not satisfy the separate production real-model requirement."
+    "note": "Candidate evidence is separate from production installation and actual external-provider acceptance."
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",
-    "hostCommit": "c257e48b257e9688ffe18bb711b6a32c6091a863",
+    "hostCommit": "955ba060b3bfa9908cb3ea4da63ff580f51beb72",
     "profile": "web",
     "mode": "source",
     "pluginVersions": {
-      "ds-bot": "0.3.0-rabi.2",
-      "dsh-pet": "0.4.5-fork.2",
+      "ds-bot": "0.3.0-rabi.3",
+      "dsh-pet": "0.4.5-fork.5",
       "dsh-plugin-subscriptions": "0.9.12-fork.2",
       "dsh-performance-statistics": "0.1.24",
       "dsh-waimai": "0.8.40",
       "dsh-environment-sync": "0.8.3",
       "dsh-usage-analytics": "1.4.3",
       "dsh-smart-selector": "0.2.2",
-      "dsh-skill-catalog-cache": "0.1.3"
+      "dsh-skill-catalog-cache": "0.1.3",
+      "dsh-media-library": "0.1.4",
+      "dsh-plugin-workbuddy-gateway": "0.4.0"
     },
-    "checkedOn": "2026-11-07",
-    "qaStatus": "pending",
-    "note": "Managed installation and authenticated runtime readback match the declared Core source; all 37 installed plugins and 714 dependency edges match the fixed installation graph. Existing Session/Bot records are retained. Smart selector persisted configuration is restored and verified against its schema through the normal plugin lifecycle; provider/model selections are unchanged. Required real-model QA remains blocked by unavailable Rabi Manager service; this maintenance round is not complete."
+    "checkedOn": "2026-11-09",
+    "qaStatus": "source-web-accepted-provider-check-separate",
+    "note": "The installed source-Web runtime, fixed plugin artifacts and advertised resources were independently read back. Existing Sessions, Bot bindings, credential identities and intended merged settings were retained. External-provider acceptance remains separate from keyless isolated tests."
   }
 }
