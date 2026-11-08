@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-06",
+  "checkedOn": "2026-11-07",
   "host": {
     "version": "0.2.2-rc.1",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "repository checkout under test",
-    "revisionEvidence": "Git commit recorded by the verification run",
+    "revisionEvidence": "Candidate and installed production source share productionAtLastVerification.hostCommit",
     "profile": "web",
     "entry": "pnpm dsh web"
   },
@@ -32,35 +32,43 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "sourceWeb": "Passed isolated source CLI startup, authenticated index, exact served Client bytes, 1002 synthetic retained-session inventory and selected short/long history reads, and public appExit(0). Browser visual inspection pending.",
+    "sourceWeb": "Passed all 9 source Web build checks, isolated authenticated startup, 16 local-model fixture scenarios, and actual page reply, refresh and persisted-history reads. Subscription media page checks passed 10/10.",
     "pluginCombination": {
+      "ds-bot": "0.3.0-rabi.2",
+      "dsh-pet": "0.4.5-fork.2",
+      "dsh-plugin-subscriptions": "0.9.12-fork.2",
       "dsh-waimai": "0.8.40",
       "dsh-usage-analytics": "1.4.3"
     },
     "coverage": [
-      "418 merged UI tests",
-      "511 Session API, Subagent, Team and V4 admission tests",
-      "325 retained PTC lifecycle tests; one existing skip",
-      "Host and Client aggregate build checks",
-      "1219 bilingual documentation pairs"
+      "9 Host, Client and Web build checks",
+      "16 isolated fixture scenarios across turns, native tools, typed decisions, guards, Bot scope and PTC v2",
+      "Pet API request persistence, recall, budget rejection and recovery: 6/6",
+      "Subscription media page checks: 10/10",
+      "Real page save/reopen, reply, refreshed history and rendered Mermaid",
+      "DS Bot current-Host regression suite: 2122 passed, 0 failed, 4 explicit platform skips"
     ],
-    "productionInstalled": false,
-    "note": "Current merged rc.1 source candidate only. Full production plugin composition and browser/native UI acceptance remain separate; previous alpha.3 deployment stays running."
+    "productionInstalled": true,
+    "note": "Candidate checks use isolated local fixtures without production credentials or chat data. Installation and candidate acceptance do not satisfy the separate production real-model requirement."
   },
   "productionAtLastVerification": {
-    "hostVersion": "0.2.2-alpha.3",
-    "hostCommit": "3ff2154e44fcec3b98e1c529ae9f62b26b20096c",
+    "hostVersion": "0.2.2-rc.1",
+    "hostCommit": "c257e48b257e9688ffe18bb711b6a32c6091a863",
     "profile": "web",
     "mode": "source",
     "pluginVersions": {
-      "ds-bot": "0.2.7-rabi.2",
-      "dsh-pet": "0.4.1-fork.3",
+      "ds-bot": "0.3.0-rabi.2",
+      "dsh-pet": "0.4.5-fork.2",
+      "dsh-plugin-subscriptions": "0.9.12-fork.2",
+      "dsh-performance-statistics": "0.1.24",
       "dsh-waimai": "0.8.40",
-      "dsh-environment-sync": "0.8.1",
+      "dsh-environment-sync": "0.8.3",
       "dsh-usage-analytics": "1.4.3",
-      "dsh-smart-selector": "0.2.2"
+      "dsh-smart-selector": "0.2.2",
+      "dsh-skill-catalog-cache": "0.1.3"
     },
-    "checkedOn": "2026-11-06",
-    "note": "Fresh read-only production observation supplied by the formal lifecycle owner; current rc.1 candidate remains separate and is not installed."
+    "checkedOn": "2026-11-07",
+    "qaStatus": "pending",
+    "note": "Managed installation and authenticated runtime readback match the declared Core source; all 37 installed plugins and 714 dependency edges match the fixed installation graph. Existing Session/Bot records are retained. Smart selector persisted configuration is restored and verified against its schema through the normal plugin lifecycle; provider/model selections are unchanged. Required real-model QA remains blocked by unavailable Rabi Manager service; this maintenance round is not complete."
   }
 }
