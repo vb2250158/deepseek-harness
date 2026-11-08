@@ -47,6 +47,8 @@ interface CommandDefinition {
    * that payload in the session log.
    */
   readonly recordInput?: boolean
+  /** Whether this command starts a durable conversation without a model turn; defaults to false. */
+  readonly startsConversation?: boolean
   /** Execute against the receiving agent without sending the command to the model. */
   readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>
 }
@@ -143,6 +145,20 @@ Human-command registry. Plain-context definitions are global; definitions regist
 register(definition: CommandDefinition): () => void
 
 /**
+ * Read Sessions with actual command work or plugin-owned command activity.
+ * @returns a detached, deduplicated Session identity list without command input.
+ * @throws when a registered source cannot establish its activity state.
+ */
+activeExecutions(): readonly SessionId[]
+
+/**
+ * Contribute synchronous activity owned by a command plugin, including unknown process outcomes.
+ * @param source - current active Session identities; throw when the state cannot be established.
+ * @returns the calling fiber's disposer that unregisters this exact contribution.
+ */
+registerActivitySource(source: () => readonly SessionId[]): () => void
+
+/**
  * Register the sole authority that resolves staged file receipts for command submissions.
  * @param resolver - Session-aware receipt resolver.
  * @returns disposer that removes this exact resolver.
@@ -195,7 +211,7 @@ find(agent: Agent, name: string): CommandDefinition | undefined
 @Remote async execute( agent: Agent, line: string, submittedAttachments: readonly CommandSubmitAttachment[], signal: AbortSignal, ): Promise<CommandExecution | undefined>
 ```
 
-Types: [Agent](core.zh.md)
+Types: [Agent](core.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/interaction/commands/src/index.ts`](../../packages/interaction/commands/src/index.ts)
 

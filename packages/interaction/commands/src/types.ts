@@ -101,8 +101,15 @@ declare module '@deepseek-ai/dsh-session/types' {
      * folding its own command records, a rich command card) never re-parses
      * a line. `args` is absent when the definition sets `recordInput: false`
      * because an authoritative domain event owns the input payload.
+     * `startsConversation` is present only for an opted-in conversation command;
+     * it affects visibility and reuse, not model history or task recovery.
      */
-    'command/run': { commandId: CommandId; name: string; args?: string; source: CommandSource }
+    'command/run': import('@deepseek-ai/dsh-session/types').ConversationActivity & {
+      commandId: CommandId
+      name: string
+      args?: string
+      source: CommandSource
+    }
     /**
      * The paired command settled. `kind`/`text` carry the handler's verbatim
      * outcome (a thrown/aborted handler settles as `kind: 'error'` with the

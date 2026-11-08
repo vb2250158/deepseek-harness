@@ -14,6 +14,7 @@ import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSessionTestRemote, testSessionPersistence } from './test-remote.ts'
+import { CommandId } from '@deepseek-ai/dsh-commands/brand'
 
 /** Booted contexts and their temp roots, torn down after each test. */
 const contexts: Context[] = []
@@ -240,6 +241,20 @@ describe('session.create Agent preset identity', () => {
 })
 
 describe('session.create reuse of a live blank Session', () => {
+  it('keeps opted-in command conversations distinct without starting a turn', async () => {
+    const { ctx, remote, selections, presetOf } = await harness({ presets: ['standard', 'minimal'] })
+    await remote.create({ sessionId: SessionId('command-talk'), agentPreset: 'minimal' })
+    const session = ctx.sessions.get(SessionId('command-talk'))!
+    session.append('command/run', { commandId: CommandId('command-talk-1'), name: 'conversation',
+      source: { kind: 'user' }, startsConversation: true })
+    const created = await remote.create({ sessionId: SessionId('command-talk') })
+    if (!created.ok) throw new Error(`create failed: ${created.error.message}`)
+    expect(created.value.sessionId).not.toBe('command-talk')
+    expect(presetOf(SessionId('command-talk'))).toBe('minimal')
+    expect(selections).toEqual([])
+    expect(ctx.agents.turnBoundaryOf(session)).toMatchObject({ openTurnStartSeq: null, lastTurn: 0 })
+  })
+
   it('recomposes a blank Session under the default when the caller names no preset', async () => {
     const { remote, selections, presetOf } = await harness({ presets: ['standard', 'minimal'] })
     await remote.create({ sessionId: SessionId('draft'), agentPreset: 'minimal' })

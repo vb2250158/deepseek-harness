@@ -78,7 +78,7 @@ export interface RunResult {
   finalResponse: string
   /** Model turn ending or native operation outcome; null when no terminal reason was recorded. */
   finishReason: string | null
-  /** Every `session.event` payload for the root session, in wire order. */
+  /** Every root `session.event` payload in wire order, including explicit command conversation activity. */
   events: SessionEvent[]
   /** Every notification for the root session and discovered descendants, in wire order. */
   notifications: HarnessNotification[]

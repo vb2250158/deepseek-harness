@@ -50,7 +50,7 @@ export class ApiSessionPresetConflict extends Error {
   }
 }
 
-/** A blank Session chosen for reuse started a turn before this Host acquired its writer. */
+/** A blank Session chosen for reuse acquired conversation activity before this Host acquired its writer. */
 class ApiSessionStartedSinceObserved extends Error {}
 
 /** Placement and Agent preset for one Session created for a new conversation. */
@@ -448,10 +448,9 @@ export class ApiSessionAgentController {
     }
   }
 
-  /** Whether no turn has started, by the predicate the preset registry's `select` enforces. */
+  /** Whether no conversation has started, by the predicate the preset registry's `select` enforces. */
   private isBlank(session: Session): boolean {
-    const boundary = this.ctx.agents.turnBoundaryOf(session)
-    return boundary.openTurnStartSeq === null && boundary.lastTurn === 0
+    return !this.ctx.agents.hasConversationActivity(session)
   }
 
   /** Without a roster, reuse cannot apply a named preset. */

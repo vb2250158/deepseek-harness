@@ -16,7 +16,7 @@ import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import { installTurnArchiveAdmission } from './archive-admission.ts'
 import type { Agent, TurnBoundaryProjection } from './types.ts'
 import type { AgentOptions, SessionStartSource } from './runtime-types.ts'
-import { turnBoundaryProjectionDefinition } from './projection.ts'
+import { conversationActivityProjectionDefinition, turnBoundaryProjectionDefinition } from './projection.ts'
 
 export * from './runtime-types.ts'
 export * from './types.ts'
@@ -247,6 +247,7 @@ export class AgentRegistry extends Service {
   static inject = ['sessionProjections']
 
   private turnBoundaryProjectionHandle!: ProjectionHandle<TurnBoundaryProjection>
+  private conversationActivityProjectionHandle!: ProjectionHandle<boolean>
   private store = new Map<SessionId, AgentEntry>()
   private factory: FactorySlot | undefined
   private readonly initiators = new AsyncLocalStorage<Agent | undefined>()
@@ -290,6 +291,16 @@ export class AgentRegistry extends Service {
 
   protected async [Service.init](): Promise<void> {
     this.turnBoundaryProjectionHandle = await this.ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
+    this.conversationActivityProjectionHandle = await this.ctx.sessionProjections.register(conversationActivityProjectionDefinition)
+  }
+
+  /**
+   * Read whether a Session has started a conversation, including opted-in commands.
+   * @param session - prepared Session whose committed activity is read.
+   * @returns whether the Session must remain distinct from a new conversation.
+   */
+  hasConversationActivity(session: Session): boolean {
+    return this.conversationActivityProjectionHandle.stateOf(session)
   }
 
   /**

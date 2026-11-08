@@ -9,11 +9,27 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentPresets from '../src/index.ts'
 import type { Context } from '@deepseek-ai/cordis'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'test/conversation-activity': import('@deepseek-ai/dsh-session/types').ConversationActivity
+  }
+}
+
 const contexts: Context[] = []
 afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.dispose() })
 async function setup() { const ctx = await harness(); contexts.push(ctx); return ctx }
 
 describe('declarative preset revisions', () => {
+  it('locks preset selection after explicit command conversation activity without a turn', async () => {
+    const ctx = await setup()
+    await declare(ctx, contribution('standard'))
+    await declare(ctx, contribution('minimal'))
+    const agent = await agentOn(ctx, 'command-selection')
+    agent.session.append('test/conversation-activity', { startsConversation: true })
+    await expect(ctx.agentPresets.select(agent, 'minimal')).rejects.toThrow('already started')
+    expect(ctx.agents.turnBoundaryOf(agent.session)).toMatchObject({ lastTurn: 0, openTurnStartSeq: null })
+  })
+
   it('eagerly scopes tool and prompt registrations and shares one revision across Agents', async () => {
     const ctx = await setup()
     await declare(ctx, contribution('standard'))

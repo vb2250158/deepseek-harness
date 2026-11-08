@@ -27,6 +27,8 @@ Use `dsh-agent` to create or resume live agents, send follow-up or steering inpu
 
 Mount `dsh-agent` with `dsh-session-projection`: it provides `ctx.agents`, the `Agent` handle, and `turnBoundaryOf(session)` for recorded turn and step positions. Creating or resuming an Agent also requires a driver to register a factory; the shipped driver is `dsh-agent-loop`. [Session model selection](#model-selection) is available on each handle as `agent.model`.
 
+`hasConversationActivity(session)` reads the durable activity projection used for blank-Session reuse and preset locking. It recognizes model turns and events that explicitly declare conversation activity, including [opted-in commands](../../interaction/commands/README.md), without altering `turnBoundaryOf(session)` or replaying work.
+
 ### Create or resume an agent
 
 `ctx.agents.create()` builds a fresh agent and session under one identity; `ctx.agents.resume()` loads a persisted session and rebuilds the agent on it. Both delegate to the registered factory and return an `AgentHandle` — the only object that can tear that agent down. See [`AgentFactory`](src/index.ts) for publication and failure-cleanup timing. `get(id)` and `list()` find live agents. The [subagent service](../../subagent/subagent/README.md) owns delegated execution and runtime tree membership.

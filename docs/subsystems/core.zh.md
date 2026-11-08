@@ -682,7 +682,7 @@ serviceFor<K extends string & keyof Context>(agent: { ctx: Context }, name: K): 
  */
 async recompose(ctx: Context, id: string): Promise<AgentPreset>
 
-/** Select a preset before a session starts its first turn. A Session whose
+/** Select a preset before a session starts a conversation. A Session whose
  * log records the preset and whose Agent runs its current revision keeps its
  * composition; nothing is logged or announced.
  * @param agent Target Agent.
@@ -736,6 +736,13 @@ Agent service (`ctx.agents`): tracks live agents and carries the initiating Agen
 Initiator methods provide same-process causal attribution only. Ambient presence is neither liveness proof nor authorization; subjects and owners remain explicit, as does identity at worker, process, persistence, and wire boundaries. Returned Promise boundaries drain during teardown, except a nested lineage that starts an owning-fiber unload is excluded from its own drain.
 
 ```ts cordis-catalog
+/**
+ * Read whether a Session has started a conversation, including opted-in commands.
+ * @param session - prepared Session whose committed activity is read.
+ * @returns whether the Session must remain distinct from a new conversation.
+ */
+hasConversationActivity(session: Session): boolean
+
 /**
  * Read the turn and step positions recorded in a Session.
  * @param session - Session whose committed events are read.

@@ -380,6 +380,28 @@ def test_compact_without_history_returns_without_a_model_turn(tmp_path: Path) ->
     }
 
 
+def test_opted_in_command_conversation_preserves_activity_without_model_turn(tmp_path: Path) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "command-conversation.mjs"
+    patch = tmp_path / "conversation.patch.yml"
+    patch.write_text(
+        "- insert:\n    - id: command-conversation-fixture\n      name: " + json.dumps(str(fixture)) + "\n",
+        encoding="utf-8",
+    )
+    with _runtime(tmp_path, [], capture_patch=patch) as runtime:
+        session = runtime.harness.start_session(_SESSION_ID)
+        result = runtime.call(session.run, "/permission read-only")
+        assert result.final_response == "Command conversation reply."
+        assert runtime.model.captured() == []
+    events = _read_events(runtime.logs)
+    commands = [event for event in events if event["type"] in {"command/run", "command/done"}]
+    for event in commands:
+        event["data"]["commandId"] = "command-1"
+    actual = [{"type": event["type"], "data": event["data"]} for event in commands]
+    expected = Path(__file__).parent / "expected" / "command-conversation.json"
+    assert actual == json.loads(expected.read_text(encoding="utf-8"))
+    assert not {event["type"] for event in events} & {"turn/start", "user/message", "assistant/message", "request/header"}
+
+
 def test_compact_rejects_busy_agent_before_the_model_is_released(tmp_path: Path) -> None:
     response = _Completion("DSH_COMMANDS_BUSY_REPLY", blocked=True)
     with _runtime(tmp_path, [response]) as runtime:

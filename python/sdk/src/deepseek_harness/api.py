@@ -50,6 +50,7 @@ class RunResult:
     """Final assistant text (empty when absent), native state-only result text, or a failure diagnostic."""
     finish_reason: str | None
     events: list[JsonObject]
+    """Root event payloads, including command/run startsConversation when explicitly declared."""
     notifications: list[Notification]
 
 

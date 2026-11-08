@@ -1423,6 +1423,8 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         const events = parseSessionLog(parent.content)
         expect(events.filter(event => event.type === 'command/run').map(event => event.data.name))
           .toEqual(['access', 'access', 'access'])
+        expect(events.filter(event => event.type === 'command/run').map(event => event.data.startsConversation))
+          .toEqual([true, true, true])
         expect(events.filter(event => event.type === 'command/done').map(event => event.data.kind))
           .toEqual(['success', 'success', 'error'])
         expect(events.filter(event => event.type === 'permission/preset').map(event => event.data.preset))

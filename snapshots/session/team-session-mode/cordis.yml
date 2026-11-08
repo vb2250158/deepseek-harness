@@ -1,3 +1,10 @@
 - insert:
     - id: team-session-mode-fixture
       name: ../../../packages/team/agent-team/tests/session-mode-fixture.ts
+
+# The authored tool catalog uses Bash on every host.
+- id: tool-bash
+  disabled: false
+
+- id: tool-pwsh
+  disabled: true

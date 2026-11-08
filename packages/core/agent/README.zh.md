@@ -27,6 +27,8 @@ kind: "package-reference"
 
 将 `dsh-agent` 与 `dsh-session-projection` 一起挂载：它提供 `ctx.agents`、`Agent` 句柄，以及读取已记录轮次和步骤位置的 `turnBoundaryOf(session)`。创建或恢复 Agent 还需要驱动器注册工厂；随附驱动器是 `dsh-agent-loop`。 [Session 模型选择](#model-selection) 通过每个句柄的 `agent.model` 提供。
 
+`hasConversationActivity(session)` 读取用于空白 Session 复用和预设锁定的持久活动投影。它识别模型轮次及明确声明对话活动的事件，包括[主动声明的命令](../../interaction/commands/README.zh.md)，不会改变 `turnBoundaryOf(session)` 或重放工作。
+
 ### 创建或恢复 agent
 
 `ctx.agents.create()` 在一个身份下构建全新 agent 与会话；`ctx.agents.resume()` 加载持久化会话并在此基础上重建 agent。两者都委托给已注册工厂，并返回 `AgentHandle`——唯一能拆除该 agent 的对象。发布和失败清理的时序见 [`AgentFactory`](src/index.ts)。`get(id)` 与 `list()` 用于查找实时 agent。[subagent 服务](../../subagent/subagent/README.zh.md) 拥有委派执行和运行时树成员关系。
