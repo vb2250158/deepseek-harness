@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import ts from 'typescript'
 import { canonicalReferenceText } from './verify-public-repository-links.ts'
 
 const root = resolve(import.meta.dirname, '..')
@@ -32,22 +33,34 @@ function isMaintained(file: string): boolean {
   return !excludedPrefixes.some(prefix => file.startsWith(prefix))
 }
 
-/** Read the exact deployment source identity; ordinary prose still uses maintained links. */
-function deploymentSourceCommit(file: string, source: string): string | undefined {
-  if (file !== 'tested-environment.json') return undefined
-  let document: unknown
+/** Duplicate JSON members cannot establish one verified source identity. */
+function jsonProperty(object: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
+  const members = object.properties.filter((property): property is ts.PropertyAssignment =>
+    ts.isPropertyAssignment(property) && ts.isStringLiteral(property.name) && property.name.text === name)
+  return members.length === 1 ? members[0]?.initializer : undefined
+}
+
+/** Exact scalar positions owned by the candidate and production verification records. */
+function verifiedSourceIdentities(file: string, source: string): { commit: string; start: number; end: number }[] {
+  if (file !== 'tested-environment.json') return []
   try {
-    document = JSON.parse(source)
+    JSON.parse(source)
   } catch (_error) {
     // Invalid JSON grants no exception to the reference policy.
-    return undefined
+    return []
   }
-  if (typeof document !== 'object' || document === null || !('productionAtLastVerification' in document)) return undefined
-  const deployment = document.productionAtLastVerification
-  if (typeof deployment !== 'object' || deployment === null || !('hostCommit' in deployment)) return undefined
-  return typeof deployment.hostCommit === 'string' && /^[\da-f]{40}$/u.test(deployment.hostCommit)
-    ? deployment.hostCommit
-    : undefined
+  const document = ts.parseJsonText(file, source)
+  const statement = document.statements[0]
+  if (statement === undefined || !ts.isExpressionStatement(statement)
+    || !ts.isObjectLiteralExpression(statement.expression)) return []
+  const object = statement.expression
+  return ['candidateVerification', 'productionAtLastVerification'].flatMap((owner) => {
+    const verification = jsonProperty(object, owner)
+    if (verification === undefined || !ts.isObjectLiteralExpression(verification)) return []
+    const identity = jsonProperty(verification, 'hostCommit')
+    if (identity === undefined || !ts.isStringLiteral(identity) || !/^[\da-f]{40}$/u.test(identity.text)) return []
+    return [{ commit: identity.text, start: identity.getStart(document), end: identity.getEnd() }]
+  })
 }
 
 /**
@@ -55,7 +68,7 @@ function deploymentSourceCommit(file: string, source: string): string | undefine
  * @param file - Repository-relative path used in diagnostics and exclusions.
  * @param source - File text or a symlink's stored target.
  * @param commits - Lowercase, unambiguous full or abbreviated commit identifiers.
- * @returns One finding per line and reference kind; digests, other Git object types and the declared deployment identity are accepted.
+ * @returns One finding per line and kind; digests, other object types and the two verified-source fields are accepted.
  * Decimal-only tokens are ignored, including actual commit identifiers.
  */
 export function findRepositoryReferences(
@@ -65,15 +78,21 @@ export function findRepositoryReferences(
 ): RepositoryReference[] {
   if (!isMaintained(file)) return []
   const references: RepositoryReference[] = []
-  const deploymentCommit = deploymentSourceCommit(file, source)
-  const deploymentIdentity = deploymentCommit === undefined ? undefined : new RegExp(`^\\s*"hostCommit"\\s*:\\s*"${deploymentCommit}"\\s*,?\\s*$`, 'u')
+  const identities = verifiedSourceIdentities(file, source)
+  let lineStart = 0
   for (const [index, line] of source.split('\n').entries()) {
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if (deploymentIdentity?.test(line) !== true && [...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
+    if ([...line.matchAll(commitCandidate)].some((match) => {
+      const commit = match[0].toLowerCase()
+      const start = lineStart + match.index
+      return commits.has(commit) && !identities.some(identity =>
+        identity.commit === commit && start >= identity.start && start + match[0].length <= identity.end)
+    })) {
       references.push({ file, line: index + 1, kind: 'commit-hash' })
     }
+    lineStart += line.length + 1
   }
   return references
 }

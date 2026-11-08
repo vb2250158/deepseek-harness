@@ -83,9 +83,67 @@ describe('maintained repository reference policy', () => {
     ])
   })
 
-  it.each(['other.json', 'docs/tested-environment.json'])('does not exempt deployment-looking fields in %s', (file) => {
+  it('retains distinct candidate and deployment identities at their exact JSON paths', () => {
+    const candidate = 'a'.repeat(40)
+    const production = 'b'.repeat(40)
+    const source = JSON.stringify({
+      candidateVerification: { hostCommit: candidate },
+      productionAtLastVerification: { hostCommit: production },
+    }, null, 2)
+    expect(findRepositoryReferences('tested-environment.json', source, new Set([candidate, production]))).toEqual([])
+  })
+
+  it.each(['candidateVerification', 'productionAtLastVerification'])(
+    'rejects the same %s identity copied to another hostCommit field', (owner) => {
+      const commit = 'a'.repeat(40)
+      const source = JSON.stringify({ [owner]: { hostCommit: commit }, observation: { hostCommit: commit } }, null, 2)
+      expect(findRepositoryReferences('tested-environment.json', source, new Set([commit]))).toEqual([
+        { file: 'tested-environment.json', line: 6, kind: 'commit-hash' },
+      ])
+    },
+  )
+
+  it('checks individual scalar positions in a compact verification document', () => {
     const commit = 'a'.repeat(40)
-    const source = JSON.stringify({ productionAtLastVerification: { hostCommit: commit } }, null, 2)
+    const identities = { candidateVerification: { hostCommit: commit }, productionAtLastVerification: { hostCommit: commit } }
+    expect(findRepositoryReferences('tested-environment.json', JSON.stringify(identities), new Set([commit]))).toEqual([])
+    const source = JSON.stringify({ ...identities, note: commit })
+    expect(findRepositoryReferences('tested-environment.json', source, new Set([commit]))).toEqual([
+      { file: 'tested-environment.json', line: 1, kind: 'commit-hash' },
+    ])
+  })
+
+  it.each(['candidateVerification', 'productionAtLastVerification'])(
+    'does not exempt a nested %s record', (owner) => {
+      const commit = 'a'.repeat(40)
+      const source = JSON.stringify({ observation: { [owner]: { hostCommit: commit } } }, null, 2)
+      expect(findRepositoryReferences('tested-environment.json', source, new Set([commit]))).toEqual([
+        { file: 'tested-environment.json', line: 4, kind: 'commit-hash' },
+      ])
+    },
+  )
+
+  it.each([
+    (commit: string) => `{"candidateVerification":{"hostCommit":"${commit}"},"candidateVerification":{"hostCommit":"${commit}"}}`,
+    (commit: string) => `{"candidateVerification":{"hostCommit":"${commit}","hostCommit":"${commit}"}}`,
+    (commit: string) => JSON.stringify({ candidateVerification: [{ hostCommit: commit }] }),
+    (commit: string) => JSON.stringify([{ candidateVerification: { hostCommit: commit } }]),
+    (commit: string) => JSON.stringify(commit),
+  ])('rejects duplicate or non-object verification owners (%#)', (document) => {
+    const commit = 'a'.repeat(40)
+    expect(findRepositoryReferences('tested-environment.json', document(commit), new Set([commit]))).toEqual([
+      { file: 'tested-environment.json', line: 1, kind: 'commit-hash' },
+    ])
+  })
+
+  it.each([
+    ['other.json', 'candidateVerification'],
+    ['other.json', 'productionAtLastVerification'],
+    ['docs/tested-environment.json', 'candidateVerification'],
+    ['docs/tested-environment.json', 'productionAtLastVerification'],
+  ])('does not exempt verification-looking fields in %s (%s)', (file, owner) => {
+    const commit = 'a'.repeat(40)
+    const source = JSON.stringify({ [owner]: { hostCommit: commit } }, null, 2)
     expect(findRepositoryReferences(file, source, new Set([commit]))).toEqual([
       { file, line: 3, kind: 'commit-hash' },
     ])
@@ -93,6 +151,7 @@ describe('maintained repository reference policy', () => {
 
   it.each([
     { observation: { hostCommit: 'a'.repeat(40) } },
+    { candidateVerification: { hostCommit: 'a'.repeat(7) } },
     { productionAtLastVerification: { hostCommit: 'a'.repeat(7) } },
   ])('rejects unowned or abbreviated source fields', (document) => {
     const source = JSON.stringify(document, null, 2)

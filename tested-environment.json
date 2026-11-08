@@ -32,33 +32,35 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "hostCommit": "955ba060b3bfa9908cb3ea4da63ff580f51beb72",
-    "sourceWeb": "Passed current-target focused regressions, command snapshots, required Host/Client/Web builds, complete isolated fixed-plugin startup, authenticated resources and public normal exit. Browser checks covered Media search/filtering and folder retention, Pet voice settings, disabled WorkBuddy commands, and persisted generated UI.",
+    "hostCommit": "eeeb8a2b0723622df9f597dca327e2ae561dad3c",
+    "sourceWeb": "Reused unchanged current-target build and behavior baselines. Verified the complete fixed-plugin candidate, two persisted keyless turns with 81 declared tools, authenticated resources, and Pet voice and subscription controls saved and retained after refresh.",
     "pluginCombination": {
       "ds-bot": "0.3.0-rabi.3",
-      "dsh-pet": "0.4.5-fork.5",
+      "dsh-pet": "0.4.5-fork.7",
       "dsh-media-library": "0.1.4",
-      "dsh-plugin-workbuddy-gateway": "0.4.0"
+      "dsh-plugin-workbuddy-gateway": "0.4.0",
+      "dsh-plugin-subscriptions": "0.9.12-fork.3"
     },
     "coverage": [
       "Current Windows source-Web target only",
       "Command conversation activity and previous persisted command semantics",
-      "Pet lifecycle, Media interactions and WorkBuddy command paths",
-      "40-plugin frozen/offline source-Web installation and actual served artifacts",
-      "Generated interface tool execution and browser refresh persistence"
+      "Pet voice controls and subscription quota controls; unchanged Media and WorkBuddy behavior baselines retained",
+      "39-plugin frozen/offline fresh and upgrade installations; nested dependency resolution matched with zero differences",
+      "Existing generated-interface tool execution and refresh-persistence baseline retained"
     ],
-    "productionInstalled": true,
-    "note": "Candidate evidence is separate from production installation and actual external-provider acceptance."
+    "productionInstalled": false,
+    "note": "The candidate Core is a documentation-only successor of the separately recorded deployed Core. Only the two accepted plugin updates were hot-installed; unchanged functional and external-provider evidence remains separately scoped.",
+    "pluginCount": 39
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",
-    "hostCommit": "955ba060b3bfa9908cb3ea4da63ff580f51beb72",
+    "hostCommit": "5ccd4e96ed1bca517c112c853b2cf94ad31e321e",
     "profile": "web",
     "mode": "source",
     "pluginVersions": {
       "ds-bot": "0.3.0-rabi.3",
-      "dsh-pet": "0.4.5-fork.5",
-      "dsh-plugin-subscriptions": "0.9.12-fork.2",
+      "dsh-pet": "0.4.5-fork.7",
+      "dsh-plugin-subscriptions": "0.9.12-fork.3",
       "dsh-performance-statistics": "0.1.24",
       "dsh-waimai": "0.8.40",
       "dsh-environment-sync": "0.8.3",
@@ -70,6 +72,9 @@
     },
     "checkedOn": "2026-11-09",
     "qaStatus": "source-web-accepted-provider-check-separate",
-    "note": "The installed source-Web runtime, fixed plugin artifacts and advertised resources were independently read back. Existing Sessions, Bot bindings, credential identities and intended merged settings were retained. External-provider acceptance remains separate from keyless isolated tests."
+    "note": "The deployed Core remained running while two plugins were installed through the supported lifecycle. Actual plugin versions, served resources, nested dependencies and refreshed saved controls were verified. Existing Sessions, Bot bindings, credential identities and preferences were retained; no historical migration or task resumption was performed. Unchanged official CLI reply evidence was reused; external-provider acceptance is separate from keyless tests.",
+    "pluginCount": 39,
+    "coreRestarted": false,
+    "pluginUpdatesInstalled": 2
   }
 }
