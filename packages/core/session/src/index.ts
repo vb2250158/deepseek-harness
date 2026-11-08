@@ -35,6 +35,16 @@ export { deriveEventMessage, foldSurface, isAppendSurfaceEvent, isReplacementSur
 export { canonicalHeader, foldRequestHeader, headerEquals } from './request-header.ts'
 export { KNOWN_SESSION_EVENT_TYPES } from './known-event-types.ts'
 
+/**
+ * Recognize durable conversation activity without treating control events as model turns.
+ * @param event - committed event whose payload may opt into conversation activity.
+ * @returns whether a turn starts or the payload explicitly declares conversation activity.
+ */
+export function isConversationActivityEvent(event: SessionEvent): boolean {
+  return event.type === 'turn/start'
+    || ('startsConversation' in event.data && event.data.startsConversation === true)
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     sessions: SessionStore

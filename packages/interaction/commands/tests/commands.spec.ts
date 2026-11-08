@@ -6,6 +6,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import CommandRuntime, { CommandDefinitionId, parseCommand, type CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 
 function command(name: string, text = `ran:${name}`): CommandDefinition {
   return {
@@ -54,6 +55,88 @@ describe('parseCommand()', () => {
 })
 
 describe('CommandRuntime', () => {
+  it('keeps command activity inspection and source registration out of Remote dispatch', async () => {
+    const ctx = await mount()
+    expect(remoteMethods(ctx.commands).map(marker => marker.method)).toEqual(['list', 'execute'])
+  })
+
+  it('keeps aborted command work busy until the original handler actually settles', async () => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'busy-command')
+    const pending = Promise.withResolvers<{ kind: 'success'; text: string }>()
+    ctx.commands.register({ ...command('wait'), handler: () => pending.promise })
+    const controller = new AbortController()
+    const request = ctx.commands.execute(agent, '/wait', [], controller.signal)
+    expect(ctx.commands.activeExecutions()).toEqual([agent.id])
+    controller.abort(new Error('Stop waiting'))
+    await expect(request).rejects.toThrow('Stop waiting')
+    expect(ctx.commands.activeExecutions()).toEqual([agent.id])
+    pending.resolve({ kind: 'success', text: 'Finished later' })
+    await pending.promise
+    expect(ctx.commands.activeExecutions()).toEqual([])
+  })
+
+  it('observes a late handler rejection after caller cancellation without releasing early', async () => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'late-rejection')
+    const pending = Promise.withResolvers<{ kind: 'success' }>()
+    ctx.commands.register({ ...command('wait'), handler: () => pending.promise })
+    const controller = new AbortController()
+    const request = ctx.commands.execute(agent, '/wait', [], controller.signal)
+    controller.abort(new Error('Stop waiting'))
+    await expect(request).rejects.toThrow('Stop waiting')
+    expect(ctx.commands.activeExecutions()).toEqual([agent.id])
+    pending.reject(new Error('Late failure'))
+    await expect(pending.promise).rejects.toThrow('Late failure')
+    expect(ctx.commands.activeExecutions()).toEqual([])
+  })
+
+  it('deduplicates simultaneous work and releases synchronous failures and admission refusals', async () => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'busy-pairs')
+    const pending = Promise.withResolvers<{ kind: 'success' }>()
+    ctx.commands.register({ ...command('wait'), handler: () => pending.promise })
+    const first = ctx.commands.execute(agent, '/wait', [], new AbortController().signal)
+    const second = ctx.commands.execute(agent, '/wait', [], new AbortController().signal)
+    expect(ctx.commands.activeExecutions()).toEqual([agent.id])
+    pending.resolve({ kind: 'success' })
+    await Promise.all([first, second])
+    expect(ctx.commands.activeExecutions()).toEqual([])
+    ctx.commands.register({ ...command('throw'), handler: () => { throw new Error('Sync failure') } })
+    await expect(ctx.commands.execute(agent, '/throw', [], new AbortController().signal)).rejects.toThrow('Sync failure')
+    expect(ctx.commands.activeExecutions()).toEqual([])
+    await ctx.commands.execute(agent, '/wait', [{ type: 'image', data: 'AQ==', mediaType: 'image/png' }], new AbortController().signal)
+    expect(ctx.commands.activeExecutions()).toEqual([])
+  })
+
+  it('owns activity sources through fiber disposal and propagates unknown source state', async () => {
+    const ctx = await mount()
+    const id = SessionId('plugin-unknown')
+    const fiber = await ctx.plugin(Object.assign((inner: Context) => {
+      inner.commands.registerActivitySource(() => [id, id])
+    }, { inject: ['commands'] }))
+    expect(ctx.commands.activeExecutions()).toEqual([id])
+    expect(Object.isFrozen(ctx.commands.activeExecutions())).toBe(true)
+    const disposeUnknown = ctx.commands.registerActivitySource(() => { throw new Error('Process exit unknown') })
+    expect(() => ctx.commands.activeExecutions()).toThrow('Process exit unknown')
+    disposeUnknown()
+    expect(ctx.commands.activeExecutions()).toEqual([id])
+    await fiber.dispose()
+    expect(ctx.commands.activeExecutions()).toEqual([])
+  })
+
+  it.each([undefined, false, true])('records conversation activity only when explicitly enabled: %s', async (startsConversation) => {
+    const ctx = await mount()
+    const { agent } = await mintAgentScope(ctx, 'conversation')
+    ctx.commands.register({ ...command('conversation'), ...startsConversation === undefined ? {} : { startsConversation } })
+    await ctx.commands.execute(agent, '/conversation hello', [], new AbortController().signal)
+    const events = agent.session.snapshotEvents()
+    expect(events.map(event => event.type)).toEqual(['command/run', 'command/done'])
+    const run = events.find(event => event.type === 'command/run')!
+    if (startsConversation === true) expect(run.data).toHaveProperty('startsConversation', true)
+    else expect(run.data).not.toHaveProperty('startsConversation')
+  })
+
   it('lists immutable global descriptors with input metadata', async () => {
     const ctx = await mount()
     const { agent } = await mintAgentScope(ctx, 'a')
@@ -297,6 +380,7 @@ describe('CommandRuntime', () => {
     [{ ...command('empty-description'), description: ' ' }, /description/],
     [{ ...command('empty-hint'), input: { hint: '' } }, /input hint/],
     [{ ...command('bad-handler'), handler: undefined }, /handler/],
+    [{ ...command('bad-conversation'), startsConversation: 'yes' }, /startsConversation/],
   ] as const)('rejects invalid definition %#', async (definition, expected) => {
     const ctx = await mount()
     expect(() => ctx.commands.register(definition as CommandDefinition)).toThrow(expected)

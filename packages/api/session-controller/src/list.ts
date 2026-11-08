@@ -6,7 +6,7 @@ import { scheduler } from 'node:timers/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
-import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import { isConversationActivityEvent, type Session, type SessionEvent, type SessionHeader, type SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionHandle, ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionRecord, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
@@ -44,7 +44,11 @@ const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
-})
+  lastActivityAt: z.number().optional(),
+}).transform(({ lastActivityAt, ...state }) => ({
+  ...state,
+  ...lastActivityAt === undefined ? {} : { lastActivityAt },
+}))
 
 const imageLimitsSchema = z.object({
   maxImageBytes: z.number().int().positive(),
@@ -65,13 +69,15 @@ export function applySessionListMetadata(
   state: SessionListMetadata,
   event: SessionEvent,
 ): SessionListMetadata {
-  const blank = state.blank && event.type !== 'turn/start'
+  const activity = isConversationActivityEvent(event)
+  const blank = state.blank && !activity
   const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
     ? event.time
     : state.lastPromptAt
-  return blank === state.blank && lastPromptAt === state.lastPromptAt
+  const lastActivityAt = activity && event.type !== 'turn/start' ? event.time : state.lastActivityAt
+  return blank === state.blank && lastPromptAt === state.lastPromptAt && lastActivityAt === state.lastActivityAt
     ? state
-    : { blank, lastPromptAt }
+    : { blank, lastPromptAt, ...lastActivityAt === undefined ? {} : { lastActivityAt } }
 }
 
 /**
@@ -128,7 +134,7 @@ export class ApiSessionList {
       init: () => ({ blank: true, lastPromptAt: null }),
       apply: applySessionListMetadata,
       wire: { viewSchema: sessionListMetadataSchema, view: state => state },
-      stateVersion: 1,
+      stateVersion: 2,
     })
     await this.ctx.sessionProjections.register<'imageLimits', null>({
       key: 'imageLimits',
@@ -549,7 +555,7 @@ function normalizeSearchQuery(query: string): string {
 }
 
 function updatedAt(header: SessionHeader, metadata: SessionListMetadata | undefined): number {
-  return Math.max(header.createdAt, metadata?.lastPromptAt ?? 0)
+  return Math.max(header.createdAt, metadata?.lastPromptAt ?? 0, metadata?.lastActivityAt ?? 0)
 }
 
 function listFields(header: SessionHeader): {

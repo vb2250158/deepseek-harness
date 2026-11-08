@@ -12,7 +12,7 @@ import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
 import { NamedEntries, ScopedLayers } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer } from '@deepseek-ai/dsh-scope'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionEventMap, SessionId } from '@deepseek-ai/dsh-session'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { CommandId } from './brand.ts'
 import type { CommandDefinitionId } from './brand.ts'
@@ -73,6 +73,8 @@ export interface CommandDefinition {
    * that payload in the session log.
    */
   readonly recordInput?: boolean
+  /** Whether this command starts a durable conversation without a model turn; defaults to false. */
+  readonly startsConversation?: boolean
   /** Execute against the receiving agent without sending the command to the model. */
   readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>
 }
@@ -189,6 +191,9 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
   if (typeof definition.handler !== 'function') {
     throw new TypeError(`command "${definition.name}" handler must be a function`)
   }
+  if (definition.startsConversation !== undefined && typeof definition.startsConversation !== 'boolean') {
+    throw new TypeError(`command "${definition.name}" startsConversation must be a boolean`)
+  }
   const rawInput: unknown = definition.input
   let input: CommandInputDescriptor | undefined
   if (rawInput !== undefined) {
@@ -213,6 +218,7 @@ function normalizeDefinition(definition: CommandDefinition): RegisteredCommand {
     description: definition.description,
     ...input === undefined ? {} : { input },
     ...definition.recordInput === undefined ? {} : { recordInput: definition.recordInput },
+    ...definition.startsConversation === true ? { startsConversation: true } : {},
     handler: definition.handler,
   })
   const descriptor = Object.freeze({
@@ -272,6 +278,10 @@ export class CommandRuntime extends TypertRemoteService {
   private readonly instanceToken = randomUUID().slice(0, 8)
   /** Optional provider installed by the Session upload owner. */
   private readonly fileReceipts: { resolver: CommandFileReceiptResolver | undefined } = { resolver: undefined }
+  /** Real admissions and handler lifetimes, independent of the caller's abort race. */
+  private readonly executions = new Map<CommandId, SessionId>()
+  /** Plugin-owned work that may outlive a returned command request. */
+  private readonly activitySources = new Set<() => readonly SessionId[]>()
 
   constructor(ctx: Context) {
     super(ctx, 'commands')
@@ -289,6 +299,33 @@ export class CommandRuntime extends TypertRemoteService {
       layer => layer.commands.insert(registered.definition.name, registered),
       { label: 'commands.register()' },
     )
+  }
+
+  /**
+   * Read Sessions with actual command work or plugin-owned command activity.
+   * @returns a detached, deduplicated Session identity list without command input.
+   * @throws when a registered source cannot establish its activity state.
+   */
+  activeExecutions(): readonly SessionId[] {
+    const sessions = new Set(this.executions.values())
+    for (const source of this.activitySources) {
+      for (const id of source()) sessions.add(id)
+    }
+    return Object.freeze([...sessions])
+  }
+
+  /**
+   * Contribute synchronous activity owned by a command plugin, including unknown process outcomes.
+   * @param source - current active Session identities; throw when the state cannot be established.
+   * @returns the calling fiber's disposer that unregisters this exact contribution.
+   */
+  registerActivitySource(source: () => readonly SessionId[]): () => void {
+    const dispose = this.ctx.effect(() => {
+      const ownedSource = (): readonly SessionId[] => source()
+      this.activitySources.add(ownedSource)
+      return () => { this.activitySources.delete(ownedSource) }
+    }, 'commands.registerActivitySource()')
+    return () => { void dispose() }
   }
 
   /**
@@ -370,64 +407,79 @@ export class CommandRuntime extends TypertRemoteService {
     if (command === undefined) return undefined
     if (signal.aborted) throw abortError(signal)
     const commandId = this.mintCommandId()
-    this.appendLifecycle(agent.session, 'command/run', {
-      commandId,
-      name: parsed.name,
-      ...command.definition.recordInput === false ? {} : { args: parsed.rawInput },
-      source: { kind: 'user' },
-    })
-    const settle = (result: CommandResult): CommandExecution => {
-      this.appendLifecycle(agent.session, 'command/done', {
-        commandId, kind: result.kind,
-        ...result.text === undefined ? {} : { text: result.text },
-        ...result.kind === 'success' && result.sourceEventSeq !== undefined
-          ? { sourceEventSeq: result.sourceEventSeq }
-          : {},
+    this.executions.set(commandId, agent.id)
+    let handlerOwnsLifetime = false
+    try {
+      this.appendLifecycle(agent.session, 'command/run', {
+        commandId,
+        name: parsed.name,
+        ...command.definition.startsConversation === true ? { startsConversation: true } : {},
+        ...command.definition.recordInput === false ? {} : { args: parsed.rawInput },
+        source: { kind: 'user' },
       })
-      return Object.freeze({ commandId, result: Object.freeze(result) })
-    }
-    let attachments: readonly (ImageBlock | FileBlock)[] = NO_ATTACHMENTS
-    if (submittedAttachments.length > 0) {
-      if (command.definition.input?.attachments !== true) {
-        return settle({ kind: 'error', text: `/${parsed.name} does not accept attachments` })
+      const settle = (result: CommandResult): CommandExecution => {
+        this.appendLifecycle(agent.session, 'command/done', {
+          commandId, kind: result.kind,
+          ...result.text === undefined ? {} : { text: result.text },
+          ...result.kind === 'success' && result.sourceEventSeq !== undefined
+            ? { sourceEventSeq: result.sourceEventSeq }
+            : {},
+        })
+        return Object.freeze({ commandId, result: Object.freeze(result) })
       }
-      const store = this.ctx.get('attachments')
-      if (store === undefined) {
-        return settle({ kind: 'error', text: `/${parsed.name}: attachments are unavailable because no attachment store is composed` })
-      }
-      try {
-        attachments = await admitCommandAttachments(
-          store,
-          submittedAttachments,
-          receiptId => this.fileReceipts.resolver?.(agent, receiptId),
-        )
-      } catch (error: unknown) {
-        if (error instanceof AttachmentError) {
-          return settle({ kind: 'error', text: error.message })
+      let attachments: readonly (ImageBlock | FileBlock)[] = NO_ATTACHMENTS
+      if (submittedAttachments.length > 0) {
+        if (command.definition.input?.attachments !== true) {
+          return settle({ kind: 'error', text: `/${parsed.name} does not accept attachments` })
         }
+        const store = this.ctx.get('attachments')
+        if (store === undefined) {
+          return settle({ kind: 'error', text: `/${parsed.name}: attachments are unavailable because no attachment store is composed` })
+        }
+        try {
+          attachments = await admitCommandAttachments(
+            store,
+            submittedAttachments,
+            receiptId => this.fileReceipts.resolver?.(agent, receiptId),
+          )
+        } catch (error: unknown) {
+          if (error instanceof AttachmentError) {
+            return settle({ kind: 'error', text: error.message })
+          }
+          this.settleThrown(agent.session, parsed.name, commandId, error)
+          throw error
+        }
+        // Cancellation must be honored BEFORE the handler runs: admission may
+        // await slow storage, and a handler entered after the caller cancelled
+        // would mutate state the retrying caller then duplicates. (The committed
+        // image objects stay unreferenced and are deferred-GC territory.)
+        const cancelledDuringAdmission = cancellationOf(signal)
+        if (cancelledDuringAdmission !== undefined) {
+          this.settleThrown(agent.session, parsed.name, commandId, cancelledDuringAdmission)
+          throw cancelledDuringAdmission
+        }
+      }
+      const invocation = Object.freeze({ commandId, agent, rawInput: parsed.rawInput, attachments, signal })
+      let result: CommandResult
+      try {
+        const output = command.definition.handler(invocation)
+        const original = Promise.resolve(output)
+        handlerOwnsLifetime = true
+        // Both outcomes release actual work. The observer itself cannot reject;
+        // caller cancellation may stop withAbort before the original settles.
+        void original.then(
+          () => { this.executions.delete(commandId) },
+          (_error: unknown) => { this.executions.delete(commandId) },
+        )
+        result = normalizeResult(parsed.name, await withAbort(original, signal))
+      } catch (error: unknown) {
         this.settleThrown(agent.session, parsed.name, commandId, error)
         throw error
       }
-      // Cancellation must be honored BEFORE the handler runs: admission may
-      // await slow storage, and a handler entered after the caller cancelled
-      // would mutate state the retrying caller then duplicates. (The committed
-      // image objects stay unreferenced and are deferred-GC territory.)
-      const cancelledDuringAdmission = cancellationOf(signal)
-      if (cancelledDuringAdmission !== undefined) {
-        this.settleThrown(agent.session, parsed.name, commandId, cancelledDuringAdmission)
-        throw cancelledDuringAdmission
-      }
+      return settle(result)
+    } finally {
+      if (!handlerOwnsLifetime) this.executions.delete(commandId)
     }
-    const invocation = Object.freeze({ commandId, agent, rawInput: parsed.rawInput, attachments, signal })
-    let result: CommandResult
-    try {
-      const output = command.definition.handler(invocation)
-      result = normalizeResult(parsed.name, await withAbort(Promise.resolve(output), signal))
-    } catch (error: unknown) {
-      this.settleThrown(agent.session, parsed.name, commandId, error)
-      throw error
-    }
-    return settle(result)
   }
 
   /** Contained `command/done` error append for a thrown handler or admission failure. */

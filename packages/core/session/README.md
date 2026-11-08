@@ -29,6 +29,8 @@ English | [中文](README.zh.md)
 
 Mount `dsh-session` wherever a session must exist. It creates and holds event-sourced `Session` instances in memory; durable storage is layered on by a persistence plugin that subscribes to the `session/event` feed.
 
+`ConversationActivity` reserves `data.startsConversation: true` for an event that starts a conversation without a model turn. `isConversationActivityEvent(event)` recognizes this explicit declaration and `turn/start`; absence preserves the event's earlier activity meaning. This presentation and reuse fact neither enters model history nor authorizes resuming a task.
+
 ### Create and inspect sessions
 
 `ctx.sessions.create()` builds a live session bound to the calling fiber; `get(id)` and `list()` find sessions, and `fork()` creates an independent session from a stable prefix of a live one. It copies history, `cwd`, `isSeeded`, and the inherited event count without recording a source relationship. `parentSession` records a subagent’s direct creator; historical ordinary forks may retain their source there, so classification uses `origin`.

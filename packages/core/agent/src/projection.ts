@@ -1,11 +1,20 @@
 /** Shared pure fold of the Session's turn and step events. */
 import type { TurnBoundaryProjection } from './types.ts'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
+import { isConversationActivityEvent, type SessionSeq } from '@deepseek-ai/dsh-session'
 import { brandNumber } from '@deepseek-ai/dsh-brand'
 import { z as zod } from 'zod'
 
 const sessionSeqSchema = zod.number().int().nonnegative().transform(brandNumber<SessionSeq>)
+
+/** Whether committed activity prevents reusing a Session for a new conversation. */
+export const conversationActivityProjectionDefinition = {
+  key: 'conversationActivity',
+  stateVersion: 1,
+  stateSchema: zod.boolean(),
+  init: () => false,
+  apply: (state, event) => state || isConversationActivityEvent(event),
+} satisfies ProjectionDefinition<'conversationActivity', boolean>
 
 const turnBoundaryProjectionSchema: zod.ZodType<TurnBoundaryProjection> = zod.object({
   openTurnStartSeq: sessionSeqSchema.nullable(),

@@ -1,7 +1,7 @@
 /**
- * The summary blank bit means "conversation not started" (no turn has run),
+ * The summary blank bit means "conversation not started" (no turn or explicit command activity),
  * not "log empty": standalone plugin events — command lifecycle records,
- * plan/mode, permission knob events, session titles — never flip it, so running /plan or /goal on a
+ * plan/mode, permission knob events, session titles — keep it unless a command opts in, so running /plan or /goal on a
  * fresh session keeps it list-hidden and reusable, while the first accepted
  * prompt's turn/start clears it. The host/session-added frame shares the
  * same predicate function (covered by the workspace spec's frame assertion).
@@ -75,6 +75,24 @@ async function listBlank(remote: TestSessionRemote, id: string): Promise<boolean
 }
 
 describe('summary blank = conversation not started', () => {
+  it('publishes opted-in command activity without a turn or model message', async () => {
+    const { ctx, remote, attach } = await harness()
+    const session = ctx.sessions.create()
+    await attach(session)
+    const added: SessionSummary[] = []
+    ctx.on('api-session/added', (summary) => { added.push(summary) })
+    session.append('command/run', {
+      commandId: CommandId('conversation-1'), name: 'conversation', args: ' hello',
+      source: { kind: 'user' }, startsConversation: true,
+    })
+    session.append('command/done', { commandId: CommandId('conversation-1'), kind: 'success', text: 'Hello.' })
+    expect(await listBlank(remote, session.id)).toBe(false)
+    expect(added.at(-1)).toMatchObject({ sessionId: session.id, blank: false })
+    expect(ctx.agents.hasConversationActivity(session)).toBe(true)
+    expect(ctx.agents.turnBoundaryOf(session)).toMatchObject({ openTurnStartSeq: null, lastTurn: 0 })
+    expect(session.snapshotEvents().map(event => event.type)).toEqual(['command/run', 'command/done'])
+  })
+
   it('standalone events (command lifecycle, plan/mode, title) keep the session blank', async () => {
     const { ctx, remote, attach } = await harness()
     const session = ctx.sessions.create()
@@ -142,6 +160,24 @@ async function resumeAndObserve(ctx: Context, remote: TestSessionRemote, id: Ses
 }
 
 describe('resumed Session summaries', () => {
+  it('cold-reads opted-in commands as conversations and keeps prompt recency empty', async () => {
+    const { ctx, remote, cwd } = await resumeHarness()
+    const id = 'session-resumed-command' as SessionId
+    const activityAt = Date.now() + 60_000
+    await storeSession(ctx, id, cwd, [
+      ...configurationEvents,
+      { type: 'command/run', seq: SessionSeq(3), time: activityAt,
+        data: { commandId: CommandId('cold-command'), name: 'conversation', source: { kind: 'user' }, startsConversation: true } },
+      { type: 'command/done', seq: SessionSeq(4), time: activityAt + 1,
+        data: { commandId: CommandId('cold-command'), kind: 'success', text: 'Saved reply.' } },
+    ])
+    const { added, listed } = await resumeAndObserve(ctx, remote, id)
+    expect(added.map(summary => [summary.blank, summary.updatedAt])).toEqual(added.map(() => [false, activityAt]))
+    expect(listed).toMatchObject({ blank: false, updatedAt: activityAt,
+      projections: { values: { sessionListMetadata: { blank: false, lastPromptAt: null, lastActivityAt: activityAt } } } })
+    expect(ctx.agents.hasConversationActivity(ctx.agents.get(id)!.session)).toBe(true)
+  })
+
   it('publish a turnless resumed Session as blank', async () => {
     const { ctx, remote, cwd } = await resumeHarness()
     const id = 'session-resumed-blank' as SessionId

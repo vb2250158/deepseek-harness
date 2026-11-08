@@ -63,6 +63,20 @@ async function setup(registry = true, peer?: JsonRpcTransportPeer) {
 }
 
 describe('SDK command dispatch', () => {
+  it('preserves explicit conversation activity on command-only SDK sessions without a model request', async () => {
+    const h = await setup()
+    await h.initialize()
+    h.ctx.effect(() => h.ctx.commands.register({ name: 'permission', definitionId: CommandDefinitionId('@deepseek-ai/dsh-permission-presets'),
+      description: 'Conversation fixture', startsConversation: true, handler: () => ({ kind: 'success', text: 'Recorded reply.' }) }))
+    const result = await h.server.query({ sessionId: SessionId('command-conversation'),
+      contentBlocks: [{ type: 'text', text: '/permission read-only' }] })
+    expect(result).toMatchObject({ kind: 'command', execution: { result: { kind: 'success', text: 'Recorded reply.' } } })
+    const session = h.ctx.agents.get(SessionId('command-conversation'))!.session
+    expect(session.snapshotEvents().map(event => event.type)).toEqual(['command/run', 'command/done'])
+    expect(session.snapshotEvents()[0]?.data).toMatchObject({ startsConversation: true })
+    expect(h.ctx.agents.hasConversationActivity(session)).toBe(true)
+  })
+
   it.each([' ', '\t\n', '\u3000'])('accepts leading whitespace through the query wire endpoint: %j', async (prefix) => {
     const h = await setup()
     await h.initialize()

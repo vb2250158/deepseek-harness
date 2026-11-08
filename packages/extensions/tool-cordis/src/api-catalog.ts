@@ -256,7 +256,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'select\') async select(agent: Agent, agentPreset: string): Promise<string>',
-        description: 'Select a preset before a session starts its first turn. A Session whose log records the preset and whose Agent runs its current revision keeps its composition; nothing is logged or announced.',
+        description: 'Select a preset before a session starts a conversation. A Session whose log records the preset and whose Agent runs its current revision keeps its composition; nothing is logged or announced.',
         parameters: [{ name: 'agent', description: 'Target Agent.' }, { name: 'agentPreset', description: 'Requested identity.' }],
         returns: 'Committed preset identity.',
       },
@@ -292,6 +292,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Agent service (`ctx.agents`): tracks live agents and carries the initiating Agent through one process-local asynchronous driver chain.',
     description: 'Agent service (`ctx.agents`): tracks live agents and carries the initiating Agent through one process-local asynchronous driver chain. Agent *creation* is provided by whichever plugin implements the AgentFactory (`@deepseek-ai/dsh-agent-loop`), registered via setFactory.\n\nInitiator methods provide same-process causal attribution only. Ambient presence is neither liveness proof nor authorization; subjects and owners remain explicit, as does identity at worker, process, persistence, and wire boundaries. Returned Promise boundaries drain during teardown, except a nested lineage that starts an owning-fiber unload is excluded from its own drain.',
     methods: [
+      {
+        signature: 'hasConversationActivity(session: Session): boolean',
+        description: 'Read whether a Session has started a conversation, including opted-in commands.',
+        parameters: [{ name: 'session', description: 'prepared Session whose committed activity is read.' }],
+        returns: 'whether the Session must remain distinct from a new conversation.',
+      },
       {
         signature: 'turnBoundaryOf(session: Session): TurnBoundaryProjection',
         description: 'Read the turn and step positions recorded in a Session.',
@@ -679,6 +685,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Register a global or calling-agent-scoped command.',
         parameters: [{ name: 'definition', description: 'discovery metadata and direct UI handler.' }],
         returns: 'the exact effect disposer that unregisters this definition.',
+      },
+      {
+        signature: 'activeExecutions(): readonly SessionId[]',
+        description: 'Read Sessions with actual command work or plugin-owned command activity.',
+        parameters: [],
+        returns: 'a detached, deduplicated Session identity list without command input.',
+        throws: ['when a registered source cannot establish its activity state.'],
+      },
+      {
+        signature: 'registerActivitySource(source: () => readonly SessionId[]): () => void',
+        description: 'Contribute synchronous activity owned by a command plugin, including unknown process outcomes.',
+        parameters: [{ name: 'source', description: 'current active Session identities; throw when the state cannot be established.' }],
+        returns: 'the calling fiber\'s disposer that unregisters this exact contribution.',
       },
       {
         signature: 'registerFileReceiptResolver(resolver: CommandFileReceiptResolver): () => void',
@@ -5962,7 +5981,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CommandDefinition',
-    declaration: 'export interface CommandDefinition {\n    readonly definitionId?: CommandDefinitionId;\n    readonly name: string;\n    readonly description: string;\n    readonly input?: CommandInputDescriptor;\n    readonly recordInput?: boolean;\n    readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>;\n}',
+    declaration: 'export interface CommandDefinition {\n    readonly definitionId?: CommandDefinitionId;\n    readonly name: string;\n    readonly description: string;\n    readonly input?: CommandInputDescriptor;\n    readonly recordInput?: boolean;\n    readonly startsConversation?: boolean;\n    readonly handler: (invocation: CommandInvocation) => CommandResult | Promise<CommandResult>;\n}',
   },
   {
     name: 'CommandDefinitionId',

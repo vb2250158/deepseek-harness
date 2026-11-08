@@ -10,7 +10,7 @@ export function apply(ctx) {
       name: 'snapshot-scoped-command-identity',
       inject: ['commands'],
       apply(inner) {
-        inner.effect(() => inner.commands.register({ ...permission, name: 'access' }))
+        inner.effect(() => inner.commands.register({ ...permission, name: 'access', startsConversation: true }))
         inner.effect(() => inner.commands.register({
           name: 'permission',
           definitionId: 'snapshot/unrelated-permission',

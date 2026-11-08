@@ -29,6 +29,8 @@ kind: "package-reference"
 
 在必须存在会话的任何地方挂载 `dsh-session`。它在内存中创建并持有事件溯源的 `Session` 实例；持久存储由订阅 `session/event` 流的持久化插件叠加。
 
+`ConversationActivity` 将 `data.startsConversation: true` 保留为事件不启动模型轮次却开启对话的显式声明。`isConversationActivityEvent(event)` 识别该声明和 `turn/start`；缺失时保留事件原有活动含义。这个展示与复用事实不进入模型历史，也不授权恢复任务。
+
 ### 创建与检查会话
 
 `ctx.sessions.create()` 构建绑定到调用方 fiber 的实时会话；`get(id)` 与 `list()` 查找会话，`fork()` 从实时会话的精确前缀创建独立会话。它复制历史、`cwd`、`isSeeded` 和继承事件数，不记录来源关系。`parentSession` 记录子代理的直接创建者；历史普通 fork 可能仍在此字段保留来源，因此分类使用 `origin`。

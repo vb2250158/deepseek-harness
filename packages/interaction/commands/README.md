@@ -45,6 +45,8 @@ ctx.commands.register({
 
 The handler returns `success` or `error` plus optional UI text that the adapter renders. `recordInput` defaults to true; a command whose own authoritative domain event already carries the payload sets it to false so the session log does not duplicate the input. Registering the same name twice in one scope throws.
 
+Set `startsConversation: true` for commands whose task and response form a conversation, such as an external agent bridge. The executor persists this opt-in on `command/run`; Session lists show the conversation and prevent reusing it as a blank Session or changing its preset. Control commands default to false and retain their existing blank-Session behavior. This flag creates no model message or turn, changes no cancellation or recovery semantics, and does not make the command available through adapters that do not support it.
+
 ### Command syntax
 
 A command line starts with a slash at byte zero, a lowercase name containing letters, digits, `_` or `-`, and then either end-of-input or whitespace. Everything after the name — including separator whitespace — is the command's `rawInput`, and the command owns its own grammar for it. Lines that are not syntactically a command, or that name an unknown command, are rejected by the adapter instead of becoming a model prompt.
@@ -66,6 +68,8 @@ The stateless `@deepseek-ai/dsh-commands/builtin` entry shares first-party ident
 ### Cancellation
 
 The caller's abort signal stops the registry from awaiting a handler; a handler that ignores the signal may continue its own external side effects after the caller stops waiting. A cancelled or thrown handler settles as a `command/done` error in the log.
+
+Host lifecycle guards read `activeExecutions()` for the deduplicated Session identities whose attachment admission or original handler promise has not settled. Caller cancellation does not release a still-running handler. Plugins that retain work or an unknown process outcome beyond their handler contribute those identities through `registerActivitySource(source)`; registration belongs to the calling fiber, and a source failure propagates instead of reporting idle. Both methods are synchronous Host APIs, not SDK RPC methods. This activity neither changes Agent status nor starts a model turn.
 
 -----
 

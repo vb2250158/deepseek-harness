@@ -1,0 +1,20 @@
+[
+  {
+    "type": "command/run",
+    "data": {
+      "commandId": "command-1",
+      "name": "permission",
+      "startsConversation": true,
+      "args": " read-only",
+      "source": { "kind": "user" }
+    }
+  },
+  {
+    "type": "command/done",
+    "data": {
+      "commandId": "command-1",
+      "kind": "success",
+      "text": "Command conversation reply."
+    }
+  }
+]

@@ -65,6 +65,12 @@ export type SessionSeqCursor = SessionSeq | -1
 /** One existing Session event position, or explicit absence. */
 export type OptionalSessionSeq = SessionSeq | null
 
+/** Explicit conversation activity carried by an event that does not start a model turn. */
+export interface ConversationActivity {
+  /** Preserve this Session as a conversation, independently of model turn boundaries. */
+  readonly startsConversation?: true
+}
+
 /**
  * Current logical Session format version, stamped into every newly written
  * {@link SessionHeader}. Current Session and persistence code accept only this
