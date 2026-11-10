@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The official user renderer owns the source-decoration chain above its bubble.
+ * The default user row owns the source-decoration chain above its bubble.
  * Steering rows do not render the chain; changing its occupant preserves the
  * existing message content and actions.
  */
@@ -13,29 +13,26 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type {
   ChatConversationViewNode, SteeringMessageNode, UserMessageNode,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
-import type { ChatNodeViewProps, UserContentInput } from '../src/client/contract/slots.ts'
+import type { ChatNodeViewProps, UserContentInput, UserRowInput } from '../src/client/contract/slots.ts'
 import { UserMessageNodeView } from '../src/client/chat/MessageItem.tsx'
 import { zh } from '../src/client/locale.ts'
-import { createUserContentFixture } from './user-content-component-fixture.tsx'
+import { createUserContentFixture, renderUserRowFixture } from './user-content-component-fixture.tsx'
 import { unusedImageLoader } from './reasoning-component-fixture.tsx'
 
 afterEach(cleanup)
 
 const t: ChatNodeViewProps['t'] = makeTranslate(zh, commonZh)
 type UserSlots = PropsRenderSlots<'conversation.chat.user.before'>
-const userSlots: UserSlots = {
-  renderSlot: () => null,
-  renderSlotChain: (_key, _owner, opts) => opts?.fallback ?? null,
-  SessionProvider: ({ children }) => <>{children}</>,
-}
+let sourceRenderer: UserSlots['renderSlotChain'] = () => null
 
 /** One durable source, unread by Chat itself. */
 const SHARED = { kind: 'user', principal: { kind: 'share-viewer', shareId: 'share-1', actor: { subjectId: 'subject-42' } } }
 
 let renderUserContent: ReturnType<typeof createUserContentFixture>
-beforeEach(() => { renderUserContent = createUserContentFixture() })
+beforeEach(() => { renderUserContent = createUserContentFixture(); sourceRenderer = () => null })
 
 const renderUserFactory: ChatNodeViewProps['renderFactorySlot'] = (name, input) => {
+  if (name === 'conversation.chat.user.row') return renderUserRowFixture(input as UserRowInput, renderUserFactory, t, sourceRenderer)
   if (name !== 'conversation.chat.user.content') throw new Error(`Unexpected Chat Factory: ${name}`)
   return renderUserContent(input as UserContentInput, () => null, t)
 }
@@ -79,7 +76,8 @@ const steeringData: SteeringMessageNode = {
 describe('official user renderer origin seat', () => {
   it('renders the source chain above the bubble and passes the durable source', () => {
     const renderSlotChain = vi.fn(() => <span data-test-origin="">来自会话分享</span>)
-    const view = render(<UserMessageNodeView {...viewProps(userData)} {...userSlots} renderSlotChain={renderSlotChain} />)
+    sourceRenderer = renderSlotChain
+    const view = render(<UserMessageNodeView {...viewProps(userData)} />)
     const row = view.container.firstElementChild as HTMLElement
     const origin = row.querySelector('[data-test-origin]')
     const bubble = row.querySelector('[data-message-bubble]')
@@ -98,7 +96,8 @@ describe('official user renderer origin seat', () => {
     const absent = vi.fn(() => null)
     const occupied = vi.fn(() => <span data-test-origin="">来自会话分享</span>)
     const empty = vi.fn(() => null)
-    const view = render(<UserMessageNodeView {...props} {...userSlots} renderSlotChain={absent} />)
+    sourceRenderer = absent
+    const view = render(<UserMessageNodeView {...props} />)
     const row = view.container.firstElementChild
     const bubble = view.container.querySelector('[data-message-bubble]')
     const text = view.getByText('hello').firstChild
@@ -110,7 +109,8 @@ describe('official user renderer origin seat', () => {
     expect(view.container.querySelector('[data-test-origin]')).toBeNull()
 
     for (const renderSlotChain of [occupied, empty, absent]) {
-      view.rerender(<UserMessageNodeView {...props} {...userSlots} renderSlotChain={renderSlotChain} />)
+      sourceRenderer = renderSlotChain
+      view.rerender(<UserMessageNodeView {...props} renderFactorySlot={(...args) => renderUserFactory(...args)} />)
       expect(view.container.firstElementChild).toBe(row)
       expect(view.container.querySelector('[data-message-bubble]')).toBe(bubble)
       expect(view.getByText('hello').firstChild).toBe(text)
@@ -122,9 +122,10 @@ describe('official user renderer origin seat', () => {
 
   it('asks the chain only for the user row beside a steering row', () => {
     const renderSlotChain = vi.fn(() => <span data-test-origin="" />)
+    sourceRenderer = renderSlotChain
     const view = render(<>
-      <UserMessageNodeView {...viewProps(userData)} {...userSlots} renderSlotChain={renderSlotChain} />
-      <UserMessageNodeView {...viewProps(steeringData)} renderSlotChain={() => null} />
+      <UserMessageNodeView {...viewProps(userData)} />
+      <UserMessageNodeView {...viewProps(steeringData)} />
     </>)
     const steeringRow = view.container.lastElementChild!
     expect(steeringRow.textContent).toContain('steer')

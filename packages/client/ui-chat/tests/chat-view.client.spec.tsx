@@ -15,7 +15,7 @@ import type {
   ChatViewSlotProps, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
   LegacyConversationSlice, ModelRetryNode, StartedToolCall, SteeringMessageNode,
   ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode,
-  TranscriptViewMode, UserContentInput, UserMessageNode,
+  TranscriptViewMode, UserContentInput, UserMessageNode, UserRowInput,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
   SessionListState, SessionSnapshot,
@@ -58,7 +58,7 @@ import type { TurnProcessSpec } from '../src/client/contract/turn-process.ts'
 import { chatSnapshotFixture } from './chat-snapshot-fixture.client.ts'
 import { installTurnNavigatorObserver } from './turn-navigator-fixture.ts'
 import { renderReasoningSlot } from './reasoning-component-fixture.tsx'
-import { createUserContentFixture } from './user-content-component-fixture.tsx'
+import { createUserContentFixture, renderUserRowFixture } from './user-content-component-fixture.tsx'
 import { ConversationGroupStore } from '../../ui-conversation/src/client/conversation/group-store.ts'
 
 function installGroupedSnapshot(
@@ -312,7 +312,7 @@ function HarnessUserOrigin({ useRenderer, owner, options }: {
 }
 
 function HarnessChatNode({
-  standard, owner, hookContext, usePerformanceUsage, toolOwners, fallback, renderAssistantSlot, renderUserChain,
+  standard, owner, hookContext, usePerformanceUsage, toolOwners, fallback, renderAssistantSlot,
 }: {
   readonly standard: HarnessStandardProps
   readonly owner: RoutedChatNodeOwner
@@ -321,7 +321,6 @@ function HarnessChatNode({
   readonly toolOwners: ToolOwner[]
   readonly fallback: React.ReactNode
   readonly renderAssistantSlot: React.ComponentProps<typeof AssistantNodeView>['renderSlot']
-  readonly renderUserChain: PropsRenderSlots<'conversation.chat.user.before'>['renderSlotChain']
 }) {
   const hooks = useMemo(() => ({
     useTurnData: CHAT_NODE_INJECT.hooks.turnData(standard, hookContext),
@@ -332,9 +331,9 @@ function HarnessChatNode({
   const nodeProps = { ...shared, ...owner, ...hooks }
   switch (owner.node.kind) {
     case 'user':
-      return <UserMessageNodeView {...nodeProps} node={owner.node} renderSlotChain={renderUserChain} />
+      return <UserMessageNodeView {...nodeProps} node={owner.node} />
     case 'steering':
-      return <UserMessageNodeView {...nodeProps} node={owner.node} renderSlotChain={() => null} />
+      return <UserMessageNodeView {...nodeProps} node={owner.node} />
     case 'context':
       return <ContextMessageNodeView {...nodeProps} node={owner.node} />
     case 'assistant-step':
@@ -458,8 +457,7 @@ function makeHarness(
     if (nodeSlotOverride !== undefined) return nodeSlotOverride(key, owner, opts)
     return <HarnessChatNode standard={props} owner={owner}
       hookContext={opts.hookContext} usePerformanceUsage={usePerformanceUsage}
-      toolOwners={toolOwners} fallback={opts.fallback} renderAssistantSlot={renderAssistantSlot}
-      renderUserChain={renderUserChain} />
+      toolOwners={toolOwners} fallback={opts.fallback} renderAssistantSlot={renderAssistantSlot} />
   }
   const renderFlowSlot: ChatFlowSlotProps['renderSlot'] = (key: string, owner: object, opts?: {
     fallback?: React.ReactNode
@@ -475,6 +473,7 @@ function makeHarness(
     return <HarnessUserOrigin useRenderer={useOriginRenderer} owner={owner as UserBeforeOwnerProps} options={opts} />
   }
   const renderFactorySlot: PropsRenderFactories['renderFactorySlot'] = (name, owner) => {
+    if (name === 'conversation.chat.user.row') return renderUserRowFixture(owner as UserRowInput, renderFactorySlot, props.t, renderUserChain)
     if (name !== 'conversation.chat.user.content') throw new Error(`Unexpected Chat Factory: ${name}`)
     return renderUserContent(owner as UserContentInput, renderImages, props.t)
   }

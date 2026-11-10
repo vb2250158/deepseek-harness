@@ -3,12 +3,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type {
   ChatConversationViewNode, ConversationNode,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
-import type { ChatNodeViewProps, UserContentInput } from '../src/client/contract/slots.ts'
+import type { ChatNodeViewProps, UserContentInput, UserRowInput } from '../src/client/contract/slots.ts'
 import {
   formatMessageClock, msUntilNextLocalMidnight, startOfLocalDay,
 } from '../src/client/chat/message-chrome.ts'
@@ -19,7 +18,7 @@ import {
 import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
 import { useDetailedPresentation } from './presentation-fixture.client.ts'
 import { unusedImageLoader } from './reasoning-component-fixture.tsx'
-import { createUserContentFixture } from './user-content-component-fixture.tsx'
+import { createUserContentFixture, renderUserRowFixture } from './user-content-component-fixture.tsx'
 import { useDisclosure } from '../src/client/chat/use-disclosure.ts'
 import { useSearchableHidden } from '../src/client/chat/searchable-hidden.ts'
 import { ActivityPill, UsagePill, type StatPillProps } from '../src/client/chat/StatsPills.tsx'
@@ -34,11 +33,6 @@ afterEach(() => {
 
 const t: ChatNodeViewProps['t'] = makeTranslate(zh, commonZh)
 const renderUserImages: Parameters<ReturnType<typeof createUserContentFixture>>[1] = () => null
-const userSlots: PropsRenderSlots<'conversation.chat.user.before'> = {
-  renderSlot: () => null,
-  renderSlotChain: (_key, _owner, opts) => opts?.fallback ?? null,
-  SessionProvider: ({ children }) => <>{children}</>,
-}
 let renderUserContent: ReturnType<typeof createUserContentFixture>
 beforeEach(() => { renderUserContent = createUserContentFixture() })
 const RETRY_ID = 'retry-fixture' as Extract<ConversationNode, { kind: 'model-retry' }>['retryId']
@@ -78,6 +72,7 @@ function MessageItem({ node, t: translate, referenceLabels, skillNames }: Messag
         : node,
   }
   const renderUserFactory: ChatNodeViewProps['renderFactorySlot'] = (name, input) => {
+    if (name === 'conversation.chat.user.row') return renderUserRowFixture(input as UserRowInput, renderUserFactory, translate)
     if (name !== 'conversation.chat.user.content') throw new Error(`Unexpected user Factory: ${name}`)
     return renderUserContent(input as UserContentInput, renderUserImages, translate)
   }
@@ -87,9 +82,9 @@ function MessageItem({ node, t: translate, referenceLabels, skillNames }: Messag
   }
   switch (node.kind) {
     case 'user':
-      return <UserMessageNodeView {...props as ChatNodeViewProps<'user'>} {...userSlots} />
+      return <UserMessageNodeView {...props as ChatNodeViewProps<'user'>} />
     case 'steering':
-      return <UserMessageNodeView {...props as ChatNodeViewProps<'steering'>} renderSlotChain={() => null} />
+      return <UserMessageNodeView {...props as ChatNodeViewProps<'steering'>} />
     case 'context':
       return <ContextMessageNodeView {...props as ChatNodeViewProps<'context'>} />
     case 'compaction':

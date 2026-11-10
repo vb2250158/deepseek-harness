@@ -1,16 +1,15 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { PropsRenderFactories, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UserTextFacts } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { JsonBlock, StateDot, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
-  ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps, UserContentAttachment, UserContentData, UserContentInput,
+  ChatNodeViewProps, ChatViewSlotProps, UserContentAttachment, UserContentData, UserContentInput, UserRowOrigin,
 } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
-import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
 
 const EMPTY_TEXT_FACTS: Readonly<Partial<UserTextFacts>> = {}
@@ -160,50 +159,17 @@ function TurnMaxTokensItem({ t }: {
   )
 }
 
-/**
- * A row the message-source seat decorates. A durable Chat node satisfies it;
- * pending and local-echo rows pass a source-less stand-in.
- */
-interface DecoratedRow {
-  readonly kind: 'user' | 'steering'
-  readonly data: { readonly source: unknown }
-}
-
-/** Pending and local-echo rows carry no durable source for the seat to elect. */
-const UNDECORATED_ROW: DecoratedRow = { kind: 'user', data: { source: null } }
-
-/** Occupant used by rows that do not own the message-source seat. */
-const NO_MESSAGE_SOURCE: PropsRenderSlots<'conversation.chat.user.before'>['renderSlotChain'] = () => null
-
-/** Right-aligned bubble shared by user and steering rows. */
-function UserStyleBubble({
-  node, renderSlotChain, content, loadImage, renderFactorySlot, actions,
-  pending = false, echo = false, batchStart = false,
+/** Prepare input contents once before entering the shared user-row presentation. */
+function PreparedUserRow({ origin, content, loadImage, renderFactorySlot,
   referenceLabels, skillNames, previewAttachments, facts: inputFacts = EMPTY_TEXT_FACTS, interactive = false,
 }: {
+  origin: UserRowOrigin
   content: readonly unknown[]
-  renderFactorySlot: PropsRenderFactories['renderFactorySlot']
-  /** Optional IconActions (or similar) below the bubble; receives the joined text. */
-  actions?: (text: string) => ReactNode
-  /** Row whose durable source the message-source seat elects above this bubble. */
-  node: DecoratedRow
-  /** Seat renderer; rows that do not own the seat pass {@link NO_MESSAGE_SOURCE}. */
-  renderSlotChain: PropsRenderSlots<'conversation.chat.user.before'>['renderSlotChain']
-  /** Whether this is the Host-authoritative pre-admission steering projection. */
-  pending?: boolean
-  /** Whether this is a local submission echo (invisible marker; the echo renders exactly like its durable replacement). */
-  echo?: boolean
-  /** Whether this admitted steering row starts its claim's batch and keeps the Turn tail slot above it. */
-  batchStart?: boolean
-  /** Exact session mention labels associated by the adjacent recall node. */
   referenceLabels?: readonly string[]
-  /** Skill names the step's `skill-invocation` injections loaded for this message. */
   skillNames?: readonly string[]
-  /** Local submission-echo attachments replacing the content-derived attachment sequence. */
   previewAttachments?: readonly UserContentAttachment[]
-  /** Inputs used by text transforms, separate from row and rendering props. */
   facts?: Readonly<Partial<UserTextFacts>>
-} & Pick<ChatNodeOwnerProps, 'loadImage'> & Pick<UserContentInput, 'interactive'>): ReactNode {
+} & Pick<UserContentInput, 'loadImage' | 'interactive'> & PropsRenderFactories): ReactNode {
   const parts = useMemo(() => contentParts(content), [content])
   const prepared = useMemo<UserContentData>(() => ({
     text: parts.text,
@@ -216,69 +182,31 @@ function UserStyleBubble({
     ...(referenceLabels === undefined ? {} : { sessionLabels: referenceLabels }),
     ...(skillNames === undefined ? {} : { skillNames }),
   }), [inputFacts, referenceLabels, skillNames])
-  return (
-    <div
-      className={css.userRow}
-      data-pending-steering={pending || undefined}
-      data-submission-echo={echo || undefined}
-      data-chat-steering-batch={batchStart ? 'start' : undefined}
-    >
-      {renderSlotChain('conversation.chat.user.before', { source: node.data.source, kind: node.kind }, { fallback: null })}
-      {renderFactorySlot('conversation.chat.user.content', {
-        content: prepared,
-        loadImage,
-        facts,
-        interactive,
-      })}
-      {actions?.(prepared.text)}
-    </div>
-  )
+  return renderFactorySlot('conversation.chat.user.row', {
+    origin, content: prepared, loadImage, facts, interactive,
+  })
 }
 
 /**
- * Render one Host-authoritative pending steering item with the same visual
- * language as its eventual durable transcript node.
- * @param props - pending content, authorized image loader, and Factory/locale seats.
- * @returns the pending steering bubble.
+ * Render a Host-pending steering input through the shared user-row presentation.
+ * @param props - pending content, authorized image loader, and Factory seat.
+ * @returns the pending steering row.
  */
-export function PendingSteeringBubble({ content, loadImage, renderFactorySlot, t }: {
+export function PendingSteeringBubble({ content, loadImage, renderFactorySlot }: {
   content: readonly unknown[]
-  renderFactorySlot: PropsRenderFactories['renderFactorySlot']
-  t: ChatViewSlotProps['t']
-} & Pick<ChatNodeOwnerProps, 'loadImage'>): ReactNode {
-  return (
-    <UserStyleBubble
-      node={UNDECORATED_ROW}
-      renderSlotChain={NO_MESSAGE_SOURCE}
-      content={content}
-      renderFactorySlot={renderFactorySlot}
-      loadImage={loadImage}
-      pending
-      actions={text => (
-        <MessageIconActions
-          text={text}
-          clock="start"
-          className={css.actions}
-          t={t}
-        />
-      )}
-    />
-  )
+} & Pick<UserContentInput, 'loadImage'> & PropsRenderFactories & Pick<ChatViewSlotProps, 't'>): ReactNode {
+  return <PreparedUserRow origin={{ kind: 'pending-steering' }} content={content}
+    renderFactorySlot={renderFactorySlot} loadImage={loadImage} />
 }
 
 /**
- * Render one local transcript or steering submission echo with the same
- * visual language and surface marker as the Host occurrence that replaces
- * it: draft text plus object-URL previews, visible from the submit click
- * until the durable `user/message` or steering occurrence renders.
- * @param props - the pending submission, authorized image loader, and render seats.
- * @returns the echoed user bubble.
+ * Render a local submission with object-URL previews through the shared user row.
+ * @param props - pending submission, authorized image loader, and Factory seat.
+ * @returns the local echo until its durable occurrence renders.
  */
-export function PendingSubmissionBubble({ submission, loadImage, renderFactorySlot, t }: {
+export function PendingSubmissionBubble({ submission, loadImage, renderFactorySlot }: {
   submission: PendingSubmission
-  renderFactorySlot: PropsRenderFactories['renderFactorySlot']
-  t: ChatViewSlotProps['t']
-} & Pick<ChatNodeOwnerProps, 'loadImage'>): ReactNode {
+} & Pick<UserContentInput, 'loadImage'> & PropsRenderFactories & Pick<ChatViewSlotProps, 't'>): ReactNode {
   const content = useMemo(
     () => (submission.text === '' ? [] : [{ type: 'text', text: submission.text }]),
     [submission.text],
@@ -299,65 +227,19 @@ export function PendingSubmissionBubble({ submission, loadImage, renderFactorySl
       : { type: 'file', file: attachment.value }),
     [submission.attachments],
   )
-  return (
-    <UserStyleBubble
-      node={UNDECORATED_ROW}
-      renderSlotChain={NO_MESSAGE_SOURCE}
-      content={content}
-      previewAttachments={previewAttachments}
-      renderFactorySlot={renderFactorySlot}
-      loadImage={loadImage}
-      pending={submission.placement === 'steering'}
-      echo
-      actions={text => (
-        <MessageIconActions
-          text={text}
-          time={submission.time}
-          clock="start"
-          className={css.actions}
-          t={t}
-        />
-      )}
-    />
-  )
+  return <PreparedUserRow origin={{ kind: 'submission', submission }} content={content}
+    previewAttachments={previewAttachments} renderFactorySlot={renderFactorySlot} loadImage={loadImage} />
 }
 
-/**
- * Official user and admitted-steering keyed Chat renderer.
- *
- * Renders the durable-message chain seat directly above the bubble. The seat is
- * declared by the `user` registration alone, so a steering row renders the same
- * bubble without asking for it.
- */
+/** Official user and steering nodes enter the same row presentation as pending input. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderFactorySlot, loadImage, renderSlotChain, t,
-}: ChatNodeViewProps<'user' | 'steering'> & {
-  /** Bound by the `user` keyed registration, the only entry that declares the seat. */
-  renderSlotChain: PropsRenderSlots<'conversation.chat.user.before'>['renderSlotChain']
-}) {
+  node, renderFactorySlot, loadImage,
+}: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
-  return (
-    <UserStyleBubble
-      node={node}
-      renderSlotChain={renderSlotChain}
-      content={data.content}
-      interactive
-      renderFactorySlot={renderFactorySlot}
-      loadImage={loadImage}
-      batchStart={node.kind === 'steering' && node.data.batchStart === true}
-      {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
-      {...data.skillNames === undefined ? {} : { skillNames: data.skillNames }}
-      actions={text => (
-        <MessageIconActions
-          text={text}
-          time={data.time}
-          clock="start"
-          className={css.actions}
-          t={t}
-        />
-      )}
-    />
-  )
+  return <PreparedUserRow origin={{ kind: 'durable', node }} content={data.content}
+    interactive renderFactorySlot={renderFactorySlot} loadImage={loadImage}
+    {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
+    {...data.skillNames === undefined ? {} : { skillNames: data.skillNames }} />
 })
 
 /** Injected-context keyed Chat renderer. */

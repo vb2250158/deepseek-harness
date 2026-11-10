@@ -36,6 +36,7 @@ import { ChatView } from './chat/ChatView.tsx'
 import { ChatFlow } from './chat/ChatFlow.tsx'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { UserContent } from './chat/UserContent.tsx'
+import { UserRow, UserRowBody } from './chat/UserRow.tsx'
 import { ActivityPill, UsagePill } from './chat/StatsPills.tsx'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { QuotaNoticeHost } from './chat/QuotaNoticeHost.tsx'
@@ -174,6 +175,14 @@ export function apply(ctx: Context): void {
   ctx.effect(() => () => { transcriptView.dispose(); performancePolicy.dispose() })
   const performanceUsage = performancePolicy.mode
   registerChatNodeRenderers(ctx, performanceUsage, presentation)
+  ctx.effect(() => ctx.slots.registerFactory({
+    name: 'conversation.chat.user.row', scope: 'session',
+    children: { 'conversation.chat.user.row.body': { kind: 'single', scope: 'session' } },
+  }, UserRow))
+  ctx.slots.inject('conversation.chat.user.row.body', () => ctx.slots.register({
+    name: 'conversation.chat.user.row.body', locale: NS,
+    children: { 'conversation.chat.user.before': { kind: 'chain', scope: 'session' } },
+  }, UserRowBody))
   ctx.slots.registerFactory({
     name: 'conversation.chat.user.content', scope: 'session', locale: NS,
     children: { 'conversation.chat.user.images': { kind: 'single', scope: 'session' } },

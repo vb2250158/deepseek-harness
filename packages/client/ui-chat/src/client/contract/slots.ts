@@ -271,6 +271,17 @@ export interface UserContentInput extends Pick<ChatNodeOwnerProps, 'loadImage'>,
   readonly facts: Readonly<Partial<UserTextFacts>>
 }
 
+/** Display origin without inventing a durable node for an uncommitted input. */
+export type UserRowOrigin =
+  | { readonly kind: 'durable'; readonly node: ChatNode<'user' | 'steering'> }
+  | { readonly kind: 'submission'; readonly submission: PendingSubmission }
+  | { readonly kind: 'pending-steering' }
+
+/** Prepared user contents and their actual admission state for every message row. */
+export interface UserRowInput extends UserContentInput {
+  readonly origin: UserRowOrigin
+}
+
 /** Shared presentation state for one Turn-process answer generation. */
 export interface TurnProcessOwnerProps {
   /** Process content eligible to share one Turn-level disclosure. */
@@ -408,6 +419,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 
   interface SlotFactoryMap {
+    /** Shared presentation entry for local, Host-pending, and durable user rows. */
+    'conversation.chat.user.row': {
+      scope: 'session'
+      props: UserRowInput
+      children: { 'conversation.chat.user.row.body': { kind: 'single'; scope: 'session' } }
+    }
     /** Prepared user text, attachments, and references inside a caller-owned message row. */
     'conversation.chat.user.content': {
       scope: 'session'
@@ -424,6 +441,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 
   interface SlotMap {
+    /** Replaceable user-message presentation shared by every admission state. */
+    'conversation.chat.user.row.body': {
+      kind: 'single'
+      scope: 'session'
+      owner: UserRowInput
+    }
     /** Area-local text gestures and surfaces; each consumer registers its own synchronous admission. */
     'conversation.chat.text-interaction': { kind: 'keyed'; scope: 'session'; owner: TextInteractionSurface }
 
@@ -449,7 +472,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       inject: ChatNodeInjected
     }
     /**
-     * Message-source decoration owned and rendered by the user Node entry.
+     * Message-source decoration owned by the default user-row body.
      * Selectors elect one component from the durable source and row kind.
      * No match renders no visible content; steering and pending rows do not
      * render this slot.
