@@ -33,13 +33,13 @@
   },
   "candidateVerification": {
     "hostCommit": "54931fbd25050ef036e44b1daec931da2bfe7b39",
-    "sourceWeb": "Verified the installed 40-plugin source-Web combination and all 164 payloads, including shared user-row rendering across local submission echoes and durable messages.",
+    "sourceWeb": "Verified the installed 40-plugin source-Web combination and all 165 payloads, including scoped Bot conversation styles and explicit Waimai sign-in.",
     "pluginCombination": {
-      "ds-bot": "0.3.2-rabi.20",
+      "ds-bot": "0.3.2-rabi.22",
       "dsh-pet": "0.4.5-fork.7",
       "dsh-plugin-subscriptions": "0.9.12-fork.3",
       "dsh-rabiroute-agent": "0.13.57",
-      "dsh-waimai": "0.9.0",
+      "dsh-waimai": "0.9.1",
       "dsh-proactive-questioning": "0.1.17"
     },
     "coverage": [
@@ -49,16 +49,18 @@
       "DSBot keyless conversation, saved model and history; Pet playback; synthetic subscription quota and failure recovery; Waimai account-free UI and local MCP",
       "Idle-stop guard rejects active commands and exits the isolated Host through its application lifecycle",
       "Three HTTP bridge tools and their discovery guidance; personal schedule access and the local schedule page",
-      "Ordinary and Bot submission echoes match their durable rows in style, size and attribution; actual message paths received model replies"
+      "Ordinary and Bot submission echoes match their durable rows in style, size and attribution; actual message paths received model replies",
+      "Location-independent absolute Core lock resolutions passed frozen/offline installs at different directory depths; ordinary Session controls remain visible after Bot mount and Waimai sign-in starts only after explicit action"
     ],
     "productionInstalled": true,
-    "note": "The fixed Core source with shared user-row rendering and two fixed plugin updates are installed and verified. The Rabi integration retains its three HTTP bridge tools.",
+    "note": "DSBot 0.3.2-rabi.22 and Waimai 0.9.1 are installed and verified on the unchanged fixed Core source. The other 38 plugins retain their selected pins, including the Rabi integration with its three HTTP bridge tools.",
     "pluginCount": 40,
     "sharedPluginCount": 39,
     "pluginSpecifiers": {
       "dsh-rabiroute-agent": "github:vb2250158/dsh-rabiroute-agent#ea2bd567af7e34d038ae746e0170fd8d53ebff05",
-      "ds-bot": "github:vb2250158/DeepSeek-Bot#2680b408ce7374ab71602e6b3ab3fc35df0aec30&path:ds-bot",
-      "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6"
+      "ds-bot": "github:vb2250158/DeepSeek-Bot#d46af074803957273b926f361a6493019ea39671&path:ds-bot",
+      "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6",
+      "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777"
     }
   },
   "productionAtLastVerification": {
@@ -67,11 +69,11 @@
     "profile": "web",
     "mode": "source",
     "pluginVersions": {
-      "ds-bot": "0.3.2-rabi.20",
+      "ds-bot": "0.3.2-rabi.22",
       "dsh-pet": "0.4.5-fork.7",
       "dsh-plugin-subscriptions": "0.9.12-fork.3",
       "dsh-performance-statistics": "0.1.24",
-      "dsh-waimai": "0.9.0",
+      "dsh-waimai": "0.9.1",
       "dsh-environment-sync": "0.8.3",
       "dsh-usage-analytics": "1.4.3",
       "dsh-smart-selector": "0.2.2",
@@ -82,17 +84,18 @@
       "dsh-proactive-questioning": "0.1.17"
     },
     "checkedOn": "2026-11-11",
-    "qaStatus": "source-web-and-message-paths-accepted",
-    "note": "The fixed Core source and two plugin updates were installed and verified. Ordinary and Bot submission echoes match their durable rows, and actual message paths received model replies. Existing Sessions, Bot model bindings and permissions were retained; the guardian resumed healthy. Shared environment publication is verified separately.",
+    "qaStatus": "source-web-dsbot-waimai-update-accepted",
+    "note": "DSBot 0.3.2-rabi.22 and Waimai 0.9.1 were installed and verified on unchanged Core54931. The first lock-location failure was restored before the corrected absolute-link lock passed; existing Sessions and Bot state were retained. Served assets match the installed payloads; ordinary Session controls remain visible, Waimai account controls recovered without sign-in or commerce, and the guardian resumed healthy. Shared publication is verified separately.",
     "pluginCount": 40,
     "coreRestarted": true,
     "pluginUpdatesInstalled": 2,
     "sharedPluginCount": 39,
-    "coreSourceChanged": true,
+    "coreSourceChanged": false,
     "pluginSpecifiers": {
       "dsh-rabiroute-agent": "github:vb2250158/dsh-rabiroute-agent#ea2bd567af7e34d038ae746e0170fd8d53ebff05",
-      "ds-bot": "github:vb2250158/DeepSeek-Bot#2680b408ce7374ab71602e6b3ab3fc35df0aec30&path:ds-bot",
-      "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6"
+      "ds-bot": "github:vb2250158/DeepSeek-Bot#d46af074803957273b926f361a6493019ea39671&path:ds-bot",
+      "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6",
+      "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777"
     }
   }
 }
