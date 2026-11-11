@@ -32,36 +32,18 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "hostCommit": "54931fbd25050ef036e44b1daec931da2bfe7b39",
-    "sourceWeb": "Verified the installed 40-plugin source-Web combination and all 165 payloads, including scoped Bot conversation styles and explicit Waimai sign-in.",
-    "pluginCombination": {
-      "ds-bot": "0.3.2-rabi.22",
-      "dsh-pet": "0.4.5-fork.7",
-      "dsh-plugin-subscriptions": "0.9.12-fork.3",
-      "dsh-rabiroute-agent": "0.13.57",
-      "dsh-waimai": "0.9.1",
-      "dsh-proactive-questioning": "0.1.17"
-    },
+    "hostVersion": "0.2.2-rc.2",
+    "hostCommit": "35ad053656b968d3d76e554ef03a423235dbf5f5",
+    "sourceWeb": "Booted the default source-Web profile in an isolated synthetic Home, verified the Session-list HTTP API and delivered page and JavaScript resources, and completed the normal application-owned exit.",
     "coverage": [
-      "Current Windows source-Web target only",
-      "40 installed plugins: 39 shared Git pins plus one separately registered machine-local integration",
-      "Frozen/offline fresh installation and target-location-equivalent dependency and payload verification",
-      "DSBot keyless conversation, saved model and history; Pet playback; synthetic subscription quota and failure recovery; Waimai account-free UI and local MCP",
-      "Idle-stop guard rejects active commands and exits the isolated Host through its application lifecycle",
-      "Three HTTP bridge tools and their discovery guidance; personal schedule access and the local schedule page",
-      "Ordinary and Bot submission echoes match their durable rows in style, size and attribution; actual message paths received model replies",
-      "Location-independent absolute Core lock resolutions passed frozen/offline installs at different directory depths; ordinary Session controls remain visible after Bot mount and Waimai sign-in starts only after explicit action"
+      "Current Windows x64 source-Web target with the declared Node and package-manager versions",
+      "Affected Agent cancellation and recovery, atomic Session append, model routing, installer behavior and shared UI consumers",
+      "Focused keyless model, context, recovery, attachment and TypeScript SDK replay checks",
+      "Necessary Host, Client and Web builds followed by aggregate build checks"
     ],
-    "productionInstalled": true,
-    "note": "DSBot 0.3.2-rabi.22 and Waimai 0.9.1 are installed and verified on the unchanged fixed Core source. The other 38 plugins retain their selected pins, including the Rabi integration with its three HTTP bridge tools.",
-    "pluginCount": 40,
-    "sharedPluginCount": 39,
-    "pluginSpecifiers": {
-      "dsh-rabiroute-agent": "github:vb2250158/dsh-rabiroute-agent#ea2bd567af7e34d038ae746e0170fd8d53ebff05",
-      "ds-bot": "github:vb2250158/DeepSeek-Bot#d46af074803957273b926f361a6493019ea39671&path:ds-bot",
-      "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6",
-      "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777"
-    }
+    "productionInstalled": false,
+    "selectedPluginCombinationVerified": false,
+    "note": "The maintained main includes the new official default source. Acceptance of the selected third-party plugin combination is pending."
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",
