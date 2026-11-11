@@ -17,6 +17,8 @@ import { defaultParallelism } from './parallelism.ts'
 const root = resolve(import.meta.dirname, '..')
 const paths = translationPairPaths('docs/cli-help.md')
 const execFileAsync = promisify(execFile)
+// Source profile imports share the expected lane's two-minute startup budget.
+const SOURCE_HELP_TIMEOUT_MS = 120_000
 
 /** Complete help text and the immediate subcommands it advertises. */
 export interface CliHelp {
@@ -211,7 +213,7 @@ async function collectHelp(): Promise<HelpPage[]> {
     const help = execFileAsync(process.execPath, [
       '--import', 'tsx/esm', 'apps/cli/src/bin.ts', ...args, '--help',
     ], {
-      cwd: root, env: environment, encoding: 'utf8', timeout: 30_000,
+      cwd: root, env: environment, encoding: 'utf8', timeout: SOURCE_HELP_TIMEOUT_MS,
       killSignal: 'SIGKILL', maxBuffer: 2 * 1024 * 1024,
     })
     // Killing directly, not through execFile's signal option, settles the read only after the child closes.

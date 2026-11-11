@@ -5,7 +5,7 @@ import { chmod, cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, s
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
@@ -60,10 +60,6 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const snapshotsRoot = fileURLToPath(new URL('./', import.meta.url))
 const dshBin = join(repoRoot, 'apps/cli/src/bin.ts')
 const tsconfigPath = join(repoRoot, 'tsconfig.json')
-const editingCordisSkill = join(
-  repoRoot,
-  'packages/preset/agent-preset/skills/editing-cordis-compositions/SKILL.md',
-)
 
 type SnapshotMode = 'replay' | 'record' | 'refresh'
 
@@ -270,7 +266,7 @@ async function writeSessionFixtures(
   const fresh = actualLogs.map((log, index) => {
     const stable = tokenizeSessionFixtureCwd(mode === 'refresh'
       ? stabilizeRefreshLog(log.content, prior[index] as string, replacements, ctx)
-      : log.content)
+      : log.content, ctx)
     return scrubSessionSnapshot(prepareSessionSnapshotFixtureForComparison(stable))
   })
   const output = redactSessionSnapshotIds(stabilizeFixtureMessageIds(fresh, prior))
@@ -521,6 +517,9 @@ const workspaceSetups: Record<string, (cwd: string) => Promise<void>> = {
     await symlink(join(source, 'node_modules'), join(target, 'node_modules'), 'dir')
     await copyFile(join(repoRoot, `packages/experimental/cua-macos/${guidanceDirectory}/guidance.${extension}`), join(target, `guidance.${extension}`))
   },
+  async 'dsh-doc-resources'(cwd) {
+    await cp(join(repoRoot, 'packages/preset/agent-preset/skills/dsh-doc'), join(cwd, '.dsh/skills/dsh-doc'), { recursive: true })
+  },
   async 'windows-acl-skill'(cwd) {
     const target = join(cwd, '.dsh', 'skills', 'diagnose-windows-sandbox-acl', 'SKILL.md')
     await mkdir(dirname(target), { recursive: true })
@@ -528,13 +527,12 @@ const workspaceSetups: Record<string, (cwd: string) => Promise<void>> = {
   },
   async 'office-skills'(cwd) {
     await cp(join(repoRoot, 'packages/skill/skill-office/assets'), join(cwd, 'office-skills'), { recursive: true })
-    // A copied macOS Node binary cannot find its adjacent libnode.dylib.
-    const nodePath = process.execPath.replaceAll("'", "'\\''")
-    await writeFile(join(cwd, 'office-node'), `#!/bin/sh\nexec '${nodePath}' "$@"\n`, { mode: 0o755 })
-    await copyFile(join(repoRoot, 'packages/skill/skill-office/node_modules/@deepseek-ai/libreoffice-kit/lib/cli.js'), join(cwd, 'office-cli.js'))
   },
   async 'office-retired-ptc'(cwd) {
     await workspaceSetups['office-skills']!(cwd)
+    // A copied macOS Node binary cannot find its adjacent libnode.dylib.
+    const nodePath = process.execPath.replaceAll("'", "'\\''")
+    await writeFile(join(cwd, 'office-node'), `#!/bin/sh\nexec '${nodePath}' "$@"\n`, { mode: 0o755 })
     // Keep the removed-tool error without process-specific stack locations.
     await writeFile(join(cwd, 'office-ptc-node'), '#!/bin/sh\nexec "$(dirname "$0")/office-node" --stack-trace-limit=0 "$@"\n', { mode: 0o755 })
   },
@@ -550,13 +548,10 @@ const workspaceSetups: Record<string, (cwd: string) => Promise<void>> = {
     await writeFile(join(cwd, 'tracked.txt'), 'DIRTY SOURCE\n')
     await writeFile(join(cwd, 'local.txt'), 'UNTRACKED SOURCE\n')
   },
-  async 'editing-cordis-skill'(cwd) {
+  async 'skill-root-isolation'(cwd) {
     const target = join(cwd, '.dsh', 'skills', 'editing-cordis-compositions', 'SKILL.md')
     await mkdir(dirname(target), { recursive: true })
-    await copyFile(editingCordisSkill, target)
-  },
-  async 'skill-root-isolation'(cwd) {
-    await workspaceSetups['editing-cordis-skill']!(cwd)
+    await copyFile(join(snapshotsRoot, 'skill-load/workspace/.dsh/skills/editing-cordis-compositions/SKILL.md'), target)
     // A symlink loop produces a real, non-absence read error without relying on chmod or root privileges.
     await symlink('broken-skills', join(cwd, 'broken-skills'))
   },
@@ -617,6 +612,12 @@ const hasPwsh = spawnSync(
   ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$true'],
   { encoding: 'utf8' },
 ).status === 0
+// The recorded shell corpus explicitly composes Git Bash on Windows.
+const gitExecPath = process.platform === 'win32' ? spawnSync('git', ['--exec-path'], { encoding: 'utf8', windowsHide: true }) : undefined
+const snapshotBashBin = gitExecPath === undefined ? undefined : resolve(gitExecPath.stdout.trim(), '../../../bin')
+if (snapshotBashBin !== undefined && (gitExecPath?.status !== 0 || !existsSync(join(snapshotBashBin, 'bash.exe')))) {
+  throw new Error('Recorded Bash snapshots require the Git Bash executable from the installed Git distribution')
+}
 const scenarioByName = new Map(scenarios.map(scenario => [scenario.name, scenario]))
 const compositionOwners = new Map<string, HeadlessScenario>()
 const headerPins = new Map<string, HeadlessScenario>()
@@ -644,6 +645,31 @@ function pinOf(scenario: HeadlessScenario): HeadlessScenario {
   const pin = headerPins.get(`${composition}/${header.class}`)
   if (pin === undefined) throw new Error(`${scenario.name}: composition/header class has no pin`)
   return pin
+}
+
+/** Put each writable header sidecar owner before its dependent scenarios. */
+function orderHeaderOwners(input: readonly HeadlessScenario[]): HeadlessScenario[] {
+  const ordered: HeadlessScenario[] = []
+  const complete = new Set<string>()
+  const active = new Set<string>()
+  const visit = (scenario: HeadlessScenario): void => {
+    if (complete.has(scenario.name)) return
+    if (active.has(scenario.name)) throw new Error(`headless header owners contain a cycle at ${scenario.name}`)
+    active.add(scenario.name)
+    const pin = pinOf(scenario)
+    const owners = new Set([pin.manifest.header.systemPromptSource ?? pin.name, pin.manifest.header.toolSchemasSource ?? pin.name])
+    for (const name of owners) {
+      if (name === scenario.name) continue
+      const owner = scenarioByName.get(name)
+      if (owner === undefined) throw new Error(`headless header owner ${name} is missing`)
+      visit(owner)
+    }
+    active.delete(scenario.name)
+    complete.add(scenario.name)
+    ordered.push(scenario)
+  }
+  for (const scenario of input) visit(scenario)
+  return ordered
 }
 
 function spillReferenceSource(events: readonly JsonObject[], label: string): JsonObject {
@@ -1344,10 +1370,15 @@ describe('headless recorded-session snapshots', () => {
       .toThrow('native tool-result messages match migration output')
   })
 
-  // Record header owners before their dependents so a new composition has a readable pin.
-  const ordered = mode === 'record'
-    ? [...scenarios].sort((left, right) => Number(right.manifest.header.pin === true) - Number(left.manifest.header.pin === true))
-    : scenarios
+  it('orders non-pin and transitive header sidecar owners before their readers', () => {
+    const names = orderHeaderOwners(scenarios).map(scenario => scenario.name)
+    expect(names.indexOf('text-turn')).toBeLessThan(names.indexOf('agent-instructions-budget'))
+    expect(names.indexOf('cordis-inspect-jsdoc')).toBeLessThan(names.indexOf('advanced-toolchain-runtime'))
+    expect(names.indexOf('ptc-persistent')).toBeLessThan(names.indexOf('ptc-reset'))
+  })
+
+  // Record and refresh both write shared sidecars, including non-pin owners.
+  const ordered = mode === 'replay' ? scenarios : orderHeaderOwners(scenarios)
   const runs = ordered.flatMap((scenario): { scenario: HeadlessScenario; retainedToolInput?: string }[] => [
     { scenario },
     // This comparison retains its own V3 input even after the ordinary scenario records a newer generation.
@@ -1446,10 +1477,8 @@ describe('headless recorded-session snapshots', () => {
               ? {}
               : { DSH_PERMISSION_MODE: scenario.manifest.permission }),
             ...scenario.manifest.environment,
-            ...bashProtocolCarrier ? {
-              DSH_SNAPSHOT_BASH_RUNNER: fileURLToPath(new URL('../sdk/passthrough-runner.mjs', import.meta.url)),
-              ...process.platform === 'win32' ? { PATH: `C:/Program Files/Git/bin;${process.env.PATH ?? ''}` } : {},
-            } : {},
+            ...(snapshotBashBin === undefined ? {} : { PATH: `${snapshotBashBin};${process.env.PATH ?? ''}` }),
+            ...bashProtocolCarrier ? { DSH_SNAPSHOT_BASH_RUNNER: fileURLToPath(new URL('../sdk/passthrough-runner.mjs', import.meta.url)) } : {},
             ...(scenario.name === 'mcp-resources' || scenario.name === 'mcp-resources-ptc' ? {
               DSH_MCP_RESOURCES_FIXTURE: join(repoRoot, 'packages/mcp/mcp-client/tests/fixtures/resources-server.ts'),
             } : {}),
@@ -1525,7 +1554,15 @@ describe('headless recorded-session snapshots', () => {
             if (scenario.name.startsWith('office-progressive-')) {
               const log = actualLogs[0]!.content
               const results = parseSessionLog(log).flatMap(event => event.type === 'tool/result' ? [event.data.message] : [])
-              expect(results).toHaveLength(4)
+              if (scenario.name === 'office-progressive-native') {
+                // office_render refuses a render for a model route without image input.
+                const render = results.pop()
+                expect(render?.isError).toBe(true)
+                expect(render?.content).toEqual([{
+                  type: 'text', text: expect.stringMatching(/^Error: cannot render ".+[\\/]report\.docx": model "deepseek-v4-flash" does not accept images$/u),
+                }])
+              }
+              expect(results).toHaveLength(2)
               expect(results.every(result => result.isError === false)).toBe(true)
               expect(log).toContain('# Office task routing')
             }

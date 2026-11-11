@@ -27,7 +27,7 @@ async function harness(adapter: LlmAdapter): Promise<Context> {
 
 function fail(message: string, code: string): () => never {
   return () => {
-    throw new LlmError(message, code)
+    throw LlmError.fromFailure({ message: message, code: code })
   }
 }
 
@@ -43,7 +43,7 @@ class DelayedPreparationFailureAdapter extends LlmAdapter {
     if (this.attempts === 1) {
       this.preparationStarted.resolve(true)
       await this.failPreparation.promise
-      throw new LlmError('model service is unavailable', 'SERVICE_UNAVAILABLE')
+      throw LlmError.fromFailure({ message: 'model service is unavailable', code: 'SERVICE_UNAVAILABLE' })
     }
     return super.prepareCall(provider, model, signal)
   }
@@ -84,7 +84,7 @@ describe('agent/request-error', () => {
     const agent = await ctx.agentLoop.create(SessionId('request-error-narrow'), { provider: 'mock', model: 'mock' })
     let recoveries = 0
     ctx.on('agent/request', () => {
-      throw new LlmError('middleware failed', 'MIDDLEWARE')
+      throw LlmError.fromFailure({ message: 'middleware failed', code: 'MIDDLEWARE' })
     })
     ctx.on('agent/request-error', async () => {
       recoveries += 1

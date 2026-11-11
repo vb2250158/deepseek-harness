@@ -839,8 +839,11 @@ async function runScenario(scenario: CorpusScenario): Promise<{
     ignoredRootEntries: RUNTIME_WORKSPACE_ENTRIES,
   })
   const [parentFixture, ...childFixtures] = replayFixtures
-  const actions = sdkActions(primaryFixture, assertions.replayStandaloneCommands === true)
-    // Turn 2 belongs to the hook's queued input; only turns 1 and 3 are SDK sends.
+  const recordedActions = sdkActions(primaryFixture, assertions.replayStandaloneCommands === true)
+  const actions = (scenario.name === 'serial-created'
+    ? recordedActions.filter(action => action.kind === 'turn' && action.content !== undefined)
+    : recordedActions)
+    // The failure-admission hook owns turn 2 instead of an SDK send.
     .filter(action => scenario.name !== 'failure-admission-wake' || action.kind !== 'turn' || action.turn !== 2)
   const resumeReplayFile = scenario.name === 'session-resume' && !recording
     ? join(patchRoot, 'resume-replay.json') : undefined
@@ -1097,6 +1100,9 @@ async function runScenario(scenario: CorpusScenario): Promise<{
           observe,
         )
       }
+      if (scenario.name === 'serial-created') {
+        await harness.client.request('session/wait', { sessionId })
+      }
       for (const type of postActionEventTypes(primaryFixture)) {
         await waitForRootEvent(subscription, sessionId, event => event.type === type, observe)
       }
@@ -1307,7 +1313,7 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         expect((first.tools as JsonObject[]).map(tool => tool.name)).toEqual(expect.arrayContaining([
           'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update',
         ]))
-        expect(JSON.stringify(first.messages)).toContain('shared task board')
+        expect(JSON.stringify(first.messages)).toContain('Agent Teams is available in this session.')
         expect(events.filter(event => event.type === 'team/task').map(event => event.data.task))
           .toEqual([expect.objectContaining({ subject: 'Configured Team', status: 'pending' })])
         expect(events.filter(event => event.type === 'tool/result').map(event => event.data.message.isError))
@@ -1319,7 +1325,7 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         expect(JSON.stringify(childResults)).toContain('Configured Team')
         for (const request of modelRequests) {
           expect((request.tools as JsonObject[]).map(tool => tool.name)).toContain('team_task_list')
-          expect(JSON.stringify(request.messages)).toContain('shared task board')
+          expect(JSON.stringify(request.messages)).toContain('Agent Teams is available in this session.')
         }
       }
       if (scenario.name === 'command-attachments') {
@@ -1843,6 +1849,11 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
       }
       if (scenario.name === 'serial-created') {
         expect(observedMethods.has('subagent.started')).toBe(false)
+        const turns = parseSessionLog(ordered[0]!.content).filter(event => event.type === 'turn/end')
+        expect(turns.map(event => event.data.reason)).toEqual([
+          { kind: 'aborted', reason: { kind: 'user' } },
+          { kind: 'completed' },
+        ])
       }
       if (ordered.length > 1 && assertions.dshSdkChild === undefined) {
         expect(observedMethods.has('subagent.started')).toBe(true)

@@ -32,7 +32,7 @@ import type { Scope } from '@deepseek-ai/dsh-scope'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import type { EpochHeader, RequestContext, Session, SessionId, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
 import { canonicalHeader, headerEquals, ToolCallRecovery } from '@deepseek-ai/dsh-session'
-import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { ToolActivationError, ToolBatchExecutionError } from '@deepseek-ai/dsh-tools'
 import type { ResolvedToolSet } from '@deepseek-ai/dsh-tools'
@@ -143,6 +143,7 @@ export class ReactLoopAgent implements Agent {
     public readonly session: Session,
     projections: LoopProjections,
     lastTurn: number,
+    private readonly lifetimeSignal: AbortSignal,
   ) {
     this.requestSurfaceGeneration = session.surface.contentGeneration
     this.dispatch = agentEvents(loopCtx, this)
@@ -192,7 +193,7 @@ export class ReactLoopAgent implements Agent {
 
   /** 恢复资格在启动驱动前同步核验，避免过期请求或重复请求开启新轮次。 */
   private continueTurn(startSeq: number, kind: 'interrupted' | 'quota'): boolean {
-    if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
+    if (this.lifetimeSignal.aborted || this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
     // oxlint-disable-next-line typescript/no-deprecated -- Existing recovery scan retained during the rc.3 merge.
     const events = this.session.snapshotEvents()
     const start = events.findLast(event => event.type === 'turn/start'
@@ -221,11 +222,15 @@ export class ReactLoopAgent implements Agent {
   }
 
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
-    if (!options.keepInbox) {
-      this.inbox.clear()
-      if (this.phase.kind !== 'idle') this.phase.wakeRequested = 'none'
+    try {
+      if (!options.keepInbox) this.inbox.clear()
+    } finally {
+      // Queue persistence must not prevent cancellation of admitted work.
+      if (this.phase.kind !== 'idle') {
+        if (!options.keepInbox) this.phase.wakeRequested = 'none'
+        this.phase.abort.abort(cause)
+      }
     }
-    if (this.phase.kind !== 'idle') this.phase.abort.abort(cause)
   }
 
   runMaintenance<T>(job: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -259,6 +264,7 @@ export class ReactLoopAgent implements Agent {
    * @param continueWithoutInput - 允许已核验的恢复轮次在无新输入时发起首次请求。
    */
   private wakeDriver(continueWithoutInput = false): void {
+    if (this.lifetimeSignal.aborted) return
     if (this.phase.kind !== 'idle') {
       // A live driver normally claims this input; a failure before admission
       // replays it at convergence. Cancellation and maintenance defer the wake.
@@ -348,7 +354,7 @@ export class ReactLoopAgent implements Agent {
         'agent/pre-step', { messages: claimed, ...position, signal, modelSelection: selection },
         (): Promise<PreStepDecision> => {
           const sections = renderContextSections(assembly)
-          const context = this.runtimeContext.project(joinContextSections(sections), sections)
+          const context = this.runtimeContext.project(sections)
           return Promise.resolve<PreStepDecision>({
             kind: 'enter',
             messages: context === undefined ? claimed : [...claimed, context],
@@ -500,7 +506,7 @@ export class ReactLoopAgent implements Agent {
         ...assembleContextFor(this, signal), modelSelection: decision.selection,
       })
       const sections = renderContextSections(currentContext)
-      const context = this.runtimeContext.project(joinContextSections(sections), sections)
+      const context = this.runtimeContext.project(sections)
       signal.throwIfAborted()
       const startsRequestSeries = firstAttempt && decision.startsRequestSeries === true
       const commits = this.systemPrompt.project(renderedPrompt, {
@@ -533,7 +539,7 @@ export class ReactLoopAgent implements Agent {
         for (const { message, intent } of this.systemPrompt.project(renderedPrompt, {
           inHistory: preparedCall?.systemPromptUpdate === 'in-history', startsSeries: true,
         })) this.session.append('system/message', { turn, step, message }, intent)
-        const restored = this.runtimeContext.project(joinContextSections(sections), sections)
+        const restored = this.runtimeContext.project(sections)
         if (restored !== undefined) this.appendUserMessage(restored)
       })
       const live = new AssistantStreamAttempt(
@@ -617,7 +623,7 @@ export class ReactLoopAgent implements Agent {
           )
           signal.throwIfAborted()
           if (action?.kind !== 'retry') {
-            throw new LlmError(finish.failure.message, finish.failure.code, finish.failure)
+            throw LlmError.fromFailure(finish.failure)
           }
           continue
         }

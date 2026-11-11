@@ -74,7 +74,7 @@ it('shares one effective route with tools, assembly and the header, then restore
 it('retains the captured route through a retry after the routing rule changes', async () => {
   const effective = { provider: 'target', model: 'first-target' }
   const adapter = new MockAdapter([
-    () => { effective.model = 'changed-rule'; throw new LlmError('retry this request', 'RETRY') },
+    () => { effective.model = 'changed-rule'; throw LlmError.fromFailure({ message: 'retry this request', code: 'RETRY' }) },
     textResponse('done'),
   ])
   const ctx = await harness(adapter)

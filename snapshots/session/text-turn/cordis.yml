@@ -84,3 +84,17 @@
 - id: tool-fs
   config:
     applyPatch: true
+
+# Recorded native-shell conversations explicitly exercise the Bash capability.
+# The shipped Windows profile keeps its normal PowerShell selection.
+- id: bash-sandbox
+  disabled: false
+
+- id: tool-bash
+  disabled: false
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true

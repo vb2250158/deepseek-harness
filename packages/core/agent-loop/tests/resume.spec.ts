@@ -1593,3 +1593,24 @@ describe('configured-start failure edges', () => {
     await configured.fiber.dispose()
   })
 })
+
+it.each(['interrupted', 'quota'] as const)('refuses %s recovery while Agent scope cleanup is running', async (kind) => {
+  const sessionId = SessionId('recovery-during-cleanup-' + kind)
+  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+  const events: SessionEvent[] = [{ type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } }]
+  if (kind === 'quota') events.push({ type: 'turn/end', seq: SessionSeq(1), time: 2, data: { turn: 1, reason: { kind: 'error', error: { code: 'QUOTA', message: 'limit' } } } })
+  await seedStoredSession(first, sessionId, events)
+  await first.fiber.dispose()
+  const adapter = new MockAdapter([])
+  const ctx = await mountPersistentHarness(root, adapter)
+  try {
+    const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+    const results: (boolean | undefined)[] = []
+    handle.agent.ctx.effect(() => () => {
+      results.push(handle.agent.continueInterrupted?.(0), handle.agent.continueQuotaFailure?.(0))
+    })
+    await handle.dispose()
+    expect(results).toEqual([false, false])
+    expect(adapter.requests).toHaveLength(0)
+  } finally { await ctx.fiber.dispose() }
+})

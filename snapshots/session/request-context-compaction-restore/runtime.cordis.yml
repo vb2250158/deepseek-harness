@@ -75,3 +75,13 @@
     retainTokens: 20
     maxTokens: 32
     compactionRetries: 0
+
+# This focused composition disables the Subagent provider and its Team consumers.
+- id: agent-team
+  disabled: true
+
+- id: tool-agent-team
+  disabled: true
+
+- id: tool-bash
+  disabled: true

@@ -1353,3 +1353,33 @@ describe('scrubToolSchemas', () => {
     expect(scrubToolSchemas(out)).toBe(out)
   })
 })
+
+it('tokenizes quoted replay context after the header cwd was stabilized', () => {
+  const cwd = String.raw`C:\Users\runner\AppData\Local\Temp\refresh-real-workspace`
+  const quoted = JSON.stringify(cwd)
+  const raw = [
+    JSON.stringify({ type: 'session', id: 's', createdAt: 1, cwd: '{{cwd}}' }),
+    JSON.stringify({ type: 'user/message', data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: 'Current working directory: ' + quoted + '.' }] } }),
+    JSON.stringify({ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'Literal ' + quoted }] } }),
+  ].join('\n') + '\n'
+  const rows = tokenizeSessionFixtureCwd(raw, { sessionIds: [], cwd }).trim().split('\n').map(line => JSON.parse(line) as { data?: { content: { text: string }[] } })
+  expect(rows[1]?.data?.content[0]?.text).toBe('Current working directory: "{{cwd}}".')
+  expect(rows[2]?.data?.content[0]?.text).toBe('Literal ' + quoted)
+})
+
+it.each(['normalize', 'tokenize'] as const)('%s scopes escaped image-path normalization to the read_image argument', (operation) => {
+  const cwd = String.raw`C:\Users\runner\AppData\Local\Temp\image-path-fixture`
+  const args = JSON.stringify({ file_path: cwd + '/.dsh/attachments/object' })
+  const imageCall = { type: 'tool-call', id: 'image', name: 'read_image', arguments: args }
+  const otherCall = { ...imageCall, name: 'other_tool' }
+  const raw = [
+    JSON.stringify({ type: 'session', id: 's', createdAt: 1, cwd }),
+    JSON.stringify({ type: 'assistant/message', data: { message: { role: 'assistant', content: [imageCall, otherCall] } } }),
+    JSON.stringify({ type: 'user/message', data: { content: [{ type: 'text', text: args }] } }),
+  ].join('\n') + '\n'
+  const output = operation === 'normalize' ? normalizeSessionLog(raw, { sessionIds: [], cwd }) : tokenizeSessionFixtureCwd(raw)
+  const rows = output.trim().split('\n').map(line => JSON.parse(line))
+  expect(JSON.parse(rows[1].data.message.content[0].arguments).file_path).toBe('{{cwd}}/.dsh/attachments/object')
+  expect(rows[1].data.message.content[1].arguments).toBe(args)
+  expect(rows[2].data.content[0].text).toBe(args)
+})

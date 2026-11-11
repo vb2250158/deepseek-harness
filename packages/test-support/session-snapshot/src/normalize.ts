@@ -178,6 +178,22 @@ function runtimeContextCwd(value: object, ctx: NormalizeContext): NormalizeConte
   }
 }
 
+/** Normalize the read-image path inside its serialized model-call arguments. */
+function readImageArguments(value: object, ctx: NormalizeContext): object {
+  if (!('name' in value) || value.name !== 'read_image'
+    || !('arguments' in value) || typeof value.arguments !== 'string'
+    || !(('type' in value && value.type === 'tool-call') || 'callId' in value)) return value
+  let args: unknown
+  try { args = JSON.parse(value.arguments) } catch (_invalidModelArguments) {
+    // Malformed model arguments stay visible to the tool's validation tests.
+    return value
+  }
+  if (args === null || typeof args !== 'object' || !('file_path' in args) || typeof args.file_path !== 'string') return value
+  const normalized = replaceCwd(args.file_path, ctx, CWD)
+  if (normalized === args.file_path) return value
+  return { ...value, arguments: value.arguments.replace(JSON.stringify(args.file_path), JSON.stringify(normalized)) }
+}
+
 /** Replace cwd, session ids, and any stray UUID with stable tokens in a string. */
 function scrubString(
   value: string,
@@ -235,8 +251,9 @@ function scrubValue(
   if (Array.isArray(value)) return value.map(v => scrubValue(v, ctx, cwdPathMode, identityMode))
   if (value !== null && typeof value === 'object') {
     const context = runtimeContextCwd(value, ctx)
+    const source = readImageArguments(value, context)
     const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value)) out[k] = scrubValue(v, context, cwdPathMode, identityMode, k)
+    for (const [k, v] of Object.entries(source)) out[k] = scrubValue(v, context, cwdPathMode, identityMode, k)
     if (
       (value as { sessionUpdate?: unknown }).sessionUpdate === 'usage_update'
       && typeof (value as { used?: unknown }).used === 'number'
@@ -273,7 +290,8 @@ function tokenizeFixtureValue(
   if (Array.isArray(value)) return value.map(item => tokenizeFixtureValue(item, ctx, basename))
   if (value !== null && typeof value === 'object') {
     const context = runtimeContextCwd(value, ctx)
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    const source = readImageArguments(value, context)
+    return Object.fromEntries(Object.entries(source).map(([key, item]) => [
       key,
       tokenizeFixtureValue(item, context, basename),
     ]))
@@ -288,10 +306,11 @@ function tokenizeFixtureValue(
  * path.
  *
  * @param rawLog The raw or refresh-stabilized session JSONL fixture.
+ * @param freshContext Actual replay workspace when stabilization already tokenized the header.
  * @returns Compact JSONL whose known cwd spellings become `{{cwd}}`.
  * @throws If a non-empty line is invalid JSON or the session cwd has no basename.
  */
-export function tokenizeSessionFixtureCwd(rawLog: string): string {
+export function tokenizeSessionFixtureCwd(rawLog: string, freshContext?: NormalizeContext): string {
   const lines = rawLog.split('\n')
   const firstLine = lines.find(line => line.trim().length > 0)
   const header = firstLine === undefined ? undefined : JSON.parse(firstLine) as { cwd?: unknown }
@@ -300,7 +319,7 @@ export function tokenizeSessionFixtureCwd(rawLog: string): string {
   if (basename === undefined || basename.length === 0) {
     throw new Error('acp-snapshot: cannot tokenize a cwd without a basename')
   }
-  const ctx: NormalizeContext = { sessionIds: [], cwd }
+  const ctx: NormalizeContext = freshContext ?? { sessionIds: [], cwd }
   return lines.map((line) => {
     if (line.trim().length === 0) return line
     return JSON.stringify(tokenizeFixtureValue(JSON.parse(line), ctx, basename))
