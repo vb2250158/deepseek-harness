@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "checkedOn": "2026-11-11",
   "host": {
-    "version": "0.2.2-rc.1",
+    "version": "0.2.2-rc.2",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "Fixed official-source Web export",
-    "revisionEvidence": "candidateVerification.hostCommit identifies the tested candidate; productionAtLastVerification identifies the separately verified installation",
+    "revisionEvidence": "host.version and candidateVerification describe the current source test target; productionAtLastVerification records the separately verified installation",
     "profile": "web",
     "entry": "pnpm dsh web"
   },
