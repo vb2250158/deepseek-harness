@@ -1378,8 +1378,13 @@ it.each(['normalize', 'tokenize'] as const)('%s scopes escaped image-path normal
     JSON.stringify({ type: 'user/message', data: { content: [{ type: 'text', text: args }] } }),
   ].join('\n') + '\n'
   const output = operation === 'normalize' ? normalizeSessionLog(raw, { sessionIds: [], cwd }) : tokenizeSessionFixtureCwd(raw)
-  const rows = output.trim().split('\n').map(line => JSON.parse(line))
-  expect(JSON.parse(rows[1].data.message.content[0].arguments).file_path).toBe('{{cwd}}/.dsh/attachments/object')
-  expect(rows[1].data.message.content[1].arguments).toBe(args)
-  expect(rows[2].data.content[0].text).toBe(args)
+  const rows = output.trim().split('\n').map((line): unknown => JSON.parse(line))
+  expect(rows[1]).toEqual({
+    type: 'assistant/message',
+    data: { message: { role: 'assistant', content: [
+      { ...imageCall, arguments: JSON.stringify({ file_path: '{{cwd}}/.dsh/attachments/object' }) },
+      otherCall,
+    ] } },
+  })
+  expect(rows[2]).toEqual({ type: 'user/message', data: { content: [{ type: 'text', text: args }] } })
 })
