@@ -454,7 +454,11 @@ interface SurfaceFoldResult {
 ```ts type-equiv
 /** One positional event call proposed for append, without assigned sequence or time. */
 type SessionEventInput = {
-  [K in SessionEventType]: readonly [type: K, data: SessionEventMap[K], ...opts: K extends SurfaceEventType ? [opts: SurfaceIntent<K>] : [opts?: { readonly ignorable?: true }]]
+  [K in SessionEventType]: readonly [
+    type: K,
+    data: SessionEventMap[K],
+    ...opts: K extends SurfaceEventType ? [opts: SurfaceIntent<K>] : [opts?: { readonly ignorable?: true }],
+  ]
 }[SessionEventType]
 ```
 
