@@ -33,7 +33,7 @@
   },
   "candidateVerification": {
     "hostVersion": "0.2.2-rc.3",
-    "sourceRevisionEvidence": "Merged source working tree verified before its maintenance commit. The fixed maintenance commit is recorded after commit and remote readback.",
+    "sourceRevisionEvidence": "The recorded maintenance merge passed isolated source-Web/API verification. Later documentation-only maintenance commits reuse those unchanged runtime inputs.",
     "sourceWeb": "Isolated source-Web with the selected 41-entry combination passed authenticated page and JavaScript-byte checks, settings, model catalog, Session history, 148 model-consumed tools and synthetic Bot queue consumption. Application-owned shutdown completed with exit zero and released owned processes and ports.",
     "coverage": [
       "Declared Windows x64, Node 24.15.0 and pnpm 11.28.5 target",
@@ -45,7 +45,8 @@
     "selectedPluginCombinationVerified": true,
     "selectedPluginCombinationVerificationScope": "Source-Web resources, APIs and synthetic model/tool behavior",
     "guiVerified": false,
-    "note": "GUI automation remains paused by the user. Actual provider performance and production adoption are pending. The current formal process uses the separately recorded source version."
+    "note": "GUI automation remains paused by the user. Actual provider performance and production adoption are pending. The current formal process uses the separately recorded source version.",
+    "hostCommit": "50c656cc1d0274bc8f4869423163efa00136f959"
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",
@@ -65,22 +66,24 @@
       "dsh-media-library": "0.1.4",
       "dsh-rabiroute-agent": "0.13.57",
       "dsh-proactive-questioning": "0.1.17",
-      "dsh-connect-workbuddy": "5.23.1",
+      "dsh-connect-workbuddy": "5.24.0-fork.1",
       "dsh-tencent-docs-toolbox": "0.1.4"
     },
     "checkedOn": "2026-11-14",
-    "qaStatus": "existing-accepted-runtime-readback",
-    "note": "The existing source-Web process remains healthy on the recorded formal Core. Installed package versions and fixed dependencies were read back. Earlier accepted plugin and data-preservation evidence is reused. The candidate source and pending GUI changes have not been adopted by this process.",
+    "qaStatus": "workbuddy-current-core-hmr-accepted",
+    "note": "WorkBuddy 5.24.0-fork.1 was adopted through the normal plugin-manager HMR on unchanged formal Core54931. An independent process verified the selected package sources and served Client bytes, healthy Host/guardian, original Session identities and stable Bot bindings. GUI acceptance of pending candidates remains paused.",
     "pluginCount": 41,
     "coreRestarted": false,
-    "pluginUpdatesInstalled": 0,
+    "pluginUpdatesInstalled": 1,
     "sharedPluginCount": 40,
     "coreSourceChanged": false,
     "pluginSpecifiers": {
       "dsh-rabiroute-agent": "github:vb2250158/dsh-rabiroute-agent#ea2bd567af7e34d038ae746e0170fd8d53ebff05",
       "ds-bot": "github:vb2250158/DeepSeek-Bot#42263d7d9061f05ceb980dec5e076d5c33110da2&path:ds-bot",
       "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6",
-      "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777"
-    }
+      "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777",
+      "dsh-connect-workbuddy": "github:vb2250158/dsh-connect-workbuddy#e3d99c5a09d5000857a50fc88d9285f608acf316"
+    },
+    "machineLocalIntegrationAttestation": "The retained formal instance has no complete loaded-byte attestation. Fresh-process candidate tests do not establish its loaded version."
   }
 }
