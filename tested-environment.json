@@ -33,8 +33,8 @@
   },
   "candidateVerification": {
     "hostVersion": "0.2.2-rc.3",
-    "sourceRevisionEvidence": "The recorded maintenance merge passed isolated source-Web/API verification. Later documentation-only maintenance commits reuse those unchanged runtime inputs.",
-    "sourceWeb": "Isolated source-Web with the selected 41-entry combination passed authenticated page and JavaScript-byte checks, settings, model catalog, Session history, 148 model-consumed tools and synthetic Bot queue consumption. Application-owned shutdown completed with exit zero and released owned processes and ports.",
+    "sourceRevisionEvidence": "Runtime source remains the recorded maintenance merge 50c656cc. The latest complete 41-entry source-Web/API verification includes WorkBuddy 5.24.2-fork.1. Subsequent documentation and CI-scope commits reuse unchanged runtime inputs.",
+    "sourceWeb": "Isolated source-Web with the current 41-entry combination including WorkBuddy 5.24.2-fork.1 passed authenticated page and JavaScript-byte checks, settings, model catalog, Session history, and 123 model-consumed tools matching logged tools. Existing synthetic Bot queue evidence is retained. Application-owned shutdown completed with exit zero and released owned processes and ports.",
     "coverage": [
       "Declared Windows x64, Node 24.15.0 and pnpm 11.28.5 target",
       "Affected renderer startup, session status, persistence, compaction, API, authentication and plugin inventory regressions",
@@ -66,12 +66,12 @@
       "dsh-media-library": "0.1.4",
       "dsh-rabiroute-agent": "0.13.57",
       "dsh-proactive-questioning": "0.1.17",
-      "dsh-connect-workbuddy": "5.24.0-fork.1",
+      "dsh-connect-workbuddy": "5.24.2-fork.1",
       "dsh-tencent-docs-toolbox": "0.1.4"
     },
     "checkedOn": "2026-11-14",
     "qaStatus": "workbuddy-current-core-hmr-accepted",
-    "note": "WorkBuddy 5.24.0-fork.1 was adopted through the normal plugin-manager HMR on unchanged formal Core54931. An independent process verified the selected package sources and served Client bytes, healthy Host/guardian, original Session identities and stable Bot bindings. GUI acceptance of pending candidates remains paused.",
+    "note": "WorkBuddy 5.24.2-fork.1 was adopted on 2026-11-14 through normal plugin-manager HMR on unchanged formal Core54931. Independent readback verified 41 package sources, 170 payloads, 5 native dependencies, actual served Client bytes, healthy unchanged Host/guardian, 1355 retained Session identities and 8 stable Bot bindings. The fresh snapshot had zero queued inputs. No formal model/tool business call or GUI acceptance was performed.",
     "pluginCount": 41,
     "coreRestarted": false,
     "pluginUpdatesInstalled": 1,
@@ -82,7 +82,7 @@
       "ds-bot": "github:vb2250158/DeepSeek-Bot#42263d7d9061f05ceb980dec5e076d5c33110da2&path:ds-bot",
       "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6",
       "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777",
-      "dsh-connect-workbuddy": "github:vb2250158/dsh-connect-workbuddy#e3d99c5a09d5000857a50fc88d9285f608acf316"
+      "dsh-connect-workbuddy": "github:vb2250158/dsh-connect-workbuddy#ba1f3843bfcba87c9e464b978fac67353bebc993"
     },
     "machineLocalIntegrationAttestation": "The retained formal instance has no complete loaded-byte attestation. Fresh-process candidate tests do not establish its loaded version."
   }
