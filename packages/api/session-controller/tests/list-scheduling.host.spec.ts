@@ -3,7 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
-import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import SessionStore, { type SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { filterSessionResults, type SessionRecord, type SessionResultFilter } from '@deepseek-ai/dsh-session-query'
 import { resolve } from 'node:path'
@@ -14,6 +14,7 @@ import SessionController from '../src/index.ts'
 import { createSessionTestController, TEST_IMAGE_LIMITS } from './test-remote.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiSessionList } from '../src/list.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 type Phase = 'live' | 'cold'
 interface Row {
@@ -80,7 +81,7 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
     detach.set(id, () => { detachAgent(); detachSession() })
   }
   const records: SessionRecord[] = rows.map((row) => {
-    const session = ctx.sessions.prepare(SessionId(row.id), {
+    const session = ctx.sessions.prepare(brandString<SessionId>(row.id), {
       meta: { createdAt: 100, ...(row.cwd === false ? {} : { cwd: resolve('list-scheduling-fixture') }) },
     })
     prepared.set(row.id, session)
@@ -127,7 +128,7 @@ describe('Session-list pages', () => {
     h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
     const page = h.list.page({ paged: true }, pagePolicy)
     try {
-      const selected = await h.list.selected([SessionId('current')])
+      const selected = await h.list.selected([brandString<SessionId>('current')])
       expect(h.listSessions).toHaveBeenCalledTimes(1)
       expect(selected.map(row => row.sessionId)).toEqual(['current'])
       expect(h.ctx.sessions.list()).toHaveLength(phase === 'live' ? 1 : 0)
@@ -151,7 +152,7 @@ describe('Session-list pages', () => {
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listSnapshotLimit: 8 }
     await h.list.page({ paged: true }, policy)
     await h.list.page({ paged: true }, policy)
-    await h.list.selected([SessionId('b')])
+    await h.list.selected([brandString<SessionId>('b')])
     expect(h.listSessions).toHaveBeenCalledTimes(1)
     h.clock.now += 101
     const refreshed = await h.list.page({ paged: true }, policy)
@@ -161,7 +162,7 @@ describe('Session-list pages', () => {
     h.ctx.emit('api-session/added', refreshed.items[0]!)
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(4)
-    h.ctx.emit('api-session/removed', SessionId('b'))
+    h.ctx.emit('api-session/removed', brandString<SessionId>('b'))
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(5)
   })
@@ -174,7 +175,7 @@ describe('Session-list pages', () => {
     h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
     const read = h.list.page({ paged: true }, policy)
-    h.ctx.emit('api-session/removed', SessionId('a'))
+    h.ctx.emit('api-session/removed', brandString<SessionId>('a'))
     gate.resolve(undefined)
     await read
     await h.list.page({ paged: true }, policy)
@@ -223,7 +224,7 @@ describe('Session-list pages', () => {
   it('reads only explicit visible metadata targets without activating cold Sessions', async () => {
     const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
     vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')
-    const selected = await h.list.selected([SessionId('a'), SessionId('b'), SessionId('missing')])
+    const selected = await h.list.selected([brandString<SessionId>('a'), brandString<SessionId>('b'), brandString<SessionId>('missing')])
     expect(selected.map(row => row.sessionId)).toEqual(['b'])
     expect(h.ctx.sessions.list()).toEqual([])
   })
@@ -235,7 +236,7 @@ describe('Session-list pages', () => {
     const controller = new AbortController()
     const reason = new Error('cancel selected metadata')
     controller.abort(reason)
-    await expect(h.list.selected([SessionId('hidden')], controller.signal)).rejects.toBe(reason)
+    await expect(h.list.selected([brandString<SessionId>('hidden')], controller.signal)).rejects.toBe(reason)
     expect(allows).not.toHaveBeenCalled()
     expect(query).not.toHaveBeenCalled()
     expect(h.listSessions).not.toHaveBeenCalled()
@@ -360,7 +361,7 @@ describe('Session-list work slices', () => {
     const get = h.ctx.sessions.get.bind(h.ctx.sessions)
     const lookup = vi.spyOn(h.ctx.sessions, 'get').mockImplementation((id) => {
       h.clock.now += 4
-      if (id === SessionId('first')) betweenRows(() => { controller.abort(reason) })
+      if (id === brandString<SessionId>('first')) betweenRows(() => { controller.abort(reason) })
       return get(id)
     })
     await expect(h.list.list(controller.signal)).rejects.toBe(reason)
@@ -443,7 +444,7 @@ describe('Session-list work slices', () => {
       : [`${phase}:first`, `${phase}:middle`, `${phase}:last`])
     expect(h.listSessions).toHaveBeenCalledExactlyOnceWith(controller.signal)
     if (phase === 'live' && abortAt === 'first') {
-      expect(lookup).toHaveBeenCalledExactlyOnceWith(SessionId('first'))
+      expect(lookup).toHaveBeenCalledExactlyOnceWith(brandString<SessionId>('first'))
     }
   })
 
@@ -545,7 +546,7 @@ describe('Session-list work slices', () => {
       { sessionId: 'queued', agentAvailable: false, running: false },
       { sessionId: 'removed', agentAvailable: false, running: false },
     ])
-    expect(h.ctx.agents.get(SessionId('queued'))).toBeDefined()
-    expect(h.ctx.sessions.get(SessionId('removed'))).toBeUndefined()
+    expect(h.ctx.agents.get(brandString<SessionId>('queued'))).toBeDefined()
+    expect(h.ctx.sessions.get(brandString<SessionId>('removed'))).toBeUndefined()
   })
 })

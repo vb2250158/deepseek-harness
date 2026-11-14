@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup } from '@testing-library/react'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
-import { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { MessageId } from '@deepseek-ai/dsh-llm/types'
 import type { SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { PropsRenderFactories, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChatNode, UserRowInput, UserRowOrigin } from '../src/client/index.ts'
@@ -70,7 +71,7 @@ describe('shared user-row presentation', () => {
       { kind: 'pending-steering' },
       { kind: 'durable', node },
       { kind: 'durable', node: { ...node, kind: 'steering', data: { ...node.data, kind: 'steering',
-        messageId: MessageId('steering-1') } } },
+        messageId: brandString<MessageId>('steering-1') } } },
     ]
     let firstRow: Element | undefined
     let firstBubble: Element | undefined

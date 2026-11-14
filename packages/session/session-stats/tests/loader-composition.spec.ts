@@ -14,9 +14,10 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import { createMessage } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { type SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as SessionStatsPlugin from '@deepseek-ai/dsh-session-stats'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 let root: string | undefined
 let context: Context | undefined
@@ -70,7 +71,7 @@ describe('real Loader composition', () => {
       .map(entry => entry.options.name)
     expect(unloaded).toEqual([])
 
-    const session = loaded.sessions.create(SessionId('composed'))
+    const session = loaded.sessions.create(brandString<SessionId>('composed'))
     session.append('turn/start', { turn: 1 })
     session.append('step/start', { turn: 1, step: 1 })
     session.append('step/end', { turn: 1, step: 1 })
@@ -87,7 +88,7 @@ describe('real Loader composition', () => {
     ])
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
     try {
-      const session = loaded.sessions.create(SessionId('composed-coverage'))
+      const session = loaded.sessions.create(brandString<SessionId>('composed-coverage'))
       session.append('turn/start', { turn: 1 })
       clock.mockReturnValue(4_000)
       session.append('step/start', { turn: 1, step: 1 })

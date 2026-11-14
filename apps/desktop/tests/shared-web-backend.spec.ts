@@ -65,7 +65,13 @@ it('uses the existing signing record without changing credentials, and detaches 
   const config = await readSharedWebBackendConfig(root, { DSH_DESKTOP_WEB_BACKEND_URL: 'http://127.0.0.1:3180/' })
   if (!config) throw new Error('Missing test configuration')
   const backend = new DesktopSharedWebBackend(root, config)
-  expect(await backend.start()).toEqual({ url: config.url, injections: [] })
+  const issuedAt = Date.now()
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(issuedAt)
+  try {
+    expect(await backend.start()).toEqual({ url: config.url, injections: [], authenticationCookie: backend.cookie() })
+  } finally {
+    clock.mockRestore()
+  }
   expect(new Headers(send.mock.calls[0]?.[1]?.headers).get('cookie')).toMatch(/^dsh-auth-/)
   expect(await readFile(join(root, '.credentials.yaml'), 'utf8')).toBe(source)
   expect(() => backend.request('http://127.0.0.1:4190/')).toThrow('another origin')

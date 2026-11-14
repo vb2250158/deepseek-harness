@@ -1,7 +1,7 @@
 /** Attach the desktop carrier to a running local Web application without owning its process or profile. */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createBrowserSessionCookie } from '@deepseek-ai/dsh-client-connection'
+import { createBrowserSessionCookie } from '@deepseek-ai/dsh-host-authentication-token'
 import { parseCredentialsDocument } from '@deepseek-ai/dsh-credentials-local'
 import type { CredentialRecord } from '@deepseek-ai/dsh-credentials'
 import type { DesktopHostReady } from './host-process.ts'
@@ -89,7 +89,7 @@ export class DesktopSharedWebBackend {
     const response = await this.request(this.config.url, { signal: AbortSignal.timeout(this.config.timeoutMs) })
     await response.body?.cancel()
     if (!response.ok) throw new Error('desktop shared backend: Web backend is unavailable or authentication failed')
-    return { url: this.config.url, injections: [] }
+    return { url: this.config.url, injections: [], authenticationCookie: this.cookie() }
   }
 
   /**

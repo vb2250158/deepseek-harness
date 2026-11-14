@@ -21,7 +21,7 @@ import { scheduler } from 'node:timers/promises'
 import { createHash, randomBytes } from 'node:crypto'
 import PQueue from 'p-queue'
 import {
-  SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
+  SessionPersistence, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
   SessionPersistenceReadScopeChangedError,
   SessionAlreadyExistsError, SessionPersistenceNotFoundError,
@@ -36,7 +36,8 @@ import {
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
 import { SessionWriteLease } from './lease.ts'
-import { SESSION_FORMAT_VERSION, SessionId as makeSessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { SESSION_FORMAT_VERSION, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
   assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath, logPath, logSuffix,
@@ -210,6 +211,13 @@ interface ResolvedJsonlGeneration {
   readonly currentPath: string
 }
 
+/** One listed generation header and the file revision it was read from. */
+interface ListedHeader {
+  readonly revision: PersistenceRevision
+  /** `undefined` when the log is unreadable as a listed Session. */
+  readonly metadata: GenerationHeader | undefined
+}
+
 /** One backend-owned historical preparation shared by its current callers. */
 interface MigrationPreparation {
   readonly sourcePath: string
@@ -222,7 +230,7 @@ interface MigrationPreparation {
 
 /** Build the stat-derived best-effort change token shared by full and lightweight reads. */
 function fileRevision(identity: JsonlPhysicalIdentity): PersistenceRevision {
-  return SessionPersistenceRevision([
+  return brandString<PersistenceRevision>([
     identity.dev,
     identity.ino,
     identity.size,
@@ -340,7 +348,7 @@ class JsonlSessionPersistence extends SessionPersistence {
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
   /** Validated headers by physical revision; directory enumeration evicts retired paths. */
-  private readonly generationHeaders = new Map<string, { revision: PersistenceRevision; metadata: GenerationHeader }>()
+  private readonly generationHeaders = new Map<string, ListedHeader>()
   /** Generation filenames remain valid only while their containing directory's revision matches. */
   private readonly generationSelections = new Map<string, {
     revision: PersistenceRevision
@@ -1346,7 +1354,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       if (source.metadata === undefined) return []
       const { selected, identity, metadata } = source
       const revision = selected.sourceVersion < SESSION_FORMAT_VERSION
-        ? SessionPersistenceRevision(`${fileRevision(identity)}:${this.sourceFingerprint(captured.children.get(metadata.header.id) ?? [])}:${captured.unclassifiedRevision}`)
+        ? brandString<PersistenceRevision>(`${fileRevision(identity)}:${this.sourceFingerprint(captured.children.get(metadata.header.id) ?? [])}:${captured.unclassifiedRevision}`)
         : fileRevision(identity)
       return [{ ...metadata, revision, sizeBytes: Number(identity.size), modifiedAt: Number(identity.mtimeNs / 1_000_000n),
         location: { kind: 'jsonl' as const, path: selected.sourcePath } }]
@@ -1411,6 +1419,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     signal?.throwIfAborted()
     const cached = this.generationHeaders.get(selected.sourcePath)
     if (cached?.revision === revision) {
+      if (cached.metadata === undefined) return undefined
       await this.assertStoredIdentity(selected.sourcePath, selected.sourceVersion, cached.metadata.header, expectedId, signal)
       return { ...cached.metadata, header: { ...cached.metadata.header } }
     }
@@ -1426,12 +1435,12 @@ class JsonlSessionPersistence extends SessionPersistence {
       throw error
     }
     signal?.throwIfAborted()
-    if (first === undefined) return undefined
+    if (first === undefined) return this.cacheGenerationHeader(selected, revision, undefined, signal)
     let value: unknown
     try {
       value = JSON.parse(first)
-    } catch {
-      return undefined
+    } catch (_invalidHeaderJson) {
+      return this.cacheGenerationHeader(selected, revision, undefined, signal)
     }
     assertNoRetiredHeaderFields(value)
     const result = sessionFormatCatalog.readHeader(value)
@@ -1453,7 +1462,7 @@ class JsonlSessionPersistence extends SessionPersistence {
         { kind: 'jsonl', path: selected.sourcePath },
       )
     }
-    if (result.status === 'malformed') return undefined
+    if (result.status === 'malformed') return this.cacheGenerationHeader(selected, revision, undefined, signal)
     const header = this.currentHeader(result.header)
     await this.assertStoredIdentity(
       selected.sourcePath,
@@ -1462,6 +1471,23 @@ class JsonlSessionPersistence extends SessionPersistence {
       expectedId,
       signal,
     )
+    return this.cacheGenerationHeader(selected, revision, { header, formatStatus: result.status }, signal)
+  }
+
+  /**
+   * Retain a readable or omitted header only while its observed file revision holds.
+   * @param selected - physical generation whose header was read.
+   * @param revision - file identity captured before the header read.
+   * @param metadata - translated header, or undefined for an unreadable header.
+   * @param signal - optional cancellation checked after filesystem work settles.
+   * @returns the observation, or undefined when the source disappeared.
+   */
+  private async cacheGenerationHeader(
+    selected: ResolvedJsonlGeneration,
+    revision: PersistenceRevision,
+    metadata: GenerationHeader | undefined,
+    signal?: AbortSignal,
+  ): Promise<GenerationHeader | undefined> {
     let after: PersistenceRevision
     try {
       after = fileRevision(await stat(selected.sourcePath, { bigint: true }))
@@ -1471,9 +1497,11 @@ class JsonlSessionPersistence extends SessionPersistence {
       return undefined
     }
     signal?.throwIfAborted()
-    const metadata: GenerationHeader = { header, formatStatus: result.status }
     if (after === revision) {
-      this.generationHeaders.set(selected.sourcePath, { revision, metadata: { ...metadata, header: { ...header } } })
+      this.generationHeaders.set(selected.sourcePath, {
+        revision,
+        metadata: metadata === undefined ? undefined : { ...metadata, header: { ...metadata.header } },
+      })
     }
     return metadata
   }
@@ -1496,12 +1524,12 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     return {
       version: SESSION_FORMAT_VERSION,
-      id: makeSessionId(header.id),
+      id: brandString<SessionId>(header.id),
       createdAt: header.createdAt,
       ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
       ...(header.parentSession === undefined
         ? {}
-        : { parentSession: makeSessionId(header.parentSession) }),
+        : { parentSession: brandString<SessionId>(header.parentSession) }),
       isSeeded: header.isSeeded,
       ...(header.origin === undefined ? {} : { origin: header.origin }),
       delegationDepth: header.delegationDepth,

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-11",
+  "checkedOn": "2026-11-14",
   "host": {
-    "version": "0.2.2-rc.2",
+    "version": "0.2.2-rc.3",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "Fixed official-source Web export",
     "revisionEvidence": "host.version and candidateVerification describe the current source test target; productionAtLastVerification records the separately verified installation",
@@ -32,18 +32,20 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "hostVersion": "0.2.2-rc.2",
-    "hostCommit": "35ad053656b968d3d76e554ef03a423235dbf5f5",
-    "sourceWeb": "Booted the default source-Web profile in an isolated synthetic Home, verified the Session-list HTTP API and delivered page and JavaScript resources, and completed the normal application-owned exit.",
+    "hostVersion": "0.2.2-rc.3",
+    "sourceRevisionEvidence": "Merged source working tree verified before its maintenance commit. The fixed maintenance commit is recorded after commit and remote readback.",
+    "sourceWeb": "Isolated source-Web with the selected 41-entry combination passed authenticated page and JavaScript-byte checks, settings, model catalog, Session history, 148 model-consumed tools and synthetic Bot queue consumption. Application-owned shutdown completed with exit zero and released owned processes and ports.",
     "coverage": [
-      "Current Windows x64 source-Web target with the declared Node and package-manager versions",
-      "Affected Agent cancellation and recovery, atomic Session append, model routing, installer behavior and shared UI consumers",
-      "Focused keyless model, context, recovery, attachment and TypeScript SDK replay checks",
-      "Necessary Host, Client and Web builds followed by aggregate build checks"
+      "Declared Windows x64, Node 24.15.0 and pnpm 11.28.5 target",
+      "Affected renderer startup, session status, persistence, compaction, API, authentication and plugin inventory regressions",
+      "Necessary Host, Client and Web artifacts followed by both aggregate build checks",
+      "Fresh-process local integration exercised only against a synthetic Hook endpoint"
     ],
     "productionInstalled": false,
-    "selectedPluginCombinationVerified": false,
-    "note": "The maintained main includes the new official default source. Acceptance of the selected third-party plugin combination is pending."
+    "selectedPluginCombinationVerified": true,
+    "selectedPluginCombinationVerificationScope": "Source-Web resources, APIs and synthetic model/tool behavior",
+    "guiVerified": false,
+    "note": "GUI automation remains paused by the user. Actual provider performance and production adoption are pending. The current formal process uses the separately recorded source version."
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",
@@ -51,31 +53,32 @@
     "profile": "web",
     "mode": "source",
     "pluginVersions": {
-      "ds-bot": "0.3.2-rabi.22",
-      "dsh-pet": "0.4.5-fork.7",
+      "ds-bot": "0.3.6-rabi.4",
+      "dsh-pet": "0.4.5-fork.12",
       "dsh-plugin-subscriptions": "0.9.12-fork.3",
       "dsh-performance-statistics": "0.1.24",
       "dsh-waimai": "0.9.1",
-      "dsh-environment-sync": "0.8.3",
+      "dsh-environment-sync": "0.8.4",
       "dsh-usage-analytics": "1.4.3",
       "dsh-smart-selector": "0.2.2",
       "dsh-skill-catalog-cache": "0.1.3",
       "dsh-media-library": "0.1.4",
-      "dsh-plugin-workbuddy-gateway": "0.4.0",
       "dsh-rabiroute-agent": "0.13.57",
-      "dsh-proactive-questioning": "0.1.17"
+      "dsh-proactive-questioning": "0.1.17",
+      "dsh-connect-workbuddy": "5.23.1",
+      "dsh-tencent-docs-toolbox": "0.1.4"
     },
-    "checkedOn": "2026-11-11",
-    "qaStatus": "source-web-dsbot-waimai-update-accepted",
-    "note": "DSBot 0.3.2-rabi.22 and Waimai 0.9.1 were installed and verified on unchanged Core54931. The first lock-location failure was restored before the corrected absolute-link lock passed; existing Sessions and Bot state were retained. Served assets match the installed payloads; ordinary Session controls remain visible, Waimai account controls recovered without sign-in or commerce, and the guardian resumed healthy. Shared publication is verified separately.",
-    "pluginCount": 40,
-    "coreRestarted": true,
-    "pluginUpdatesInstalled": 2,
-    "sharedPluginCount": 39,
+    "checkedOn": "2026-11-14",
+    "qaStatus": "existing-accepted-runtime-readback",
+    "note": "The existing source-Web process remains healthy on the recorded formal Core. Installed package versions and fixed dependencies were read back. Earlier accepted plugin and data-preservation evidence is reused. The candidate source and pending GUI changes have not been adopted by this process.",
+    "pluginCount": 41,
+    "coreRestarted": false,
+    "pluginUpdatesInstalled": 0,
+    "sharedPluginCount": 40,
     "coreSourceChanged": false,
     "pluginSpecifiers": {
       "dsh-rabiroute-agent": "github:vb2250158/dsh-rabiroute-agent#ea2bd567af7e34d038ae746e0170fd8d53ebff05",
-      "ds-bot": "github:vb2250158/DeepSeek-Bot#d46af074803957273b926f361a6493019ea39671&path:ds-bot",
+      "ds-bot": "github:vb2250158/DeepSeek-Bot#42263d7d9061f05ceb980dec5e076d5c33110da2&path:ds-bot",
       "dsh-proactive-questioning": "github:vb2250158/dsh-proactive-questioning#486c4fef9cb3f7d1d2d606cfed7d864dbd6880d6",
       "dsh-waimai": "github:vb2250158/dsh-waimai#006f3e06df22cb01b6baf6627f9ca09dd46a6777"
     }

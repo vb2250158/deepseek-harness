@@ -23,7 +23,8 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { CommandId } from '@deepseek-ai/dsh-commands/types'
 // Side-effect type imports: the configuration-event SessionEventMap merges.
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -56,10 +57,10 @@ async function harness(): Promise<{ ctx: Context; remote: TestSessionRemote; att
 /** Append the standalone (non-conversation) event family a fresh session can accumulate. */
 function appendStandalone(session: Session): void {
   session.append('command/run', {
-    commandId: CommandId('blank-cmd-1'), name: 'plan', args: '', source: { kind: 'user' },
+    commandId: brandString<CommandId>('blank-cmd-1'), name: 'plan', args: '', source: { kind: 'user' },
   })
   session.append('plan/mode', { active: true })
-  session.append('command/done', { commandId: CommandId('blank-cmd-1'), kind: 'success', text: 'Plan mode on.' })
+  session.append('command/done', { commandId: brandString<CommandId>('blank-cmd-1'), kind: 'success', text: 'Plan mode on.' })
   session.append('session/title', {
     title: 'standalone title', messageSeqs: [], source: { kind: 'fallback' },
   })
@@ -82,10 +83,10 @@ describe('summary blank = conversation not started', () => {
     const added: SessionSummary[] = []
     ctx.on('api-session/added', (summary) => { added.push(summary) })
     session.append('command/run', {
-      commandId: CommandId('conversation-1'), name: 'conversation', args: ' hello',
+      commandId: brandString<CommandId>('conversation-1'), name: 'conversation', args: ' hello',
       source: { kind: 'user' }, startsConversation: true,
     })
-    session.append('command/done', { commandId: CommandId('conversation-1'), kind: 'success', text: 'Hello.' })
+    session.append('command/done', { commandId: brandString<CommandId>('conversation-1'), kind: 'success', text: 'Hello.' })
     expect(await listBlank(remote, session.id)).toBe(false)
     expect(added.at(-1)).toMatchObject({ sessionId: session.id, blank: false })
     expect(ctx.agents.hasConversationActivity(session)).toBe(true)
@@ -167,9 +168,9 @@ describe('resumed Session summaries', () => {
     await storeSession(ctx, id, cwd, [
       ...configurationEvents,
       { type: 'command/run', seq: SessionSeq(3), time: activityAt,
-        data: { commandId: CommandId('cold-command'), name: 'conversation', source: { kind: 'user' }, startsConversation: true } },
+        data: { commandId: brandString<CommandId>('cold-command'), name: 'conversation', source: { kind: 'user' }, startsConversation: true } },
       { type: 'command/done', seq: SessionSeq(4), time: activityAt + 1,
-        data: { commandId: CommandId('cold-command'), kind: 'success', text: 'Saved reply.' } },
+        data: { commandId: brandString<CommandId>('cold-command'), kind: 'success', text: 'Saved reply.' } },
     ])
     const { added, listed } = await resumeAndObserve(ctx, remote, id)
     expect(added.map(summary => [summary.blank, summary.updatedAt])).toEqual(added.map(() => [false, activityAt]))

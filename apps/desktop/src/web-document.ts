@@ -35,20 +35,6 @@ export async function serveWebDocument(request: Request, root: string): Promise<
   })
 }
 
-/**
- * Exchange the Host launch URL for an authority-bound browser cookie.
- * @param url - Authenticated URL reported by the owned Host process.
- * @returns Cookie header for requests forwarded to that Host.
- */
-export async function authenticateWebHost(url: string): Promise<string> {
-  const response = await fetch(url, { redirect: 'manual' })
-  const cookie = response.headers.get('set-cookie')
-  await response.body?.cancel()
-  if (response.status !== 303 || cookie === null) throw new Error('Desktop Host authentication failed')
-  const end = cookie.indexOf(';')
-  return end < 0 ? cookie : cookie.slice(0, end)
-}
-
 /** Cookie store operations used to remove legacy Host authentication cookies. */
 export interface HostCookieStore {
   get(filter: { url: string }): Promise<readonly { readonly name: string }[]>
@@ -91,7 +77,7 @@ const PLUGIN_BUNDLE_PATH = /^\/plugins\//u
  * no later launch can reuse.
  * @param request - Request from the application origin.
  * @param host - Selected Host URL.
- * @param cookie - Host-issued authentication cookie.
+ * @param cookie - Host-issued authentication cookie for the selected owned or shared Host.
  * @param bootDocument - Add the native boot gate to a shared Web entry document.
  * @returns Host response without connection-level headers.
  */

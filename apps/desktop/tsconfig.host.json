@@ -8,6 +8,7 @@
     "src"
   ],
   "references": [
+    { "path": "../../packages/host/authentication-token" },
     { "path": "../../packages/client/connection/tsconfig.host.json" },
     { "path": "../../packages/credentials/credentials-local" },
     { "path": "../../packages/credentials/credentials" },
