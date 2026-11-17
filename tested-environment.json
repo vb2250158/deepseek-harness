@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-15",
+  "checkedOn": "2026-11-18",
   "host": {
-    "version": "0.2.2-rc.3",
+    "version": "0.2.2-rc.4",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "Fixed official-source Web export",
     "revisionEvidence": "host.version and candidateVerification describe the current source test target; productionAtLastVerification records the separately verified installation",
@@ -32,21 +32,20 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "hostVersion": "0.2.2-rc.3",
-    "sourceRevisionEvidence": "Runtime source remains the recorded maintenance merge 50c656cc. The latest complete 41-entry source-Web/API verification includes WorkBuddy 5.24.5-fork.1. Subsequent documentation and CI-scope commits reuse unchanged runtime inputs.",
-    "sourceWeb": "Isolated source-Web with the current 41-entry combination including WorkBuddy 5.24.5-fork.1 passed authenticated page and JavaScript-byte checks, settings, model catalog, Session history, and 123 model-consumed tools matching logged tools. Existing synthetic Bot queue evidence is retained. Application-owned shutdown completed with exit zero and released owned processes and ports.",
+    "hostVersion": "0.2.2-rc.4",
+    "sourceRevisionEvidence": "The current checkout merges the current official release into maintained master. The workflow summary identifies its fixed commit.",
+    "sourceWeb": "Current source-Web Host/Client/Web artifacts, both aggregate build checks, 525 focused behavior tests, five recorded Session replays and nine isolated default/best-effort Web startup/shutdown checks passed. The complete maintained plugin combination is verified separately before adoption.",
     "coverage": [
       "Declared Windows x64, Node 24.15.0 and pnpm 11.28.5 target",
-      "Affected renderer startup, session status, persistence, compaction, API, authentication and plugin inventory regressions",
-      "Necessary Host, Client and Web artifacts followed by both aggregate build checks",
-      "Fresh-process local integration exercised only against a synthetic Hook endpoint"
+      "Session command activity, paged metadata, header-only JSONL/read-scope/query behavior, fork-source persistence, startup selection and Windows runtime regressions",
+      "Authenticated Remote plugin-event carrier and MCP OAuth credentials",
+      "Necessary Host, Client and Web artifacts, both aggregate build checks, source lint, current documentation gates",
+      "Five affected keyless recorded Session cases and isolated Web startup/shutdown"
     ],
     "productionInstalled": false,
-    "selectedPluginCombinationVerified": true,
-    "selectedPluginCombinationVerificationScope": "Source-Web resources, APIs and synthetic model/tool behavior",
+    "selectedPluginCombinationVerified": false,
     "guiVerified": false,
-    "note": "GUI automation remains paused by the user. Actual provider performance and production adoption are pending. The current formal process uses the separately recorded source version.",
-    "hostCommit": "50c656cc1d0274bc8f4869423163efa00136f959"
+    "note": "GUI automation remains paused. This source candidate is not installed; formal Core stays at the separately recorded rc.1 source."
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",

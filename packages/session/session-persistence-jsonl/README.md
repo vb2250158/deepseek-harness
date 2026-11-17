@@ -35,7 +35,7 @@ Metadata requests take priority over historical body discovery on the bounded li
 
 ### When to choose it
 
-Choose this backend when consumers benefit from one artifact per session — navigation, external tooling, or a raw line-readable log. It is the sole first-party Session-persistence provider. The backend keeps sessions under a deployment-controlled root: project-local, shared, temporary, or centralized.
+Choose this backend when consumers benefit from one artifact per session — navigation, external tooling, or a raw line-readable log. Shipped profiles use this provider by default. The [SQLite provider](../session-persistence-sqlite/README.md) is a separate plugin that imports existing JSONL history on first open. The backend keeps sessions under a deployment-controlled root: project-local, shared, temporary, or centralized.
 
 ### Minimal configuration
 
@@ -53,6 +53,8 @@ Choose this backend when consumers benefit from one artifact per session — nav
 | `root` | required | Root directory for all session files |
 | `compression` | `'zstd'` | Physical encoding: `'zstd'` checksummed frames, or `'none'` newline-delimited UTF-8 text |
 | `listConcurrency` | `3` | Maximum directory, header, and stat reads in flight, shared by every concurrent listing of this backend |
+
+JSONL fork creation copies the supplied child history into the child's file before returning its writer; it does not read the parent artifact. Read opens wait for an in-progress local writer close to finish draining before reading that Session's history; a failed drain stops the open.
 
 Live-event write batching is not configuration: the batching window is the seam's internal scheduling policy inside each write handle.
 

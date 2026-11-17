@@ -72,7 +72,21 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build current JavaScript and Web assets
-        run: pnpm run build:artifacts --profile official
+        env:
+          DSH_CLIENT_BUILD_PROFILE: official
+          DSH_CLIENT_TITLE: DeepSeek Harness
+        run: |
+          $env:DSH_CLIENT_COMMIT_HASH = $env:GITHUB_SHA
+          $env:DSH_CLIENT_VERSION = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          pnpm run build:native-system
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm exec tsx scripts/compile-referenced-projects.ts host-libraries
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm exec tsx scripts/compile-referenced-projects.ts client
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm exec tsdown --config-loader native --env.DSH_BUILD_FACE client
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm run build:web
 
       - name: Check the current source types
         run: pnpm run build:check

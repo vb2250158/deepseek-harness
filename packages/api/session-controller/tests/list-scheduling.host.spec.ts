@@ -91,6 +91,7 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   const listSessions = vi.fn(async (_signal?: AbortSignal) => records)
   class ListingSource extends Service {
     readonly listSessions = listSessions
+    readonly getListMetadata = () => ({ blank: true, lastPromptAt: null })
     async filterSessions(filters: readonly SessionResultFilter[], signal?: AbortSignal): Promise<SessionRecord[]> {
       signal?.throwIfAborted()
       return filterSessionResults(records, filters)

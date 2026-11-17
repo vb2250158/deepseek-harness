@@ -6,8 +6,8 @@ import { scheduler } from 'node:timers/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
-import { isConversationActivityEvent, type Session, type SessionEvent, type SessionHeader, type SessionId } from '@deepseek-ai/dsh-session'
-import type { ProjectionHandle, ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
+import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionRecord, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -41,15 +41,6 @@ const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
-const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
-  blank: z.boolean(),
-  lastPromptAt: z.number().nullable(),
-  lastActivityAt: z.number().optional(),
-}).transform(({ lastActivityAt, ...state }) => ({
-  ...state,
-  ...lastActivityAt === undefined ? {} : { lastActivityAt },
-}))
-
 const imageLimitsSchema = z.object({
   maxImageBytes: z.number().int().positive(),
   maxImagesPerMessage: z.number().int().positive(),
@@ -58,27 +49,6 @@ const imageLimitsSchema = z.object({
   maxImageDimension: z.number().int().positive(),
   mediaTypes: z.array(z.string()),
 }) as unknown as z.ZodType<ImageAttachmentLimits>
-
-/**
- * Advance the Session-list metadata projection by one committed event.
- * @param state - metadata before the event.
- * @param event - next committed Session event.
- * @returns the original or advanced metadata value.
- */
-export function applySessionListMetadata(
-  state: SessionListMetadata,
-  event: SessionEvent,
-): SessionListMetadata {
-  const activity = isConversationActivityEvent(event)
-  const blank = state.blank && !activity
-  const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
-    ? event.time
-    : state.lastPromptAt
-  const lastActivityAt = activity && event.type !== 'turn/start' ? event.time : state.lastActivityAt
-  return blank === state.blank && lastPromptAt === state.lastPromptAt && lastActivityAt === state.lastActivityAt
-    ? state
-    : { blank, lastPromptAt, ...lastActivityAt === undefined ? {} : { lastActivityAt } }
-}
 
 /**
  * Return the longest prefix containing at most `maximum` Unicode code points.
@@ -105,7 +75,6 @@ export class ApiSessionList {
     readonly expiresAt: number
   } | undefined
   private discoveryGeneration = 0
-  private listMetadata!: ProjectionHandle<SessionListMetadata>
 
   /**
    * @param ctx - Host context carrying Session, query, persistence, and projection services.
@@ -128,14 +97,6 @@ export class ApiSessionList {
    * @returns when all required registrations are ready.
    */
   async initialize(): Promise<void> {
-    this.listMetadata = await this.ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
-      key: 'sessionListMetadata',
-      stateSchema: sessionListMetadataSchema,
-      init: () => ({ blank: true, lastPromptAt: null }),
-      apply: applySessionListMetadata,
-      wire: { viewSchema: sessionListMetadataSchema, view: state => state },
-      stateVersion: 2,
-    })
     await this.ctx.sessionProjections.register<'imageLimits', null>({
       key: 'imageLimits',
       stateSchema: z.null(),
@@ -193,7 +154,7 @@ export class ApiSessionList {
         if (live === undefined && header.cwd === undefined) continue
         const metadata = live === undefined
           ? this.ctx.get('sessionProjectionCache')?.cachedSnapshot(header, ['sessionListMetadata'])?.values.sessionListMetadata
-          : this.listMetadata.stateOf(live)
+          : this.ctx.sessionQuery.getListMetadata(live)
         ranked.push({
           record, updatedAt: updatedAt(header, metadata),
           priority: this.ctx.agents.get(header.id)?.status === 'running',
@@ -302,17 +263,17 @@ export class ApiSessionList {
 
   /**
    * Build one current attached-Session summary.
-   * Blankness and recency come from the `sessionListMetadata` handle; projection
+   * Blankness and recency come from `sessionQuery.getListMetadata`; projection
    * hints carry every summary key computed through `snapshot`. The first call
    * for a Session computes these projections over its whole in-memory log, and
-   * later calls advance them incrementally. The handle read and the hint with
-   * the same key come from one cell; the handle read does not depend on any
+   * later calls advance them incrementally. The metadata read and the hint with
+   * the same key come from one cell; the metadata read does not depend on any
    * other unit's view.
    * @param session - attached Session to summarize.
    * @returns current list metadata and available projections.
    */
   summaryFor(session: Session): SessionSummary {
-    const metadata = this.listMetadata.stateOf(session)
+    const metadata = this.ctx.sessionQuery.getListMetadata(session)
     const projections = this.projectionsFor(session.header, session)
     return {
       sessionId: session.id,
