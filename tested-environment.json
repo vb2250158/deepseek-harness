@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-18",
+  "checkedOn": "2026-11-19",
   "host": {
-    "version": "0.2.2-rc.4",
+    "version": "0.2.2-rc.5",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "Fixed official-source Web export",
     "revisionEvidence": "host.version and candidateVerification describe the current source test target; productionAtLastVerification records the separately verified installation",
@@ -32,20 +32,18 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "hostVersion": "0.2.2-rc.4",
-    "sourceRevisionEvidence": "The current checkout merges the current official release into maintained master. The workflow summary identifies its fixed commit.",
-    "sourceWeb": "Current source-Web Host/Client/Web artifacts, both aggregate build checks, 525 focused behavior tests, five recorded Session replays and nine isolated default/best-effort Web startup/shutdown checks passed. The complete maintained plugin combination is verified separately before adoption.",
+    "hostVersion": "0.2.2-rc.5",
+    "sourceRevisionEvidence": "Maintained master merges the official 0.2.2-rc.5 source. The workflow summary identifies the fixed maintained commit.",
+    "sourceWeb": "The Windows source Web workflow checks the current candidate. Formal adoption requires a separate check of the selected plugin combination.",
     "coverage": [
       "Declared Windows x64, Node 24.15.0 and pnpm 11.28.5 target",
-      "Session command activity, paged metadata, header-only JSONL/read-scope/query behavior, fork-source persistence, startup selection and Windows runtime regressions",
-      "Authenticated Remote plugin-event carrier and MCP OAuth credentials",
-      "Necessary Host, Client and Web artifacts, both aggregate build checks, source lint, current documentation gates",
-      "Five affected keyless recorded Session cases and isolated Web startup/shutdown"
+      "Conversation Workspace adoption, per-occurrence delivery choice and first-screen selection commits",
+      "Session persistence, terminal and changed plugin composition in source Web"
     ],
     "productionInstalled": false,
     "selectedPluginCombinationVerified": false,
     "guiVerified": false,
-    "note": "GUI automation remains paused. This source candidate is not installed; formal Core stays at the separately recorded rc.1 source."
+    "note": "Source candidate only; formal Core remains the rc.1 source recorded below."
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",
