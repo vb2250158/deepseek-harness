@@ -7,6 +7,25 @@ import { expect, it, vi } from 'vitest'
 import * as appBoot from '@deepseek-ai/dsh-app-boot'
 import { configurationFixture } from './configuration-fixture.ts'
 
+it('publishes presentation changes from live entries without reading the profile layers', async () => {
+  const { ctx } = await configurationFixture({ hmr: false })
+  const form = ctx.settings.describe().find(row => row.ns === 'first')!
+  const entry = ctx.configEditor.entries().find(row => row.options.id === 'first')!
+  const events: Array<[string, number]> = []
+  ctx.on('settings/document-updated', (ns, revision) => { events.push([ns, revision]) })
+  const read = vi.spyOn(appBoot, 'loadProfileDirectory')
+  try {
+    const undo = ctx.settings.configure({ auto: false }, entry.fiber!)
+    await Promise.resolve()
+    undo()
+    await Promise.resolve()
+    expect(read).not.toHaveBeenCalled()
+    expect(events).toEqual([['first', form.revision], ['first', form.revision]])
+  } finally {
+    read.mockRestore()
+  }
+})
+
 it('reads only the requested profile forms without marking other settings removed', async () => {
   const { ctx } = await configurationFixture({ hmr: false })
   const all = ctx.settings.describe({ redactSecrets: true })

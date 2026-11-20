@@ -284,7 +284,11 @@ export class SettingsForms extends Service {
     queueMicrotask(() => {
       this.scheduled = false
       if (this.closed || this.ownerContext.fiber.state !== FiberState.ACTIVE) return
-      try { this.describe() } catch (error) { this.ownerContext.logger.error(error) }
+      try {
+        const active = new Set<string>()
+        for (const entry of this.ownerContext.configEditor.entries()) this.trackForm(entry, active)
+        this.retireMissing(active)
+      } catch (error) { this.ownerContext.logger.error(error) }
     })
   }
 
@@ -297,6 +301,35 @@ export class SettingsForms extends Service {
    */
   prepareDocument(): Promise<string> { return Promise.resolve(this.documentPath) }
 
+  private trackForm(entry: Entry, active: Set<string>) {
+    const fiber = entry.fiber
+    const runtime = fiber?.runtime
+    const schema = this.schema(entry)
+    if (schema === undefined || fiber === undefined || !runtime || fiber.state !== FiberState.ACTIVE) return
+    const form = volatileForm(schema)
+    if (form === undefined) return
+    active.add(entry.id)
+    const raw = JSON.stringify([fiber.uid, schema.toJSON(), entry.options.config ?? {}])
+    const autoGenerate = this.presentations.get(fiber.ctx.fiber)?.auto ?? true
+    const previous = this.revisions.get(entry.id)
+    const revision = previous === undefined ? 0 : previous.revision + Number(previous.raw !== raw)
+    const ns = entry.options.id as SettingsNamespace
+    this.revisions.set(entry.id, { raw, revision, ns, autoGenerate })
+    if (previous?.raw !== raw || previous.autoGenerate !== autoGenerate) {
+      this.ownerContext.emit('settings/document-updated', ns, revision)
+    }
+    return { fiber, runtime, form, ns, revision, autoGenerate }
+  }
+
+  private retireMissing(active: Set<string>, namespaces?: readonly string[]): void {
+    for (const [id, previous] of this.revisions) {
+      if (active.has(id) || previous.raw === undefined || namespaces?.includes(previous.ns) === false) continue
+      const revision = previous.revision + 1
+      this.revisions.set(id, { ...previous, raw: undefined, revision })
+      this.ownerContext.emit('settings/document-updated', previous.ns, revision)
+    }
+  }
+
   /** Read active plugin schemas and their live values.
    * @param options Optional namespace selection and redaction required for remote callers.
    * @returns Forms keyed by unique profile entry ids.
@@ -304,41 +337,25 @@ export class SettingsForms extends Service {
   describe(options?: SettingsDescribeOptions): SettingsDescriptor[] {
     const active = new Set<string>()
     const descriptors = this.ownerContext.configEditor.configuration(options?.namespaces).flatMap(({ entry, inherited, override }) => {
-      const schema = this.schema(entry)
-      if (schema === undefined || entry.fiber === undefined
-        || entry.fiber.runtime === null || entry.fiber.state !== FiberState.ACTIVE) return []
-      const form = volatileForm(schema)
-      if (form === undefined) return []
-      active.add(entry.id)
-      const raw = JSON.stringify([entry.fiber.uid, schema.toJSON(), entry.options.config ?? {}])
-      const autoGenerate = this.presentations.get(entry.fiber.ctx.fiber)?.auto ?? true
-      const previous = this.revisions.get(entry.id)
-      const revision = previous === undefined ? 0 : previous.revision + Number(previous.raw !== raw)
-      this.revisions.set(entry.id, { raw, revision, ns: entry.options.id as SettingsNamespace, autoGenerate })
-      if (previous?.raw !== raw || previous.autoGenerate !== autoGenerate) {
-        this.ownerContext.emit('settings/document-updated', entry.options.id as SettingsNamespace, revision)
-      }
-      const value = projectForm(form, plainConfig(entry.fiber.effectiveConfig))
+      const tracked = this.trackForm(entry, active)
+      if (tracked === undefined) return []
+      const { fiber, runtime, form, ns, revision, autoGenerate } = tracked
+      const value = projectForm(form, plainConfig(fiber.effectiveConfig))
       // Inherited layers omit profile fields, so only interpolate and validate them, without the running fiber's config hooks.
-      const resolved: unknown = interpolate(entry.fiber.ctx, inherited)
-      const base = projectForm(form, plainConfig(inheritedConfig(entry.fiber.runtime, resolved)))
+      const resolved: unknown = interpolate(fiber.ctx, inherited)
+      const base = projectForm(form, plainConfig(inheritedConfig(runtime, resolved)))
       const user = projectForm(form, override)
       const redacted = redactSecrets(form as z<never>, value)
       return [{
         autoGenerate,
-        ns: entry.options.id as SettingsNamespace, schema: form.toJSON(), revision, applies: 'live' as const,
+        ns, schema: form.toJSON(), revision, applies: 'live' as const,
         value: options?.redactSecrets ? redacted.value : value,
         base: options?.redactSecrets ? redactSecrets(form as z<never>, base).value : base,
         user: options?.redactSecrets ? redactSecrets(form as z<never>, user).value : user,
         ...options?.redactSecrets ? { secrets: redacted.secrets } : {},
       }]
     })
-    for (const [id, previous] of this.revisions) {
-      if (active.has(id) || previous.raw === undefined || options?.namespaces?.includes(previous.ns) === false) continue
-      const revision = previous.revision + 1
-      this.revisions.set(id, { ...previous, raw: undefined, revision })
-      this.ownerContext.emit('settings/document-updated', previous.ns, revision)
-    }
+    this.retireMissing(active, options?.namespaces)
     return descriptors
   }
 

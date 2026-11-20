@@ -43,6 +43,8 @@ Settings 启动后、Loader 完成所有条目的加载时，早期版本留在 
 
 Host 调用方可以向 `describe()` 传入 `namespaces`，按 Loader 顺序读取指定的配置表单。所选表单沿用相同的脱敏和修订号规则。
 
+配置重载和表单展示策略变更时，服务通过当前 Loader 入口判断哪些表单需要通知。读取表单时再解析当前 profile 的配置层。
+
 <details>
 <summary>实现内部细节——点击展开</summary>
 

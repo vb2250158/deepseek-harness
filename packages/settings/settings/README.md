@@ -43,6 +43,8 @@ Each form reports `autoGenerate`, enabled by default, for clients that build pag
 
 Host callers can pass `namespaces` to `describe()` to read specific profile forms in Loader order. The same redaction and revision rules apply to each selected form.
 
+Configuration reload and presentation notifications compare live Loader entries. Reading a form resolves its current profile layers.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

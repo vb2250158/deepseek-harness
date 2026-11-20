@@ -362,7 +362,7 @@ it('describes an entry whose required field only the profile supplies, and repor
   const first = restored.settings.describe().find(row => row.ns === 'first')!
   expect(first.value).toEqual({ count: 4 })
   expect(first.base).toEqual({})
-  vi.spyOn(restored.settings, 'describe').mockImplementationOnce(() => { throw new Error('refresh failed') })
+  vi.spyOn(restored.configEditor, 'entries').mockImplementationOnce(() => { throw new Error('refresh failed') })
   restored.emit('app-boot/config-reload')
   const failures = (): unknown[] => restored.logger.buffer.filter(message => message.type === 'error').map((message): unknown => message.args[0])
   await vi.waitFor(() => { expect(failures()).toContainEqual(expect.objectContaining({ message: 'refresh failed' })) })
