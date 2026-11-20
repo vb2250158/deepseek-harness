@@ -144,23 +144,16 @@ export class ApiSessionList {
     } else {
       const records = await this.discover(policy.listDiscoveryCacheMs, request.fresh === true, signal)
       const ranked: Array<{ record: SessionRecord; updatedAt: number; priority: boolean }> = []
+      let rank = this.rankingReader(request.cwd)
       let deadline = performance.now() + this.workSliceMs
       for (const record of records) {
-        const { header } = record
         signal?.throwIfAborted()
-        if (request.cwd !== undefined && header.cwd !== request.cwd) continue
-        if (!this.ctx.remoteAccess.allows({ kind: 'session', id: header.id })) continue
-        const live = this.ctx.sessions.get(header.id)
-        if (live === undefined && header.cwd === undefined) continue
-        const metadata = live === undefined
-          ? this.ctx.get('sessionProjectionCache')?.cachedSnapshot(header, ['sessionListMetadata'])?.values.sessionListMetadata
-          : this.ctx.sessionQuery.getListMetadata(live)
-        ranked.push({
-          record, updatedAt: updatedAt(header, metadata),
-          priority: this.ctx.agents.get(header.id)?.status === 'running',
-        })
+        const row = rank(record)
+        if (row === undefined) continue
+        ranked.push(row)
         if (performance.now() >= deadline) {
           await scheduler.yield()
+          rank = this.rankingReader(request.cwd)
           deadline = performance.now() + this.workSliceMs
         }
       }
@@ -196,6 +189,32 @@ export class ApiSessionList {
         : page
     }
     return this.projectPage(catalog, token, offset, policy.listPageSize, signal)
+  }
+
+  /** Bind lookups for one synchronous ranking slice; a yield may replace a service. */
+  private rankingReader(cwd: string | undefined): (record: SessionRecord) =>
+    { record: SessionRecord; updatedAt: number; priority: boolean } | undefined {
+    const { remoteAccess, sessions, agents, sessionQuery } = this.ctx
+    const cache = this.ctx.get('sessionProjectionCache')
+    const allows = remoteAccess.allows.bind(remoteAccess)
+    const getLive = sessions.get.bind(sessions)
+    const getAgent = agents.get.bind(agents)
+    const readLive = sessionQuery.getListMetadata.bind(sessionQuery)
+    const readCold = cache?.cachedSnapshot.bind(cache)
+    return (record) => {
+      const { header } = record
+      if (cwd !== undefined && header.cwd !== cwd) return undefined
+      if (!allows({ kind: 'session', id: header.id })) return undefined
+      const live = getLive(header.id)
+      if (live === undefined && header.cwd === undefined) return undefined
+      const metadata = live === undefined
+        ? readCold?.(header, ['sessionListMetadata'])?.values.sessionListMetadata
+        : readLive(live)
+      return {
+        record, updatedAt: updatedAt(header, metadata),
+        priority: getAgent(header.id)?.status === 'running',
+      }
+    }
   }
 
   private async projectPage(
