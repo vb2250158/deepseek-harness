@@ -432,7 +432,7 @@ export function createViewerDispatch(input: ViewerDispatchDeps): ViewerDispatch 
       endpoint,
       controller,
       // Every projection block a reader receives states the same branch facts its session list carried.
-      iterator: endpoint === 'session/follow' || endpoint === 'session/control'
+      iterator: endpoint === 'session/follow' || endpoint === 'session/control' || endpoint === 'session/compactControl'
         ? fork().withLineageFrames(
           values,
           endpoint,

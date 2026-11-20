@@ -43,7 +43,7 @@ const CALL = { request: {} }
  */
 const GLOBAL_ACTIONS = [
   'commands/list', 'llm/listConfigurableProviders', 'llm/listProviders', 'session/canOpenWorkspacePath',
-  'session/control', 'session/list', 'session/modelCatalog', 'pluginEvents/follow',
+  'session/control', 'session/compactControl', 'session/list', 'session/modelCatalog', 'pluginEvents/follow',
   'productAnalytics/enabled', 'productAnalytics/report', 'productAnalytics/watchPolicy',
   'speech/cancelPreparation', 'speech/catalog', 'speech/follow', 'speech/prepare', 'speech/transcribe',
   'workspace/follow',
@@ -52,7 +52,7 @@ const GLOBAL_ACTIONS = [
 const SESSION_READS = [
   'commands/list', 'fileReferences/list', 'fileUploads/upload', 'goals/get', 'goals/edit',
   'goals/clear', 'goals/complete', 'goals/create', 'goals/pause', 'goals/resume', 'job/list', 'job/follow',
-  'session/attachment', 'session/control',
+  'session/attachment', 'session/control', 'session/compactControl',
   'session/events', 'session/follow', 'session/list', 'session/observeEvent', 'session/observeProjections',
   'session/observeState', 'session/page', 'session/projections', 'session/state', 'session/wait',
   'sessionReferenceResolver/candidates', 'userQuestions/answer', 'userQuestions/attachWait',

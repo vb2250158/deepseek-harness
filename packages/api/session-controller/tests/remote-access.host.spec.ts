@@ -18,11 +18,18 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { remoteMethods, type PeerId, type PeerScope, type Principal, type RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import { z } from 'zod'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type SessionController from '../src/index.ts'
 import { ApiSessionList } from '../src/list.ts'
 import type { SessionControlFrame, SessionRequestId, SessionSearchValue } from '../src/types.ts'
 import { createSessionTestController } from './test-remote.ts'
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    controlDetailTest: string
+  }
+}
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface PrincipalMap {
@@ -37,10 +44,13 @@ const SHARED = brandString<SessionId>('shared-session')
 const PRIVATE = brandString<SessionId>('private-session')
 
 /** Calls the Session list and control methods; each item still needs a Session role. */
-const LISTER: RemoteAccessRole<'global'> = { name: 'test:session-lister', resource: 'global', actions: ['session/list', 'session/control'] }
+const LISTER: RemoteAccessRole<'global'> = {
+  name: 'test:session-lister', resource: 'global', actions: ['session/list', 'session/control', 'session/compactControl'],
+}
 /** Reads one Session: its list row, its control projections, and its stored projections. */
 const READER: RemoteAccessRole<'session'> = {
-  name: 'test:session-reader', resource: 'session', actions: ['session/list', 'session/control', 'session/projections'],
+  name: 'test:session-reader', resource: 'session',
+  actions: ['session/list', 'session/control', 'session/compactControl', 'session/projections'],
 }
 const LIST_CALLS: RemoteAccessBinding = { role: LISTER, resource: { kind: 'global' } }
 const READS_SHARED: RemoteAccessBinding = { role: READER, resource: { kind: 'session', id: SHARED } }
@@ -252,12 +262,12 @@ describe('Session Controller access', () => {
     await expect(as(OWNER, 'search').sessionController.search({ query: 'hit' }, new AbortController().signal)).resolves.toEqual(hits)
   })
 
-  it('filters session/control baselines and projection frames for a non-owner', async () => {
+  it.each(['control', 'compactControl'] as const)('filters %s baselines and projection frames for a non-owner', async (method) => {
     const { ctx, shared, hidden, as } = await harness()
     guestPolicy(ctx, LIST_CALLS, READS_SHARED)
     const abort = new AbortController()
-    const guest = as(GUEST, 'control').sessionController.control(abort.signal)[Symbol.asyncIterator]()
-    const owner = as(OWNER, 'control').sessionController.control(abort.signal)[Symbol.asyncIterator]()
+    const guest = as(GUEST, method).sessionController[method](abort.signal)[Symbol.asyncIterator]()
+    const owner = as(OWNER, method).sessionController[method](abort.signal)[Symbol.asyncIterator]()
     const baselineSessions = async (iterator: AsyncIterator<SessionControlFrame>): Promise<string[]> => {
       const next = await iterator.next()
       if (next.done === true || next.value.type !== 'baseline') throw new Error('control stream opened without a baseline')
@@ -280,6 +290,49 @@ describe('Session Controller access', () => {
     expect(await projected(guest)).toBe(SHARED)
     abort.abort()
     await Promise.all([guest.return?.(), owner.return?.()])
+  })
+
+  it('defers only opted-in values in compact baselines and frames while exact reads keep Session grants', async () => {
+    const { ctx, controller, shared } = await harness()
+    const largeValue = 'detail'.repeat(20_000)
+    await ctx.sessionProjections.register({
+      key: 'controlDetailTest', stateVersion: 1, stateSchema: z.string(), init: () => largeValue,
+      apply: (state, event) => event.type === 'agent/inbox/spliced' ? state + '!' : state,
+      wire: { viewSchema: z.string(), view: state => state, onDemand: true },
+    })
+    const abort = new AbortController()
+    const compact = controller.compactControl(abort.signal)[Symbol.asyncIterator]()
+    const full = controller.control(abort.signal)[Symbol.asyncIterator]()
+    try {
+      const first = (await compact.next()).value
+      expect(first).toMatchObject({ type: 'baseline', value: { projections: {
+        [SHARED]: { deferredKeys: ['controlDetailTest'] },
+      } } })
+      expect(JSON.stringify(first)).not.toContain(largeValue)
+      expect((await full.next()).value).toMatchObject({ value: { projections: {
+        [SHARED]: { values: { controlDetailTest: largeValue } },
+      } } })
+      shared.inbox.append('next-turn', message('work'))
+      expect((await compact.next()).value).toMatchObject({ type: 'projection', deferredKeys: ['controlDetailTest'] })
+      expect((await full.next()).value).toMatchObject({ type: 'projection', changes: expect.arrayContaining([
+        { key: 'controlDetailTest', val: largeValue + '!' },
+      ]) })
+      const follow = controller.follow({ address: { kind: 'session', sessionId: SHARED },
+        compactProjections: true }, abort.signal)[Symbol.asyncIterator]()
+      const opening = await follow.next()
+      await follow.return?.()
+      expect(opening.value).toMatchObject({ projections: { deferredKeys: ['controlDetailTest'] } })
+      expect(JSON.stringify(opening.value)).not.toContain(largeValue)
+      await ctx.plugin(TypertGatewayService)
+      guestPolicy(ctx, READS_SHARED)
+      const read = (sessionId: SessionId) => guestCall(ctx, 'projections', { request: { sessionId, keys: ['controlDetailTest'] } })
+      const detail = await read(SHARED)
+      expect(detail).toEqual({ kind: 'sequenced', asOfSeq: expect.any(Number), values: { controlDetailTest: largeValue + '!' } })
+      await expect(read(PRIVATE)).rejects.toMatchObject({ code: 'remote-access/denied' })
+    } finally {
+      abort.abort()
+      await Promise.all([compact.return?.(), full.return?.()])
+    }
   })
 
   it('records a non-owner caller on the prompt source and leaves owner sources unchanged', async () => {

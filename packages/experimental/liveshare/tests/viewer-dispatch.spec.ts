@@ -583,6 +583,14 @@ describe('viewer streams', () => {
     expect(h.streams.get('share-1:1')).toMatchObject({ endpoint: 'session/follow', actor: viewer })
   })
 
+  it('applies branch facts to compact control baselines', async () => {
+    const h = harness()
+    h.gateway.open.mockResolvedValue((async function* () { yield {} })())
+    await expect(h.dispatch.answer('share-1', { op: 'stream-open', id: 5, endpoint: 'session/compactControl', payload: {} }, viewer))
+      .resolves.toEqual({ status: 200, body: { opened: true } })
+    expect(h.fork.withLineageFrames).toHaveBeenCalledWith(expect.anything(), 'session/compactControl', undefined, expect.any(Function))
+  })
+
   it('relays a non-follow stream with its own iterator', async () => {
     const h = harness()
     h.gateway.open.mockResolvedValue((async function* () { yield 1 })())

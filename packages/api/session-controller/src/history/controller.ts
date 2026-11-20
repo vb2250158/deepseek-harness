@@ -1,5 +1,6 @@
 /** Independent Session snapshots and passive event subscriptions. */
 
+import type { ProjectionKeySelection } from '@deepseek-ai/dsh-session-projection'
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionLogOffset, SessionSeq, isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import type { SessionId, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -14,9 +15,15 @@ import { SessionAssistantStreamsListener } from './assistant-stream.ts'
 import type {
   SessionEventFrame, SessionEventsPage, SessionPageRequest,
   SessionObserveEventRequest, SessionProjectionsRequest, SessionProjectionFrame,
-  SessionAddress, SessionProjectionBaseline, SessionProjectionValues, SessionProjectionsValue, SessionWaitOutput, SessionHistoryRecord,
+  SessionAddress, SessionProjectionBaseline, SessionProjectionValue, SessionProjectionValues, SessionProjectionsValue,
+  SessionWaitOutput, SessionHistoryRecord,
 } from '../types.ts'
 
+
+interface KeySelection {
+  readonly keys: Exclude<ProjectionKeySelection, readonly string[]>
+  readonly deferred?: { readonly deferredKeys: readonly string[] }
+}
 
 /** Session snapshots do not share lifetime with passive subscriptions. */
 export class HistoryController {
@@ -73,20 +80,22 @@ export class HistoryController {
     }
     try {
       signal.throwIfAborted()
+      const selection = this.selectProjectionKeys(request)
       const live = this.ctx.sessions.get(sessionId)
       if (live !== undefined) {
-        const snapshot = this.ctx.sessionProjections.snapshot(live)
-        return { kind: 'sequenced', asOfSeq: snapshot.asOfSeq, values: snapshot.values as SessionProjectionValues }
+        const snapshot = this.ctx.sessionProjections.snapshot(live, selection?.keys)
+        return { kind: 'sequenced', asOfSeq: snapshot.asOfSeq, values: snapshot.values as SessionProjectionValues,
+          ...selection?.deferred }
       } else {
         const stored = await this.ctx.get('sessionPersistence')?.stat(sessionId, { signal })
         signal.throwIfAborted()
         if (stored?.formatStatus === 'migration-required') {
           const cached = this.ctx.get('sessionProjectionCache')?.cachedSnapshot(stored.header)
-          return { kind: 'migration-required', values: { ...cached?.values } as SessionProjectionValues }
+          return { kind: 'migration-required', ...this.selectValues({ ...cached?.values } as SessionProjectionValues, selection) }
         }
         return await this.usingObservation({ sessionId: request.sessionId, projection: true }, signal, observation => ({
           kind: 'sequenced' as const,
-          ...projections(observation),
+          ...this.selectedBaseline(observation, selection),
         }))
       }
     } catch (error: unknown) {
@@ -100,6 +109,44 @@ export class HistoryController {
       if (remoteErrorOf(error) !== undefined) throw error
       throw new RemoteError('gateway/internal', 'Session projection read failed', {}, { cause: error })
     }
+  }
+
+  /** Select explicit detail keys or the eager keys for compact transport. */
+  private selectProjectionKeys(request: Pick<SessionProjectionsRequest, 'keys' | 'compactProjections'>): KeySelection | undefined {
+    if (request.keys === undefined && request.compactProjections !== true) return undefined
+    const { eager, deferred } = this.ctx.sessionProjections.controlKeys()
+    if (request.keys !== undefined) {
+      const named = new Set(request.keys)
+      return { keys: new Set([...eager, ...deferred].filter(key => named.has(key))) }
+    }
+    return { keys: eager, ...(deferred.size === 0 ? {} : { deferred: { deferredKeys: [...deferred] } }) }
+  }
+
+  /** Keep only selected values from a cold or migration-required read. */
+  private selectValues(
+    values: SessionProjectionValues, selection: KeySelection | undefined,
+  ): Pick<SessionProjectionBaseline, 'values' | 'deferredKeys'> {
+    if (selection === undefined) return { values }
+    const keys: ReadonlySet<string> = selection.keys
+    const deferredKeys = selection.deferred?.deferredKeys.filter(key => Object.hasOwn(values, key))
+    const wireValues: Readonly<Record<string, SessionProjectionValue>> = values
+    return { values: Object.fromEntries(Object.entries(wireValues).filter(([key]) => keys.has(key))),
+      ...(deferredKeys === undefined || deferredKeys.length === 0 ? {} : { deferredKeys }) }
+  }
+
+  private selectedBaseline(observation: SessionObservation, selection: KeySelection | undefined): SessionProjectionBaseline {
+    const block = projections(observation)
+    return selection === undefined ? block : { asOfSeq: block.asOfSeq, ...this.selectValues(block.values, selection) }
+  }
+
+  /**
+   * Select a follow opening's projections at the exact history cut.
+   * @param observation - projected observation held by the opening read.
+   * @param compact - deliver on-demand watermarks instead of their values.
+   * @returns the opening projection values and their shared watermark.
+   */
+  openingProjections(observation: SessionObservation, compact: boolean): SessionProjectionBaseline {
+    return this.selectedBaseline(observation, compact ? this.selectProjectionKeys({ compactProjections: true }) : undefined)
   }
 
   /**

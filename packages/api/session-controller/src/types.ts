@@ -54,6 +54,8 @@ export interface SessionProjectionHints {
 
 /** Complete projection values at an exact Session event cursor. */
 export interface SessionProjectionBaseline {
+  /** Registered keys available on demand at this cut when a compact snapshot was requested. */
+  readonly deferredKeys?: readonly string[]
   readonly asOfSeq: number
   /** Provider-validated values; omitted keys are absent capabilities at this cut. */
   readonly values: SessionProjectionValues
@@ -420,13 +422,17 @@ export type SessionAddress =
 
 /** One non-activating Session projection read. */
 export interface SessionProjectionsRequest {
+  /** Select exact values by name; unknown keys are absent from the result. */
+  readonly keys?: readonly string[]
+  /** Request watermarks for on-demand projections in place of their values. */
+  readonly compactProjections?: true
   readonly sessionId: SessionId
 }
 
 /** Exact projections carry their event cut; required migration returns sequence-free cache hints. Null means absent. */
 export type SessionProjectionsValue =
   | (SessionProjectionBaseline & { readonly kind: 'sequenced' })
-  | { readonly kind: 'migration-required'; readonly values: SessionProjectionValues }
+  | { readonly kind: 'migration-required'; readonly values: SessionProjectionValues; readonly deferredKeys?: readonly string[] }
   | null
 
 /** One raw Session event in the Remote journal. */
@@ -495,6 +501,8 @@ export interface SessionPageRequest {
 
 /** One live event request for a durable Session address. */
 export interface SessionFollowRequest extends Pick<SessionPageRequest, 'maxMessages' | 'turnWindow'> {
+  /** Request on-demand projection watermarks in the opening snapshot. */
+  readonly compactProjections?: true
   readonly address: SessionAddress
   /** Request background activation; omission leaves the read passive. */
   readonly activate?: boolean
@@ -584,6 +592,8 @@ export interface SessionControlBaseline {
  * update per event that changed at least one client-visible projection view.
  */
 export interface SessionProjectionUpdate {
+  /** Changed on-demand keys omitted from this compact update; seq is their new watermark. */
+  readonly deferredKeys?: readonly string[]
   readonly sessionId: SessionId
   /** Seq of the committed event that caused every listed change. */
   readonly seq: number

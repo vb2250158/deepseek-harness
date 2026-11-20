@@ -56,6 +56,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'commands/list': 'reader-session-read', // the page lists slash commands for a visible Session (also granted globally)
   'fileReferences/list': 'reader-session-read', // the reader lists files of a Session workspace it can read
   'fileUploads/upload': 'reader-session-read', // the reader attaches a file to a Session it can see; visibility alone decides
+  'session/compactControl': 'reader-session-read', // grants match the full control stream
   'session/control': 'reader-session-read', // the page follows a visible Session control stream (also granted globally)
   'session/list': 'reader-session-read', // the page lists Sessions (also granted globally)
   'goals/get': 'reader-session-read', // the page reads the goal of a visible Session

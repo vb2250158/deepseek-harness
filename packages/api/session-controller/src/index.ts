@@ -685,7 +685,21 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote({ mode: 'stream' })
   async *control(signal: AbortSignal): AsyncIterable<SessionControlFrame> {
-    for await (const frame of this.controlState.control(signal)) {
+    yield* this.authorizedControl(signal, false)
+  }
+
+  /**
+   * Open the live control stream with watermarks for units marked on demand.
+   * @param signal - Remote stream cancellation.
+   * @returns an opening snapshot followed by changes to authorized Sessions.
+   */
+  @Remote({ mode: 'stream' })
+  async *compactControl(signal: AbortSignal): AsyncIterable<SessionControlFrame> {
+    yield* this.authorizedControl(signal, true)
+  }
+
+  private async *authorizedControl(signal: AbortSignal, compact: boolean): AsyncIterable<SessionControlFrame> {
+    for await (const frame of this.controlState.control(signal, compact)) {
       switch (frame.type) {
         case 'baseline': {
           const projections = Object.fromEntries(Object.entries(frame.value.projections)

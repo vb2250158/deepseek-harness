@@ -220,6 +220,10 @@ describe('Session projection discovery', () => {
         subagentCatalog: catalog === 'empty' ? [] : [{ id: 'cached-child', createdAt: 2, mode: 'one-shot', label: 'cached child' }],
       },
     })
+    const selected = { sessionId: parent.header.id, keys: ['title'] }
+    await expect(fixture.controller.projections(selected, new AbortController().signal)).resolves.toEqual({
+      kind: 'migration-required', values: { title: 'cached title' },
+    })
     expect(list).not.toHaveBeenCalled()
     expect(await readFile(cache.path, 'utf8')).toBe(cache.bytes)
   })

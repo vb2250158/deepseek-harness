@@ -122,6 +122,8 @@ export interface ProjectionDefinition<K extends string, S> {
      * @default true
      */
     summary?: boolean
+    /** Send a key watermark instead of this value to clients requesting compact snapshots. */
+    onDemand?: boolean
   } : never
   /**
    * Non-negative persisted-cache invalidation version. Bump when state fields or fold
@@ -221,6 +223,7 @@ interface ErasedDefinition {
     view(state: unknown): unknown
     /** Whether a Session summary carries this unit (false when the unit declared `summary: false`). */
     summary: boolean
+    onDemand: boolean
   } | undefined
   stateVersion: number
 }
@@ -282,6 +285,10 @@ function cursorBefore(offset: SessionLogOffset): SessionSeqCursor {
 export class SessionProjectionRegistry extends Service {
   private readonly registrations = new Map<string, Registration>()
   /** Stable summary key set; dropped whenever the key table changes. */
+  private controlKeySets: {
+    eager: ReadonlySet<Extract<keyof SessionProjectionMap, string>>
+    deferred: ReadonlySet<Extract<keyof SessionProjectionMap, string>>
+  } | undefined
   private summaryKeySet: ReadonlySet<Extract<keyof SessionProjectionMap, string>> | undefined
   private readonly listeners = new Set<ProjectionChangeListener>()
   private readonly eventListeners = new Set<ProjectionEventChangeListener>()
@@ -384,6 +391,7 @@ export class SessionProjectionRegistry extends Service {
       viewSchema: ZodType
       view(state: S): unknown
       summary?: boolean
+      onDemand?: boolean
     } | undefined
     const erased: ErasedDefinition = {
       key: definition.key,
@@ -396,7 +404,8 @@ export class SessionProjectionRegistry extends Service {
       // into the erased unit, where the key set reads it.
       wire: wire === undefined
         ? undefined
-        : { viewSchema: wire.viewSchema, view: state => wire.view(state as S), summary: wire.summary !== false },
+        : { viewSchema: wire.viewSchema, view: state => wire.view(state as S),
+          summary: wire.summary !== false, onDemand: wire.onDemand === true },
       stateVersion: definition.stateVersion,
     }
     if (!Number.isSafeInteger(definition.stateVersion) || definition.stateVersion < 0) {
@@ -410,12 +419,16 @@ export class SessionProjectionRegistry extends Service {
         registration = { def: erased, cells: new WeakMap(), refs: 1 }
         this.registrations.set(key, registration)
         this.summaryKeySet = undefined
+        this.controlKeySets = undefined
       } else {
         if (existing.def.stateVersion !== erased.stateVersion) {
           throw new Error(`session projection key ${JSON.stringify(key)} is already registered at stateVersion ${String(existing.def.stateVersion)}; refusing to share it with stateVersion ${String(erased.stateVersion)}`)
         }
         if (existing.def.wire?.summary !== erased.wire?.summary) {
           throw new Error(`session projection key ${JSON.stringify(key)} is already registered with summary=${String(existing.def.wire?.summary)}; refusing to share it with summary=${String(erased.wire?.summary)}`)
+        }
+        if (existing.def.wire?.onDemand !== erased.wire?.onDemand) {
+          throw new Error(`session projection key ${JSON.stringify(key)} is already registered with a different onDemand setting`)
         }
         existing.refs += 1
         registration = existing
@@ -424,6 +437,7 @@ export class SessionProjectionRegistry extends Service {
         registration.refs -= 1
         if (registration.refs === 0) {
           this.summaryKeySet = undefined
+          this.controlKeySets = undefined
         }
       }
     }, 'sessionProjections.register()')
@@ -570,6 +584,25 @@ export class SessionProjectionRegistry extends Service {
   summaryKeys(): ReadonlySet<Extract<keyof SessionProjectionMap, string>> {
     this.summaryKeySet ??= this.deriveSummaryKeys()
     return this.summaryKeySet
+  }
+
+  /**
+   * Split registered wire keys for a compact read. Both sets use the same registration cut.
+   * @returns eagerly delivered keys and keys available through a named projection read.
+   */
+  controlKeys(): {
+    eager: ReadonlySet<Extract<keyof SessionProjectionMap, string>>
+    deferred: ReadonlySet<Extract<keyof SessionProjectionMap, string>>
+  } {
+    if (this.controlKeySets !== undefined) return this.controlKeySets
+    const eager = new Set<Extract<keyof SessionProjectionMap, string>>()
+    const deferred = new Set<Extract<keyof SessionProjectionMap, string>>()
+    for (const { def, refs } of this.registrations.values()) {
+      if (refs === 0 || def.wire === undefined) continue
+      const destination = def.wire.onDemand ? deferred : eager
+      destination.add(def.key as Extract<keyof SessionProjectionMap, string>)
+    }
+    return this.controlKeySets = { eager, deferred }
   }
 
   /** Rebuild the summary key set from the current registrations. */

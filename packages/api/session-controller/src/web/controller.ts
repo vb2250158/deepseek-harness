@@ -6,7 +6,7 @@ import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
 import type { HistoryController } from '../history/controller.ts'
 import { addressId, rejectNotFound } from '../history.ts'
 import { EventListener, ListenerBuffer } from '../history/listener.ts'
-import { history, projections, resolveHistoryRequest, validateObservationAddress } from '../history/controller.ts'
+import { history, resolveHistoryRequest, validateObservationAddress } from '../history/controller.ts'
 import type { SessionFollowFrame, SessionFollowRequest } from '../types.ts'
 
 /** Combines opening data and consumes transformed listener output from one queue. */
@@ -47,7 +47,7 @@ export class WebController {
     let opening: SessionFollowFrame = {
       type: 'snapshot',
       header: { ...observation.header },
-      projections: projections(observation),
+      projections: this.historyController.openingProjections(observation, request.compactProjections === true),
       ...history(observation, spec),
     }
     listener.setCursor(opening.cursor)
