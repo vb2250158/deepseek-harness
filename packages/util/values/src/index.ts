@@ -20,9 +20,10 @@ function hasIntrinsicConstructor(prototype: object, name: 'Array' | 'Object'): b
   const constructor: unknown = descriptor?.value
   if (typeof constructor !== 'function') return false
   try {
+    const intrinsic = name === 'Array' ? Array : Object
     return constructor.name === name
       && constructor.prototype === prototype
-      && Function.prototype.toString.call(constructor) === Function.prototype.toString.call(name === 'Array' ? Array : Object)
+      && (constructor === intrinsic || Function.prototype.toString.call(constructor) === Function.prototype.toString.call(intrinsic))
   } catch {
     return false
   }
@@ -120,7 +121,7 @@ function walkJsonValue(value: unknown, detach: boolean): JsonValue | true | unde
     }
 
     for (;;) {
-      const frame = frames.at(-1)
+      const frame = frames[frames.length - 1]
       if (frame === undefined) return detach ? root : true
       const length = frame.kind === 'array' ? frame.length : frame.keys.length
       if (frame.index >= length) {

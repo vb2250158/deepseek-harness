@@ -26,7 +26,7 @@ Callers can validate lossless JSON, read streamed arguments, detach a JSON snaps
 
 ### Validate or snapshot JSON data
 
-Use `isJsonValue()` for a predicate and `snapshotJsonValue()` when the caller also needs a detached copy. Both accept only lossless JSON roots: `null`, booleans, finite numbers other than negative zero, strings, dense intrinsic arrays, and plain or null-prototype records with enumerable string keys. Cycles, sparse arrays, symbol or non-enumerable own properties, functions, and class instances are rejected.
+Use `isJsonValue()` for a predicate and `snapshotJsonValue()` when the caller also needs a detached copy. Both accept only lossless JSON roots: `null`, booleans, finite numbers other than negative zero, strings, dense intrinsic arrays, and plain or null-prototype records with enumerable string keys. Same-realm intrinsic constructors are recognized by identity; other realms additionally require a matching native constructor representation. Cycles, sparse arrays, symbol or non-enumerable own properties, functions, and class instances are rejected.
 
 ```ts
 import { isJsonValue, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
