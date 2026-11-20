@@ -46,7 +46,6 @@ export class ModelDirectoryResolver extends Service {
   constructor(ctx: Context) {
     super(ctx, 'modelDirectories')
     this.catalog = new ModelCatalogDirectory(ctx)
-    void this.catalog.load().catch(() => { /* selectors expose the shared error */ })
     ctx.on('connection/reset', () => {
       this.catalog.resetGeneration()
       for (const directory of this.live.directories.values) directory.resetConnected()
@@ -73,6 +72,10 @@ export class ModelDirectoryResolver extends Service {
     if (binding === undefined) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no binding`)
     const existing = live.directories.get(binding)
     if (existing !== undefined) return existing
+    // A late-mounted selector may have missed the Host connection's initial catalog load.
+    if (sessions.subagentAddress(sessionId) === undefined && this.catalog.store.getSnapshot().status === 'idle') {
+      void this.catalog.load().catch(() => { /* selectors expose the shared error */ })
+    }
     const directory = new ModelDirectory(
       this.ctx.remote.session,
       sessionId,
