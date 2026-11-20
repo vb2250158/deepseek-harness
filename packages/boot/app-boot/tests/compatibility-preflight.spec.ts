@@ -1,8 +1,8 @@
 /** Admission of profile composition rows before the Loader imports any plugin code. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { parseEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -217,6 +217,24 @@ describe('manifest resolution', () => {
     return ctx
   }
 
+  it('reads the runtime version once per preflight and rechecks plugin requirements on the next one', () => {
+    const f = fixture()
+    f.plugin('allowed-plugin')
+    const ctx = context(f)
+    const base = pathToFileURL(f.dir).href + '/'
+    const rows = ['first', 'second'].map(id => ({ id, name: 'allowed-plugin' }))
+    const runtimeManifest = fileURLToPath(new URL('../package.json', import.meta.url))
+    const read = vi.spyOn(fs, 'readFileSync')
+    onTestFinished(() => { read.mockRestore() })
+    const runtimeReads = () => read.mock.calls.filter(([filename]) => filename === runtimeManifest).length
+
+    expect(prepareProfileEntries(ctx, rows, base)).toEqual(rows)
+    expect(runtimeReads()).toBe(1)
+    f.plugin('allowed-plugin', { peer: '^9.0.0' })
+    expect(prepareProfileEntries(ctx, rows, base).map(row => row.disabled)).toEqual([true, true])
+    expect(runtimeReads()).toBe(2)
+  })
+
   it('leaves rows with no resolvable manifest to the Loader', () => {
     const f = fixture()
     writeFileSync(join(f.dir, 'standalone.mjs'), 'export function apply() {}\n')
@@ -277,13 +295,14 @@ describe('manifest resolution', () => {
     }],
     ['a module path that loops', (f: ReturnType<typeof fixture>) => {
       f.plugin('denied-plugin')
-      symlinkSync('loop.mjs', join(f.dir, 'node_modules', 'denied-plugin', 'loop.mjs'))
+      const loop = join(f.dir, 'node_modules', 'denied-plugin', 'loop')
+      symlinkSync(loop, loop, process.platform === 'win32' ? 'junction' : 'dir')
     }],
   ])('refuses a row whose %s cannot be read', (_label, prepare) => {
     const f = fixture()
     prepare(f)
     const name = _label === 'a module path that loops'
-      ? './node_modules/denied-plugin/loop.mjs' : './node_modules/denied-plugin/index.mjs'
+      ? './node_modules/denied-plugin/loop/index.mjs' : './node_modules/denied-plugin/index.mjs'
     const rows = prepareProfileEntries(context(f), [{ id: 'row', name }], pathToFileURL(f.dir).href + '/')
     expect(rows[0]?.disabled).toBe(true)
     expect(f.warnings.join('\n')).toContain('cannot be validated')

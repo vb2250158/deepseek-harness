@@ -10,7 +10,7 @@ import { resolvePluginResource } from './package-meta.ts'
 import { barePackageName } from './profile-resolution/resolver.ts'
 import type {} from './profile-resolution/service.ts'
 import type {} from './profile-context.ts'
-import { evaluatePluginCompatibility, pluginCompatibilityWarning } from './plugin-compatibility.ts'
+import { evaluatePluginCompatibility, getDshRuntimeVersion, pluginCompatibilityWarning } from './plugin-compatibility.ts'
 import { readProfileCompatibility } from './profile-compatibility.ts'
 import { includeFilename } from './include-filename.ts'
 
@@ -97,12 +97,13 @@ function preflight(
   const { exemptions, warnings } = readProfileCompatibility(profile.dir)
   for (const warning of warnings) process.stderr.write(`${warning}\n`)
   const includes = new Set<string>()
+  let runtimeVersion: string | undefined
   /** Only a compatibility conflict denies a row; every other failure keeps the Loader's own diagnosis. */
   const denial = (row: EntryOptions, base: string): string | undefined => {
     try {
       const manifest = manifestOf(ctx, row.name, base)
       if (manifest === undefined) return undefined
-      const issue = evaluatePluginCompatibility(manifest, exemptions)
+      const issue = evaluatePluginCompatibility(manifest, exemptions, runtimeVersion ??= getDshRuntimeVersion())
       return issue === undefined || issue.exempted ? undefined : pluginCompatibilityWarning(issue)
     } catch (error) {
       // Requirement metadata that cannot be read or validated is refused rather than silently admitted.
