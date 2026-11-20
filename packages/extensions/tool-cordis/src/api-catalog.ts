@@ -10152,7 +10152,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionPersistenceSnapshot',
-    declaration: 'export interface SessionPersistenceSnapshot {\n    readonly header: SessionHeader;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly revision: SessionPersistenceRevision;\n    readonly eventCount?: number;\n    readonly sizeBytes?: number;\n    readonly modifiedAt?: number;\n    readonly location?: SessionLocation;\n}',
+    declaration: 'export interface SessionPersistenceSnapshot {\n    readonly header: SessionHeader;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly revision: SessionPersistenceRevision;\n    readonly replayCacheKey?: string;\n    readonly eventCount?: number;\n    readonly sizeBytes?: number;\n    readonly modifiedAt?: number;\n    readonly location?: SessionLocation;\n}',
   },
   {
     name: 'SessionPersistenceStatOptions',
