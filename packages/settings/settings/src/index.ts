@@ -33,6 +33,8 @@ export interface SettingsDescriptor {
 /** Wire readers always request secret redaction. */
 export interface SettingsDescribeOptions {
   redactSecrets?: boolean
+  /** Profile entry ids to describe. Omission selects every active form. */
+  namespaces?: readonly string[]
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -296,12 +298,12 @@ export class SettingsForms extends Service {
   prepareDocument(): Promise<string> { return Promise.resolve(this.documentPath) }
 
   /** Read active plugin schemas and their live values.
-   * @param options Redaction required for remote callers.
+   * @param options Optional namespace selection and redaction required for remote callers.
    * @returns Forms keyed by unique profile entry ids.
    */
   describe(options?: SettingsDescribeOptions): SettingsDescriptor[] {
     const active = new Set<string>()
-    const descriptors = this.ownerContext.configEditor.configuration().flatMap(({ entry, inherited, override }) => {
+    const descriptors = this.ownerContext.configEditor.configuration(options?.namespaces).flatMap(({ entry, inherited, override }) => {
       const schema = this.schema(entry)
       if (schema === undefined || entry.fiber === undefined
         || entry.fiber.runtime === null || entry.fiber.state !== FiberState.ACTIVE) return []
@@ -332,7 +334,7 @@ export class SettingsForms extends Service {
       }]
     })
     for (const [id, previous] of this.revisions) {
-      if (active.has(id) || previous.raw === undefined) continue
+      if (active.has(id) || previous.raw === undefined || options?.namespaces?.includes(previous.ns) === false) continue
       const revision = previous.revision + 1
       this.revisions.set(id, { ...previous, raw: undefined, revision })
       this.ownerContext.emit('settings/document-updated', previous.ns, revision)

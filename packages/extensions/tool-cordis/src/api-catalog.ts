@@ -810,9 +810,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Active entries with unique profile patch ids.',
       },
       {
-        signature: 'configuration(): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }>',
+        signature: 'configuration(namespaces?: readonly string[]): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }>',
         description: 'Read inherited and explicit profile values for the active entries.',
-        parameters: [],
+        parameters: [{ name: 'namespaces', description: 'Optional profile entry ids to read, in Loader order.' }],
         returns: 'Detached layer values alongside their Loader entries.',
       },
       {
@@ -4065,7 +4065,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'describe(options?: SettingsDescribeOptions): SettingsDescriptor[]',
         description: 'Read active plugin schemas and their live values.',
-        parameters: [{ name: 'options', description: 'Redaction required for remote callers.' }],
+        parameters: [{ name: 'options', description: 'Optional namespace selection and redaction required for remote callers.' }],
         returns: 'Forms keyed by unique profile entry ids.',
       },
       {
@@ -10456,7 +10456,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SettingsDescribeOptions',
-    declaration: 'export interface SettingsDescribeOptions {\n    redactSecrets?: boolean;\n}',
+    declaration: 'export interface SettingsDescribeOptions {\n    redactSecrets?: boolean;\n    namespaces?: readonly string[];\n}',
   },
   {
     name: 'SettingsDescribeValue',

@@ -150,9 +150,10 @@ Persist complete raw configs and apply them through the normal Loader path.
 entries(): Entry[]
 
 /** Read inherited and explicit profile values for the active entries.
+ * @param namespaces Optional profile entry ids to read, in Loader order.
  * @returns Detached layer values alongside their Loader entries.
  */
-configuration(): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }>
+configuration(namespaces?: readonly string[]): Array<{ entry: Entry; inherited: Record<string, unknown>; override: Record<string, unknown> }>
 
 /** Validate, persist, and reconcile a plugin's next config; ordinary fields keep normal lifecycle rules.
  * @param entry Current Loader entry, also used to detect replacement during the write.

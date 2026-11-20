@@ -41,6 +41,8 @@ Each form reports `autoGenerate`, enabled by default, for clients that build pag
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+Host callers can pass `namespaces` to `describe()` to read specific profile forms in Loader order. The same redaction and revision rules apply to each selected form.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

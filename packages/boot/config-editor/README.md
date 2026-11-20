@@ -35,6 +35,8 @@ Use [settings](../../settings/settings/README.md) for forms restricted to live f
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+Pass profile entry ids to `configuration()` to read the inherited and explicit settings for those entries.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

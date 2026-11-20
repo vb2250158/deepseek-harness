@@ -43,7 +43,7 @@ configure(presentation: { auto?: boolean }, owner: Fiber = this.ctx.fiber): () =
 prepareDocument(): Promise<string>
 
 /** Read active plugin schemas and their live values.
- * @param options Redaction required for remote callers.
+ * @param options Optional namespace selection and redaction required for remote callers.
  * @returns Forms keyed by unique profile entry ids.
  */
 describe(options?: SettingsDescribeOptions): SettingsDescriptor[]

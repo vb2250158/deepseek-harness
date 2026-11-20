@@ -7,6 +7,26 @@ import { expect, it, vi } from 'vitest'
 import * as appBoot from '@deepseek-ai/dsh-app-boot'
 import { configurationFixture } from './configuration-fixture.ts'
 
+it('reads only the requested profile forms without marking other settings removed', async () => {
+  const { ctx } = await configurationFixture({ hmr: false })
+  const all = ctx.settings.describe({ redactSecrets: true })
+  const first = all.find(row => row.ns === 'first')!
+  const compose = vi.spyOn(appBoot, 'composeEntries')
+  try {
+    expect(ctx.settings.describe({ namespaces: [], redactSecrets: true })).toEqual([])
+    expect(ctx.settings.describe({ namespaces: ['missing'] })).toEqual([])
+    expect(compose).not.toHaveBeenCalled()
+    const selected = ctx.settings.describe({ namespaces: ['first', 'first'], redactSecrets: true })
+    expect(selected).toHaveLength(1)
+    expect(selected[0]).toMatchObject({ ns: first.ns, revision: first.revision,
+      value: first.value, base: first.base, user: first.user, secrets: first.secrets })
+    expect(ctx.settings.describe().map(({ ns, revision }) => [ns, revision]))
+      .toEqual(all.map(({ ns, revision }) => [ns, revision]))
+  } finally {
+    compose.mockRestore()
+  }
+})
+
 it('shares composition for entries without config overrides while retaining group and insert inheritance', async () => {
   const { ctx, profile, start } = await configurationFixture({ hmr: false })
   await ctx.fiber.dispose()
