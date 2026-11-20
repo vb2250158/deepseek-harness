@@ -9,6 +9,21 @@ it('distinguishes identical two-key chords from pairs sharing only one key', () 
   expect(overlappingBindings(left, { code: 'KeyB', secondCode: 'KeyA', modifiers: [] })).toBe(true)
   expect(overlappingBindings(left, { code: 'KeyB', secondCode: 'KeyC', modifiers: [] })).toBe(false)
 })
+it('orders chord conflicts by declaration and reports each fixed action once', () => {
+  const chord = (code: string, secondCode?: string) => ({
+    code, modifiers: [] as const, ...(secondCode === undefined ? {} : { secondCode }),
+  })
+  const rows = effectiveShortcuts([
+    { id: id('test.b'), defaults: { 'desktop:windows': chord('KeyB') } },
+    { id: id('test.a'), defaults: { 'desktop:windows': chord('KeyA') } },
+    { id: id('test.ba'), defaults: { 'desktop:windows': chord('KeyB', 'KeyA') } },
+    { id: id('test.bc'), defaults: { 'desktop:windows': chord('KeyB', 'KeyC') } },
+    { id: id('test.ab'), defaults: { 'desktop:windows': chord('KeyA', 'KeyB') } },
+    { id: id('test.fixed'), defaults: {}, fixed: [chord('KeyA'), chord('KeyB')] },
+  ], { schemaVersion: 2, profiles: {} }, 'desktop', 'windows')
+  expect(rows.find(row => row.id === 'test.ab')?.conflicts).toEqual(['test.b', 'test.a', 'test.ba', 'test.fixed'])
+})
+
 it.each(['macos', 'windows', 'linux'] as const)('accepts Mod+Shift+Period on %s without permitting shift-only Web bindings', (platform) => {
   const binding = normalizeBinding({ code: 'Period', modifiers: ['primary', 'shift'] }, platform)
   for (const runtime of ['web', 'desktop'] as const) expect(bindingIssue(binding, runtime, platform)).toBeNull()
