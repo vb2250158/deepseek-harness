@@ -8,14 +8,14 @@ import type { Entry, ModuleLoader, ModuleJob, ResolveResult } from '@deepseek-ai
 import type { Include } from '@deepseek-ai/cordis-plugin-include'
 import { FSWatcher, watch, type ChokidarOptions } from 'chokidar'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import {
-  readProfileManifest, readProfilePatches, recomposeProfile, PROFILE_PATCH_FILENAME, type RuntimeResolution,
+  readProfileManifest, readProfilePatches, recomposeProfile, PROFILE_PATCH_FILENAME,
 } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import { handleError } from './error.ts'
 import { PackageManifests } from './package-manifest.ts'
-import { directorySpelling } from './directory-spelling.ts'
+import { mappedDirectories, profileRoots, reloadRoots } from './profile-directories.ts'
 import { ModuleFiles } from './module-files.ts'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -945,7 +945,7 @@ class Hmr extends Service {
     // Entries this recomposition stops start again, and fail it when they cannot.
     const running = [...this.ctx.loader.entries()].filter(entry => entry.fiber?.state === FiberState.ACTIVE)
     // Read while the packages are still on disk, so a removed link's target is known in its real spellings.
-    const mapped = mappedDirectories(this.ownerContext.get('pluginPackages')?.resolution)
+    const mapped = await mappedDirectories(this.ownerContext.get('pluginPackages')?.resolution)
     let comparison: ProfileComparison | undefined
     let comparedAt = 0
     let pending: PendingModule[] = []
@@ -953,9 +953,9 @@ class Hmr extends Service {
       const patches = readProfilePatches('dsh', profile)
       comparedAt = this.files.now()
       // A failed comparison keeps every record, so the next recomposition compares the same modules again.
-      comparison = await this.contained('comparing loaded modules with disk', () => {
-        const roots = profileRoots(profile.dir)
-        return Promise.resolve({ roots, ...this.files.compare(this.profileModules(roots)) })
+      comparison = await this.contained('comparing loaded modules with disk', async () => {
+        const roots = await reloadRoots(profile.dir)
+        return { roots, ...this.files.compare(this.profileModules(roots)) }
       }, undefined)
       // Changed modules stay stale until replaced, including when the generation cannot be applied.
       pending = [...comparison?.stale ?? []].map(url => ({ url, reason: 'module-comparison' }))
@@ -987,8 +987,8 @@ class Hmr extends Service {
       return { warnings: result.warnings, pending, ...restartReason === undefined ? {} : { restartReason } }
     } finally {
       const recorded = comparison
-      await this.contained('evicting dropped packages', () => {
-        const kept = mappedDirectories(this.ownerContext.get('pluginPackages')?.resolution)
+      await this.contained('evicting dropped packages', async () => {
+        const kept = await mappedDirectories(this.ownerContext.get('pluginPackages')?.resolution)
         return this.evictDropped([...mapped].filter(dir => !kept.has(dir)), kept)
       }, undefined)
       await this.contained('recording loaded module files', () => {
@@ -1083,53 +1083,6 @@ function* moduleJobs(internal: ModuleLoader): Generator<ModuleJob> {
   for (const value of Map.prototype.values.call(internal.loadCache) as Iterable<Partial<Record<string, ModuleJob>>>) {
     yield* Object.values(value).filter(job => job !== undefined)
   }
-}
-
-/**
- * The directories of a runtime resolution's profile mappings and linked roots, in every real spelling of those that
- * exist, each with a trailing separator.
- * @param resolution The published resolution, if any.
- * @returns The directories; none without a resolution.
- */
-function mappedDirectories(resolution: RuntimeResolution | undefined): Set<string> {
-  const directories = new Set<string>()
-  if (resolution === undefined) return directories
-  const dirs = [...resolution.entries.filter(entry => entry.scope === 'profile').map(entry => entry.packageDir),
-    ...resolution.linkedRoots.map(root => root.realPath)]
-  const known = new Map<string, string>()
-  for (const dir of new Set(dirs)) {
-    for (const spelling of existsSync(dir) ? realSpellings(dir, known) : [dir]) directories.add(spelling + sep)
-  }
-  return directories
-}
-
-/**
- * The JavaScript and native real paths of an existing path. A packed worker's file system has no native realpath.
- * @param path Existing path.
- * @param known JavaScript directory spellings from the current synchronous scan.
- * @returns The distinct spellings.
- */
-function realSpellings(path: string, known?: Map<string, string>): string[] {
-  const native: unknown = Reflect.get(realpathSync, 'native')
-  if (typeof native !== 'function') return [realpathSync(path)]
-  const js = known === undefined ? realpathSync(path) : directorySpelling(resolve(path), known)
-  return [js, String(Reflect.apply(native, realpathSync, [path]))]
-}
-
-/**
- * Real directories, with a trailing separator, of the profile and of the targets its linked packages point to. Each
- * appears in both real-path spellings: Node's module caches use the JavaScript one, the runtime resolution the native
- * one, and on Windows they differ for 8.3 short names.
- */
-function profileRoots(dir: string): string[] {
-  const real = realpathSync(dir)
-  const modules = join(real, 'node_modules')
-  const names = existsSync(modules) ? readdirSync(modules) : []
-  const packages = names.flatMap(name => name.startsWith('@')
-    ? readdirSync(join(modules, name)).map(child => join(modules, name, child))
-    : [join(modules, name)])
-  const linked = packages.filter(path => lstatSync(path).isSymbolicLink() && existsSync(path))
-  return [...new Set([dir, ...linked].flatMap(path => realSpellings(path)).map(root => root + sep))]
 }
 
 /** Every `package.json` from a module file's directory up to the profile root or linked package target containing it. */
