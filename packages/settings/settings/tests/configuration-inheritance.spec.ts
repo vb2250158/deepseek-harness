@@ -115,7 +115,7 @@ it.each([0, 13, 190])('bounds composition work for 190 entries with %i config ov
   patches[0]!.insert.push(...entries)
   writeFileSync(bundlePath, JSON.stringify(patches))
   writeFileSync(profile.patchPath, JSON.stringify(patches[0]!.insert.slice(0, overrideCount).map(entry => ({
-    id: entry.id, config: entry.config ?? {},
+    id: entry.id, config: entry.id.startsWith('generated-') ? { ordinary: 'overridden' } : entry.config ?? {},
   }))))
   const restored = await start()
   const compose = vi.spyOn(appBoot, 'composeEntries')
@@ -123,7 +123,10 @@ it.each([0, 13, 190])('bounds composition work for 190 entries with %i config ov
     const rows = restored.configEditor.configuration()
     expect(rows).toHaveLength(190)
     expect(rows.find(row => row.entry.options.id === 'generated-0')!.inherited).toEqual({ ordinary: 'value-0' })
-    expect(compose).toHaveBeenCalledTimes(overrideCount + Number(overrideCount < rows.length))
+    if (overrideCount > 5) {
+      expect(rows.find(row => row.entry.options.id === 'generated-0')!.override).toEqual({ ordinary: 'overridden' })
+    }
+    expect(compose).toHaveBeenCalledTimes(1)
   } finally {
     compose.mockRestore()
   }

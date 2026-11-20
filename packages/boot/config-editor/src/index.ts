@@ -21,6 +21,12 @@ function flatten(rows: EntryOptions[]): EntryOptions[] {
   return rows.flatMap(row => [row, ...row.group && Array.isArray(row.config) ? flatten(row.config as EntryOptions[]) : []])
 }
 
+function withoutConfig(patch: PatchOptions): PatchOptions {
+  const rest = { ...patch }
+  Reflect.deleteProperty(rest, 'config')
+  return rest
+}
+
 /** Persist complete raw configs and apply them through the normal Loader path. */
 export class ConfigEditor extends Service {
   static inject = ['loader', 'profileContext']
@@ -55,15 +61,24 @@ export class ConfigEditor extends Service {
     const loaded = loadProfileDirectory('dsh', profile.dir, profile.installAnchor)
     // An own config key can replace inherited config even when its value is undefined.
     const overridden = new Set(loaded.patches.filter(patch => patch.insert === undefined && Object.hasOwn(patch, 'config')).map(patch => patch.id))
+    const layers = loaded.layers.map(layer => layer.patches)
+    // In a flat tree an entry's config cannot supply another entry. Removing
+    // every explicit config together produces each entry's inherited value.
+    const flat = [...layers, loaded.patches].every(layer => layer.every(
+      patch => !patch.group && !patch.insert?.some(row => row.group),
+    ))
     const composed = new Map<string, EntryOptions>()
-    if (entries.some(entry => !overridden.has(entry.options.id))) {
-      for (const row of flatten(composeEntries([...loaded.layers.map(layer => layer.patches), loaded.patches]))) {
+    if (flat || entries.some(entry => !overridden.has(entry.options.id))) {
+      const patches = flat
+        ? loaded.patches.map(patch => patch.insert === undefined && Object.hasOwn(patch, 'config') ? withoutConfig(patch) : patch)
+        : loaded.patches
+      for (const row of flatten(composeEntries([...layers, patches]))) {
         if (!composed.has(row.id)) composed.set(row.id, row)
       }
     }
     return entries.map(entry => ({
       entry,
-      inherited: overridden.has(entry.options.id)
+      inherited: !flat && overridden.has(entry.options.id)
         ? this.inherited(entry, loaded)
         : structuredClone((composed.get(entry.options.id)?.config ?? {}) as Record<string, unknown>),
       override: structuredClone((loaded.patches.findLast(
@@ -75,8 +90,7 @@ export class ConfigEditor extends Service {
   private inherited(entry: Entry, loaded: ReturnType<typeof loadProfileDirectory>): Record<string, unknown> {
     const patches = loaded.patches.map((patch) => {
       if (patch.id !== entry.options.id || patch.insert !== undefined) return patch
-      const rest = { ...patch }; Reflect.deleteProperty(rest, 'config')
-      return rest
+      return withoutConfig(patch)
     })
     const row = flatten(composeEntries([...loaded.layers.map(layer => layer.patches), patches])).find(row => row.id === entry.options.id)
     return structuredClone((row?.config ?? {}) as Record<string, unknown>)

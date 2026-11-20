@@ -35,7 +35,7 @@ kind: "package-reference"
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
-向 `configuration()` 传入 profile 入口 ID，可以读取这些入口的继承设置和显式设置。
+向 `configuration()` 传入 profile 入口 ID，可以读取这些入口的继承设置和显式设置。没有分组时，一次组合即可取得所有入口的继承值，包括已被显式覆盖的入口。
 
 <details>
 <summary>实现内部细节——点击展开</summary>
