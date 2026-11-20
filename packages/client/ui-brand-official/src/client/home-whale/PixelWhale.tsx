@@ -36,13 +36,17 @@ function isBlankClick(event: MouseEvent<HTMLDivElement>): boolean {
  * @returns a layout-neutral frame around the children.
  */
 export function PixelWhale({ hero, children }: PixelWhaleProps) {
+  const surface = useRef<HTMLCanvasElement | null>(null)
   const whale = useRef<PixelWhaleHandle | undefined>(undefined)
   const canvasRef = useCallback((canvas: HTMLCanvasElement | null) => {
     whale.current?.dispose()
-    whale.current = canvas === null ? undefined : attachPixelWhale(canvas, WHALE_ARTWORK, atlasUrl)
+    whale.current = undefined
+    surface.current = canvas
   }, [])
   const onClick = (event: MouseEvent<HTMLDivElement>): void => {
-    if (whale.current !== undefined && isBlankClick(event)) whale.current.play()
+    if (surface.current === null || !isBlankClick(event)) return
+    whale.current ??= attachPixelWhale(surface.current, WHALE_ARTWORK, atlasUrl)
+    whale.current.play()
   }
   return (
     <div className={css.layer} onClick={onClick}>

@@ -24,15 +24,19 @@ afterEach(() => {
 })
 
 describe('pixel whale frame layer', () => {
-  it('attaches the artwork to a canvas before its content and releases it on unmount', () => {
+  it('attaches the artwork on the first blank click and releases it on unmount', () => {
     const whale = handle()
     const view = render(<PixelWhale hero><p>content</p></PixelWhale>)
     const canvas = view.container.querySelector('canvas')
     expect(canvas?.getAttribute('aria-hidden')).toBe('true')
     expect(canvas?.nextElementSibling?.textContent).toBe('content')
+    expect(attach).not.toHaveBeenCalled()
+    fireEvent.click(view.getByText('content'))
     expect(attach).toHaveBeenCalledExactlyOnceWith(canvas, WHALE_ARTWORK, expect.stringContaining('breach-atlas'))
     view.rerender(<PixelWhale hero><p>updated</p></PixelWhale>)
+    fireEvent.click(view.getByText('updated'))
     expect(attach).toHaveBeenCalledOnce()
+    expect(whale.play).toHaveBeenCalledTimes(2)
     view.unmount()
     expect(whale.dispose).toHaveBeenCalledOnce()
   })
@@ -43,7 +47,7 @@ describe('pixel whale frame layer', () => {
     view.rerender(<PixelWhale hero={false}><p>content</p></PixelWhale>)
     expect(view.container.querySelector('canvas')).toBeNull()
     expect(view.getByText('content')).toBeTruthy()
-    expect(whale.dispose).toHaveBeenCalledOnce()
+    expect(attach).not.toHaveBeenCalled()
     fireEvent.click(view.getByText('content'))
     expect(whale.play).not.toHaveBeenCalled()
   })
