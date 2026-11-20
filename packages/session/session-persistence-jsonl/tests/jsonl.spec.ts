@@ -849,7 +849,7 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     await expect(ctx.sessionPersistence.list()).rejects.toThrow(/compression|encoding|zstd/)
   })
 
-  it('serves a metadata list before queued historical discovery without increasing I/O concurrency', async () => {
+  it.each(['metadata', 'snapshots'] as const)('serves %s before queued lower-priority discovery within the I/O bound', async (priority) => {
     const sessionCount = 4
     await Promise.all(Array.from({ length: sessionCount }, async (_, index) => {
       const header = meta(`priority-${index}`, '/work')
@@ -880,9 +880,11 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
         listArtifacts(): Promise<readonly { header: SessionHeader }[]>
       }
       const completed: string[] = []
-      const discovery = backend.listArtifacts().then(() => { completed.push('discovery') })
+      const background = priority === 'metadata' ? backend.list() : backend.listArtifacts()
+      const discovery = background.then(() => { completed.push('discovery') })
       await entered
-      const listing = limited.sessionPersistence.list().then((rows) => {
+      const foreground = priority === 'metadata' ? backend.listMetadata() : backend.list()
+      const listing = foreground.then((rows) => {
         expect(rows).toHaveLength(sessionCount)
         completed.push('list')
       })

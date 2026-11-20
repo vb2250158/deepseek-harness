@@ -31,7 +31,7 @@ Materialized `stat()` and `list()` snapshots include the file modification time 
 
 `withReadScope` discovers selected generations and direct-child membership once per pass. It retains only headers, source paths, and physical identities between reads. A scoped read validates its own selected generation and actual direct children before and after decoding; replaced, removed, or superseded sources reject instead of mixing old revisions with new events. Children added after discovery belong to the next pass. Unreadable headers contribute to conservative historical revisions and `omittedSourceCount`. Scoped preparation never enters the ordinary-open memo and never publishes a successor; ordinary `open` keeps its latest-relationship checks. The first pass still reads changed historical bodies, while unchanged revisions require only metadata.
 
-Metadata requests take priority over historical body discovery on the bounded listing queue. Parsed current logs use weak references. Prepared historical migrations retain their publication validation until use or bounded eviction, so garbage collection cannot silently bypass a changed-source refusal. Generation selections are reused only while their directory revision remains unchanged. These caches do not alter immutable stored generations.
+The listing queue serves header-only listings first, then revision-bearing snapshots, then historical body discovery. Parsed current logs use weak references. Prepared historical migrations retain their publication validation until use or bounded eviction, so garbage collection cannot silently bypass a changed-source refusal. Generation selections are reused only while their directory revision remains unchanged. These caches do not alter immutable stored generations.
 
 ### When to choose it
 
@@ -149,7 +149,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 -----
 
-Session listing bounds concurrent directory, header, and metadata reads with `listConcurrency` (default 3, a positive integer). Metadata requests take priority over queued historical body discovery while sharing that same concurrency limit; work already running is not interrupted. Header and directory-selection caches are checked against physical revisions and retired paths are evicted. On failure or cancellation, the operation stops admitting reads and awaits already-started reads before rejecting; ordering and duplicate-id refusal remain unchanged.
+Session listing bounds concurrent directory, header, and metadata reads with `listConcurrency` (default 3, a positive integer). All three priorities share that limit. Work already running completes before its slot takes the next queued operation. Header and directory-selection caches are checked against physical revisions and retired paths are evicted. On failure or cancellation, the operation stops admitting reads and awaits already-started reads before rejecting; ordering and duplicate-id refusal remain unchanged.
 
 <a id="model-experience"></a>
 

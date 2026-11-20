@@ -104,8 +104,10 @@ export const JsonlCompressionSchema: z<JsonlCompression> = z.union([
 
 /** Default maximum listing filesystem operations in flight per backend. */
 const DEFAULT_LIST_CONCURRENCY = 3
-/** Metadata requests precede historical body-discovery work on the same bounded I/O queue. */
-const LIST_METADATA_PRIORITY = 1
+/** Revision-bearing snapshots precede migration body discovery on the same bounded I/O queue. */
+const SNAPSHOT_PRIORITY = 1
+/** Header-only discovery serves the visible Session list ahead of revision-bearing snapshots. */
+const LIST_METADATA_PRIORITY = 2
 
 /** Plugin config for the JSONL backend's root, physical encoding, and listing concurrency. */
 export interface Config {
@@ -596,7 +598,7 @@ export class JsonlSessionPersistence extends SessionPersistence {
     const metadata = await this.readGenerationHeader(selected, id, options?.signal)
     if (metadata === undefined) return undefined
     if (selected.sourceVersion < SESSION_FORMAT_VERSION) {
-      const captured = await this.captureSources(options?.signal, LIST_METADATA_PRIORITY)
+      const captured = await this.captureSources(options?.signal, SNAPSHOT_PRIORITY)
       return this.capturedSnapshots(captured).find(snapshot => snapshot.header.id === id)
     }
     try {
@@ -630,7 +632,7 @@ export class JsonlSessionPersistence extends SessionPersistence {
     // append lands mid-scan is then still in this snapshot (its artifact may
     // predate the scan), so create-to-list visibility never has a hole.
     const pending = [...this.tracker.pendingEntries()]
-    const captured = await this.captureSources(signal, LIST_METADATA_PRIORITY)
+    const captured = await this.captureSources(signal, SNAPSHOT_PRIORITY)
     for (const snapshot of this.capturedSnapshots(captured)) {
       listed.add(snapshot.header.id)
       snapshots.push(snapshot)
@@ -655,7 +657,7 @@ export class JsonlSessionPersistence extends SessionPersistence {
   ): Promise<T> {
     return this.runReadScope(async (discoverySignal) => {
       const pending = new Map(this.tracker.pendingEntries())
-      const captured = await this.captureSources(discoverySignal, LIST_METADATA_PRIORITY)
+      const captured = await this.captureSources(discoverySignal, SNAPSHOT_PRIORITY)
       const snapshots = this.capturedSnapshots(captured)
       const sources = new Map(captured.sources.flatMap(source => source.metadata === undefined
         ? [] : [[source.metadata.header.id, source] as const]))
