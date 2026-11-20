@@ -303,6 +303,23 @@ describe('loadProfile', () => {
     expect(profile.layers.map(layer => layer.packageName)).toEqual(['bundle-a'])
   })
 
+  it('discovers newly installed bundles and rechecks installation precedence on every profile read', () => {
+    const anchor = stageInstallation({})
+    const dir = tmp()
+    const bundle = '@fixture/new-bundle'
+    initProfile(dir, [bundle])
+    const read = () => loadProfileDirectory('test', dir, anchor)
+    expect(read().skippedBundles.map(({ packageName }) => packageName)).toEqual([bundle])
+
+    for (const root of [dir, dirname(anchor)]) {
+      const packageDir = join(root, 'node_modules', bundle)
+      mkdirSync(packageDir, { recursive: true })
+      writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: './patch.yml' } } }))
+      writeFileSync(join(packageDir, 'patch.yml'), '[]\n')
+      expect(read().layers.map(layer => layer.packageDir)).toEqual([packageDir])
+    }
+  })
+
   it('resolves each dsh.profile.bundles entry to its patch layer in order, plus the user layer', () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '- insert:\n    - id: a\n      name: pkg-a\n' },

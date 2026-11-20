@@ -655,11 +655,20 @@ function dropRetiredBundles(dir: string, manifest: ProfileManifest): ProfileMani
  * matches what the Loader would import from the same anchor, and
  * `existsSync` follows the symlinks pnpm's isolated layout uses.
  */
-function packageDirFromAnchor(anchor: string, packageName: string): string | undefined {
+function packageDirFromAnchor(anchor: string, packageName: string, directories?: Map<string, boolean>): string | undefined {
   // resolve.paths returns null only for builtins, which no bundle name is.
   /* v8 ignore next */
   for (const searchPath of createRequire(anchor).resolve.paths(packageName) ?? []) {
     const candidate = join(searchPath, packageName)
+    // A relative specifier may resolve outside the search directory.
+    if (directories && candidate.startsWith(searchPath + sep)) {
+      let exists = directories.get(searchPath)
+      if (exists === undefined) {
+        exists = existsSync(searchPath)
+        directories.set(searchPath, exists)
+      }
+      if (!exists) continue
+    }
     if (existsSync(join(candidate, 'package.json'))) return candidate
   }
   return undefined
@@ -680,8 +689,14 @@ function packageDirFromAnchor(anchor: string, packageName: string): string | und
 export function resolveBundleDir(
   binName: string, packageName: string, installAnchor: string, profileDir: string,
 ): string {
+  return profileBundleDir(binName, packageName, installAnchor, profileDir)
+}
+
+function profileBundleDir(
+  binName: string, packageName: string, installAnchor: string, profileDir: string, directories?: Map<string, boolean>,
+): string {
   for (const anchor of [installAnchor, join(profileDir, 'package.json')]) {
-    const dir = packageDirFromAnchor(anchor, packageName)
+    const dir = packageDirFromAnchor(anchor, packageName, directories)
     if (dir !== undefined) return dir
   }
   throw new Error(
@@ -714,10 +729,11 @@ export function loadProfileDirectory(
   const bundles = manifest.dsh?.profile?.bundles ?? []
   const layers: ProfileLayer[] = []
   const skippedBundles: SkippedBundle[] = []
+  const directories = new Map<string, boolean>()
   const exemptions = bundles.length === 0 ? {} : readProfileVersionExemptions(dir)
   for (const packageName of bundles) {
     try {
-      const packageDir = resolveBundleDir(binName, packageName, installAnchor, dir)
+      const packageDir = profileBundleDir(binName, packageName, installAnchor, dir, directories)
       const bundleManifest = readProfileManifest(binName, packageDir)
       const bundle = bundleManifest.dsh?.bundle
       if (bundle === undefined) {
