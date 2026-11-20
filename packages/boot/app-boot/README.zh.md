@@ -128,6 +128,8 @@ Loader 结算后，app-boot 在仅 optional 条目未激活时输出警告。如
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+读取 profile 时会比对每个补丁文件的当前文本。内容相同就复用已解析的 YAML，并给调用方独立的补丁列表。编辑或移除文件后，下次读取即生效。
+
 <details>
 <summary>实现细节——点击展开</summary>
 

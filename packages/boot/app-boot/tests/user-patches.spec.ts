@@ -43,6 +43,23 @@ describe('loadOptionalPatches', () => {
     expect(loadOptionalPatches(NAME, join(tmp(), PROFILE_PATCH_FILENAME))).toBeUndefined()
   })
 
+  it('detaches repeated overlay reads and sees replacements, parse failures and removal', () => {
+    const file = join(tmp(), PROFILE_PATCH_FILENAME)
+    writeFileSync(file, '- id: first\n  config: { count: 1 }\n')
+    const first = loadOverlayPatches(NAME, file)
+    first[0]!.config = { count: 9 }
+    const second = loadOverlayPatches(NAME, file)
+    expect(second[0]?.config).toEqual({ count: 1 })
+    second.pop()
+    expect(loadOptionalPatches(NAME, file)).toHaveLength(1)
+    writeFileSync(file, '- id: first\n  config: { count: 2 }\n')
+    expect(loadOverlayPatches(NAME, file)[0]?.config).toEqual({ count: 2 })
+    writeFileSync(file, 'broken: [')
+    expect(() => loadOverlayPatches(NAME, file)).toThrow('failed to parse overlay')
+    rmSync(file)
+    expect(loadOptionalPatches(NAME, file)).toBeUndefined()
+  })
+
   it('parses a patch list and preserves !!js expressions as loader expression nodes', () => {
     const dir = tmp()
     writeFileSync(join(dir, PROFILE_PATCH_FILENAME), [

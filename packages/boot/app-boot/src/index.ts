@@ -572,6 +572,10 @@ function anchorInsertedPluginNames(patches: PatchOptions[], file: string): Patch
   for (const patch of patches) patch.insert?.forEach(visit)
   return patches
 }
+// Each read checks the current text. Only the latest anchored syntax tree for a file is retained.
+const parsedPatchFiles = new Map<string, { content: string; patches: PatchOptions[] }>()
+const PATCH_FILE_CACHE_LIMIT = 64
+
 /**
  * Parse one loader patch list: a top-level YAML array of
  * `@deepseek-ai/cordis-plugin-include` `PatchOptions` (id-targeted config overrides and
@@ -588,6 +592,10 @@ function anchorInsertedPluginNames(patches: PatchOptions[], file: string): Patch
 function parsePatchList(
   binName: string, file: string, content: string, label: string,
 ): PatchOptions[] {
+  const path = resolve(file)
+  const cached = parsedPatchFiles.get(path)
+  if (cached?.content === content) return structuredClone(cached.patches)
+  parsedPatchFiles.delete(path)
   let parsed: unknown
   try {
     parsed = parseEntryYaml(content)
@@ -602,7 +610,13 @@ function parsePatchList(
       throw new Error(`${binName}: ${label} entry ${index + 1} in ${file} must be a mapping (a loader patch entry)`)
     }
   })
-  return anchorInsertedPluginNames(parsed as PatchOptions[], file)
+  const patches = anchorInsertedPluginNames(parsed as PatchOptions[], path)
+  if (parsedPatchFiles.size >= PATCH_FILE_CACHE_LIMIT) {
+    const oldest = parsedPatchFiles.keys().next()
+    if (!oldest.done) parsedPatchFiles.delete(oldest.value)
+  }
+  parsedPatchFiles.set(path, { content, patches: structuredClone(patches) })
+  return patches
 }
 
 /** One overlay patch list with the source label printed in dump comments. */

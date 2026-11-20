@@ -128,6 +128,8 @@ If your app owns the terminal, it can hand the terminal back before the process 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+Profile reads compare the current text of each patch file and reuse its parsed YAML when the text matches. Each caller receives a detached patch list. Edits and removals take effect on the next read.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 
