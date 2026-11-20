@@ -753,6 +753,7 @@ export class Session implements SessionFace {
     this.openError = null
     this.notifier.markDirty()
     const events = new SessionEventStream(this.remote, this.sessionAddress(), {
+      compactProjections: this.projections.canLoadDetails,
       publish: (change) => {
         if (generation !== this.openGeneration || this.events !== events) return
         this.acceptEventChange(change)

@@ -93,6 +93,8 @@ export type SessionControlStream = RemoteSnapshotStream<
 export interface SessionControlStreamOptions {
   /** Apply a complete baseline or one later update. */
   readonly accept: (frame: SessionControlFrame) => void
+  /** Request invalidations for projection values loaded on demand. */
+  readonly compactProjections?: boolean
   /** Observe a retryable carrier loss before reconnection. */
   readonly carrierFailed?: (error: RemoteStreamCarrierFailure) => void
   /** Publish a terminal business or protocol failure. */
@@ -101,6 +103,8 @@ export interface SessionControlStreamOptions {
 
 /** Domain sinks used by one addressed Session event journal. */
 export interface SessionEventStreamOptions {
+  /** Omit on-demand values when the receiving store can request individual keys. */
+  readonly compactProjections?: boolean
   /** Apply one complete event-window change. */
   readonly publish: (change: SessionJournalChange) => void
   /** Observe a retryable carrier loss before reconnection. */
@@ -121,7 +125,7 @@ export function createSessionControlStream(
 ): SessionControlStream {
   const stream = remote.$stream<SessionControlFrame>({
     name: 'session control stream',
-    open: signal => remote.session.control(signal),
+    open: signal => options.compactProjections ? remote.session.compactControl(signal) : remote.session.control(signal),
     ended: accepted => accepted
       ? new RemoteStreamCarrierError('session control stream ended without a terminal result')
       : new Error('session control stream ended before its opening snapshot'),
@@ -184,9 +188,11 @@ export class SessionEventStream extends RemoteJournalStream<
         : { carrierFailed: options.carrierFailed }),
       failed: options.failed,
     })
+    this.compactProjections = options.compactProjections === true
     this.buffered = buffered
   }
 
+  private readonly compactProjections: boolean
   private readonly buffered: BufferedRecords
 
   /**
@@ -214,6 +220,7 @@ export class SessionEventStream extends RemoteJournalStream<
       address: this.address,
       activate: true,
       assistantStream: true,
+      ...(this.compactProjections ? { compactProjections: true as const } : {}),
       ...this.repairRequest(request),
     }, signal)) {
       if (frame.type === 'snapshot') {

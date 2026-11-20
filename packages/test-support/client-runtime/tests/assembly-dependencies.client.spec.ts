@@ -32,7 +32,7 @@ describe('bundle dependency closures', () => {
     await vi.waitFor(() => {
       expect(client.ctx.sessions.list.getSnapshot().phase).toBe('ready')
       expect(mock.log.calls('session/list')).toHaveLength(1)
-      expect(mock.log.streams('session/control')).toHaveLength(1)
+      expect(mock.log.streams('session/compactControl')).toHaveLength(1)
     })
   }, 60_000)
 })

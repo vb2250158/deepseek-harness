@@ -40,11 +40,11 @@ class HistoryDeliveryGate {
       server.onMessage((message) => {
         const frame = parseRemoteStreamServerMessage(String(message))
         const endpoint = this.streams.get(frame.streamId)
-        if (!this.holding || (endpoint !== 'session/control' && endpoint !== 'session/follow')) {
+        if (!this.holding || (endpoint !== 'session/compactControl' && endpoint !== 'session/follow')) {
           socket.send(message)
           return
         }
-        const control = endpoint === 'session/control' && frame.type === 'item'
+        const control = endpoint === 'session/compactControl' && frame.type === 'item'
           ? frame.value as { type: string; sessionId?: string; changes?: readonly { key: string; val: unknown }[] } : undefined
         const inbox = control?.type === 'projection' && control.sessionId === SESSION_ID
           ? control.changes?.find(change => change.key === 'inbox')?.val as InboxState | undefined : undefined

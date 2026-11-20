@@ -52,6 +52,7 @@ export const remoteDefaultResponses: RemoteTable = {
   stream: {
     'sessionStatus/follow': openStream([{ type: 'baseline', items: [] }]),
     // api-session-controller client `apply`: the control stream's opening baseline, then open.
+    'session/compactControl': openStream([{ type: 'baseline', value: { projections: {} } }]),
     'session/control': openStream([{ type: 'baseline', value: { projections: {} } }]),
     // ui-settings-account shares the account snapshot across settings and the sidebar menu.
     'account/watch': openStream([{ type: 'snapshot', state: { status: 'signed-out', attempt: null, links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' } } }]),

@@ -71,8 +71,8 @@ export interface WorkspaceSessionPage {
 /** Shared projection values and the lifecycle of their explicit baseline read. */
 /**
  * Every projection value the store currently holds, with the summary mark
- * stripped, and the lifecycle of its explicit baseline read. This is the full
- * attached-Session set, not a list row's summary contract (see
+ * stripped, and the lifecycle of its explicit baseline read. On-demand keys appear
+ * after a keyed subscription loads their values. This differs from a list row's summary (see
  * `SessionListEntry.projectionValues`).
  */
 export interface SessionProjectionSnapshot {
@@ -235,6 +235,7 @@ export class SessionManager {
    */
   async dispose(): Promise<void> {
     this.disposed = true
+    for (const store of this.projectionStores.values()) store.clear()
     const workspaceReads = this.resetWorkspacePages()
     this.listMutations = null
     this.listContinuation = null
@@ -356,7 +357,11 @@ export class SessionManager {
   private projectionStore(sessionId: SessionId): ProjectionValueStore {
     let store = this.projectionStores.get(sessionId)
     if (store === undefined) {
-      store = new ProjectionValueStore()
+      store = new ProjectionValueStore(async (key, signal) => {
+        const result = await this.remote.session.projections({ sessionId, keys: [key] }, signal)
+        if (!result.ok) throw result.error
+        return result.value
+      })
       const projections = store
       store.subscribeAny(() => {
         // Newer history or control metadata corrects a resident Session's stale list hint.
@@ -386,16 +391,17 @@ export class SessionManager {
     this.notifier.markDirty()
     const operation = (async () => {
       try {
-        const result = await this.remote.session.projections({ sessionId }, controller.signal)
+        const result = await this.remote.session.projections({ sessionId, compactProjections: true }, controller.signal)
         if (controller.signal.aborted) return
         if (result.ok) {
           const value = result.value
           if (value !== null) {
             switch (value.kind) {
               case 'sequenced':
-                store.seed({ values: value.values, asOfSeq: sessionSeqCursor(value.asOfSeq) })
+                store.seed({ ...value, asOfSeq: sessionSeqCursor(value.asOfSeq) })
                 break
               case 'migration-required':
+                store.defer(value.deferredKeys ?? [], null)
                 store.applyCached(value.values)
                 break
               default:
@@ -820,6 +826,7 @@ export class SessionManager {
     }
     const store = this.projectionStore(frame.sessionId)
     const seq = SessionSeq(frame.seq)
+    store.defer(frame.deferredKeys ?? [], seq)
     for (const change of frame.changes) store.apply(change.key, change.val, seq)
     this.notifier.markDirty()
   }
@@ -883,6 +890,7 @@ export class SessionManager {
     else this.sessions.get(sessionId)?.handleRemoved()
     const catalog = this.projectionStores.get(sessionId)?.values().subagentCatalog
     if (!durableSubagent && (catalog === undefined || catalog.length === 0)) {
+      this.projectionStores.get(sessionId)?.clear()
       this.projectionStores.delete(sessionId)
     }
     this.pruneEngagement(sessionId, this.retainedIds(this.summaries))

@@ -27,6 +27,11 @@ export class Notifier {
     }
   }
 
+  /** Whether the channel has subscribers waiting for changes. */
+  get observed(): boolean {
+    return this.listeners.size > 0
+  }
+
   /** Mark the snapshot dirty and notify in a microtask. */
   markDirty(): void {
     this.dirty = true

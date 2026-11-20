@@ -17,7 +17,7 @@ const SELF = '@deepseek-ai/dsh-api-session-controller'
 const ROSTER = webApp.closure([SELF])
 const it = createClientTest({ roster: ROSTER })
 const EVENTS = '$events'
-const CONTROL = 'session/control'
+const CONTROL = 'session/compactControl'
 const BASELINE = { type: 'baseline', value: { projections: {} } }
 /** The first client boot pays the cold module transform of the cone. */
 const COLD_BOOT_TIMEOUT_MS = 60_000
