@@ -8,6 +8,8 @@ kind: "package-reference"
 
 桌面埋点遵循[产品采集策略](../../client/product-analytics/README.zh.md)及其启动时开关，不包含 Web 使用情况。
 
+Web 客户端以紧凑方式获取会话控制流、会话跟踪和投影快照。声明为按需加载的投影先传递进度水位，组件通过 `useProjection(key)` 订阅时再读取该会话的精确值。并发订阅共用这次读取；重新连接后，客户端丢弃上一个 Host 的读取结果。
+
 ## 概述
 
 `@deepseek-ai/dsh-api-session-controller` 拥有 Host 的 `ctx.sessionController` 服务，以及生成的 Client `session`、`skills` 和 `fileReferences` Remote namespace。它提供 Session 生命周期与历史、Host generation 模型目录、人工后台任务终止、工作区路径打开、用户可调用 skill（技能）发现和 Agent（智能体）范围的文件引用。当 Client 需要按 Session 寻址的操作时，请通过 API Gateway 使用它。
