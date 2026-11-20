@@ -1418,7 +1418,11 @@ export class JsonlSessionPersistence extends SessionPersistence {
       const revision = selected.sourceVersion < SESSION_FORMAT_VERSION
         ? brandString<PersistenceRevision>(`${fileRevision(identity)}:${this.sourceFingerprint(captured.children.get(metadata.header.id) ?? [])}:${captured.unclassifiedRevision}`)
         : fileRevision(identity)
-      return [{ ...metadata, revision, sizeBytes: Number(identity.size), modifiedAt: Number(identity.mtimeNs / 1_000_000n),
+      // Change the namespace if decoding or migration changes for identical physical inputs.
+      const replayCacheKey = createHash('sha256').update(JSON.stringify([
+        'jsonl-scoped-replay/v1', SESSION_FORMAT_VERSION, selected.sourceVersion, selected.sourcePath, revision,
+      ])).digest('hex')
+      return [{ ...metadata, revision, replayCacheKey, sizeBytes: Number(identity.size), modifiedAt: Number(identity.mtimeNs / 1_000_000n),
         location: { kind: 'jsonl' as const, path: selected.sourcePath } }]
     })
   }

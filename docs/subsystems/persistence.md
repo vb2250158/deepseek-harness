@@ -323,6 +323,12 @@ interface SessionPersistenceSnapshot {
   readonly formatStatus?: 'current' | 'migration-required'
   /** Opaque change token; see {@link SessionPersistence.stat}. */
   readonly revision: SessionPersistenceRevision
+  /**
+   * Opaque identity for reusing a derived result across service instances. Equal keys for the
+   * same Session identify the same read inputs and decoding semantics. Only publish a derived
+   * result after a successful scoped read. An absent or changed key requires revalidation.
+   */
+  readonly replayCacheKey?: string
   /** Logical event count, when the backend can provide it cheaply from metadata; otherwise absent. */
   readonly eventCount?: number
   /** Physical artifact byte size, when the backend can provide it cheaply (JSONL); otherwise absent. */

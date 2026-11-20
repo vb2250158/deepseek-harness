@@ -120,6 +120,24 @@ describe.each(['none', 'zstd'] as const)('historical catalog publication (%s)', 
     expect(await revision()).not.toBe(added)
   })
 
+  it('reuses scoped replay keys after restart and invalidates historical parents when a child changes', async () => {
+    const f = await fixture()
+    const second = new Context()
+    contexts.push(second)
+    await second.plugin(JsonlSessionPersistence, { root: f.root, compression })
+    const key = (ctx: Context, id: SessionId) => ctx.sessionPersistence.withReadScope(
+      async scope => scope.snapshots.find(row => row.header.id === id)?.replayCacheKey,
+    )
+    const parent = await key(f.ctx, f.parent)
+    expect(parent).toMatch(/^[\da-f]{64}$/)
+    expect(await key(second, f.parent)).toBe(parent)
+    await f.write('unrelated', [], false, 4)
+    const current = await key(second, brandString<SessionId>('unrelated'))
+    await f.write('child', [f.descriptor], true)
+    expect(await key(second, f.parent)).not.toBe(parent)
+    expect(await key(f.ctx, brandString<SessionId>('unrelated'))).toBe(current)
+  })
+
   it('keeps historical revisions stable when an unrelated trusted source changes', async () => {
     const f = await fixture()
     const first = (await f.ctx.sessionPersistence.stat(f.parent))!.revision

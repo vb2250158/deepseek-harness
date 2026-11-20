@@ -52,6 +52,8 @@ await ctx.sessionPersistence.flush()                           // backend-wide d
 
 `withReadScope(callback, options)` 管理一次有界只读遍历。`SessionPersistenceReadScope` 提供 `snapshots`、`observedAt`、`consistency`、`omittedSourceCount` 与 `read(id)`；读取返回不可变的 `SessionInspection`，事件包含继承前缀。默认实现使用实时句柄，在读取前后核对所列修订值；JSONL 则捕获选中的来源集合。两种模式都不承诺跨文件原子快照。参与来源改变时抛出 `SessionPersistenceReadScopeChangedError`，由后续遍历重试。遗漏来源数非零时，条目缺席不能证明会话已删除。回调结束、调用方取消或提供者卸载都会取消未完成读取并等待清理；已退出的范围拒绝后续读取。修订值仍只允许在同一服务实例、同一会话身份内比较；修订值不等不能证明既有前缀保持不变。
 
+快照还可包含 `replayCacheKey`。对于同一会话，提供者可用此键跨服务实例标识没有变化的范围读取，涵盖解码规则与迁移输入。调用方可在范围读取成功后将此键与结果一起保存；键缺失或变更时需要重新验证。
+
 服务级 `flush()` 排空每个活跃写句柄已路由的事件并把其会话实体化，效果与各句柄自己的 `flush` 完全相同；失败按会话聚合为一个 `AggregateError` 而不中途放弃清扫，清扫途中被关闭的句柄视同已 flush，因为 close 本身会持久排空。
 
 `create(header, { parentSource, inheritedEventCount })` 持久保存完整的 fork 历史后才返回写句柄。`parentSource.events` 从 seq 0 起：截至不包含末端位置的 `parentSource.endSeq` 的父会话已存储前缀，其后是子会话事件；`header.isSeeded` 为 true 时，这些事件在 `inheritedEventCount` 处包含继承标记。共享前缀的后端要求父会话存在且至少持久化了 `endSeq` 个事件，并只写入其余部分；复制的后端写入全部事件。父会话后续追加不会改变子会话。来源字段和创建失败见 [`SessionPersistenceCreateOptions`](src/index.ts)。
