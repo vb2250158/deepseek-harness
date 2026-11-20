@@ -1,5 +1,6 @@
 /** Serialized module and profile-configuration reloads. */
 import assert from 'node:assert/strict'
+import { hasDirectoryPrefix } from './directory-prefix.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { watchConfig as watchExactConfig } from './watch-config.ts'
 import { Context, FiberState, Inject, Service, type Fiber, type Plugin } from '@deepseek-ai/cordis'
@@ -791,10 +792,12 @@ class Hmr extends Service {
 
   /** Loaded `file:` modules below the given profile roots. */
   private profileModules(roots: readonly string[]): string[] {
+    const prefixes = new Set(roots)
+    const only = roots.length === 1 ? roots[0] : undefined
     return [...this.loadedUrls()].filter((url) => {
       if (!url.startsWith('file:')) return false
       const filename = fileURLToPath(url)
-      return roots.some(root => filename.startsWith(root))
+      return only === undefined ? hasDirectoryPrefix(filename, prefixes) : filename.startsWith(only)
     })
   }
 
@@ -905,7 +908,7 @@ class Hmr extends Service {
     const host = new Set(await this.hostModules())
     const urls = this.profileModules(dropped).filter((url) => {
       const filename = fileURLToPath(url)
-      return !host.has(url) && ![...kept].some(dir => filename.startsWith(dir))
+      return !host.has(url) && !hasDirectoryPrefix(filename, kept)
     })
     for (const url of urls) for (const manifest of packageManifests(url, dropped)) this.manifests.invalidate(manifest)
     this.evict(urls)

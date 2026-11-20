@@ -1,5 +1,6 @@
 /** Expire Node's cached package configuration for package directories whose manifest changed. */
 import { isUtf8 } from 'node:buffer'
+import { hasDirectoryPrefix } from './directory-prefix.ts'
 import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire, isBuiltin } from 'node:module'
 import { basename, dirname, join, sep, toNamespacedPath } from 'node:path'
@@ -181,11 +182,7 @@ export class PackageManifests {
       this.realDirectories.set(parent, real)
     }
     const target = join(real, basename(path))
-    if (this.directories.has(target)) return true
-    for (let end = target.indexOf(sep); end !== -1; end = target.indexOf(sep, end + 1)) {
-      if (this.directories.has(target.slice(0, end + 1))) return true
-    }
-    return false
+    return this.directories.has(target) || hasDirectoryPrefix(target, this.directories)
   }
 
   private isUrlInInvalidatedDirectory(url: string): boolean {
