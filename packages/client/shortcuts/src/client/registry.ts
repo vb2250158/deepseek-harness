@@ -1,7 +1,7 @@
 /** Command registration, normalized default bindings, and synchronous dispatch. */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { bindingIssue, bindingKey, effectiveShortcuts, initialShortcutConfig, isWebBindingAllowed, normalizeBinding, overlappingBindings, presentBinding, resolveShortcutDefault } from '../protocol.ts'
-import type { ShortcutCommandId, ShortcutConfigSnapshot, ShortcutDefinition, ShortcutPlatform, ShortcutRuntime } from '../protocol.ts'
+import type { NormalizedBinding, ShortcutProfile, ShortcutCommandId, ShortcutConfigSnapshot, ShortcutDefinition, ShortcutPlatform, ShortcutRuntime } from '../protocol.ts'
 import type { ShortcutCatalogEntry, ShortcutCommand, ShortcutContext, ShortcutGesture,
   ShortcutFixedCommand, ShortcutFixedCatalogEntry } from './types.ts'
 
@@ -13,6 +13,7 @@ type ShortcutDispatch = { status: 'handled'; commandId: ShortcutCommandId }
 /** Application command registry; adapters own event listeners, feature plugins own actions. */
 export class ShortcutRegistry {
   private readonly commands = new Map<ShortcutCommandId, ShortcutCommand>()
+  private readonly defaultBindings = new Map<ShortcutCommandId, Partial<Record<ShortcutProfile, NormalizedBinding>>>()
   private readonly fixedCommands = new Map<ShortcutCommandId, ShortcutFixedCommand>()
   private readonly conflicts = new Map<string, ShortcutCommand>()
   private readonly bindings = new Map<string, ShortcutCommand>()
@@ -83,6 +84,7 @@ export class ShortcutRegistry {
    */
   register(command: ShortcutCommand): () => void {
     if (this.commands.has(command.id) || this.fixedCommands.has(command.id)) throw new Error(`Duplicate shortcut command: ${command.id}`)
+    const defaults: Partial<Record<ShortcutProfile, NormalizedBinding>> = {}
     for (const runtime of ['desktop', 'web'] as const) {
       for (const platform of ['macos', 'windows', 'linux'] as const) {
         const candidate = resolveShortcutDefault(command, runtime, platform)
@@ -92,18 +94,22 @@ export class ShortcutRegistry {
           throw new Error(`Unsupported Web shortcut: ${command.id}`)
         }
         if (bindingIssue(binding, runtime, platform) !== null) throw new Error(`Reserved shortcut default: ${command.id}`)
-        for (const existing of this.commands.values()) {
-          const other = resolveShortcutDefault(existing, runtime, platform)
-          if (other !== undefined && overlappingBindings(binding, normalizeBinding(other, platform))) {
-            throw new Error(`Conflicting shortcut defaults: ${command.id} and ${existing.id} (${runtime}:${platform})`)
+        const profile = `${runtime}:${platform}` as const
+        for (const [id, registered] of this.defaultBindings) {
+          const other = registered[profile]
+          if (other !== undefined && overlappingBindings(binding, other)) {
+            throw new Error(`Conflicting shortcut defaults: ${command.id} and ${id} (${profile})`)
           }
         }
+        defaults[profile] = binding
       }
     }
+    this.defaultBindings.set(command.id, defaults)
     this.commands.set(command.id, command)
     this.refreshLabels()
     return () => {
       if (this.commands.get(command.id) !== command) return
+      this.defaultBindings.delete(command.id)
       this.commands.delete(command.id)
       this.refreshLabels()
     }
@@ -124,9 +130,9 @@ export class ShortcutRegistry {
       if (config.status !== 'loading' && row.issue === null && row.conflicts.length > 0 && row.binding !== null) {
         this.conflicts.set(bindingKey(row.binding), command)
       }
+      const presentation = presentBinding(row.binding, this.platform)
       return { ...row, label: command.label(), aliases: command.aliases,
-        ...presentBinding(row.binding, this.platform),
-        aria: enabled ? presentBinding(row.binding, this.platform).aria : undefined }
+        ...presentation, aria: enabled ? presentation.aria : undefined }
     })
     this.state.set({ config, catalog })
     this.refreshFixedLabels()

@@ -1,6 +1,6 @@
 /** Validated preference documents and deterministic conflict resolution, without browser dependencies. */
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import { bindingKey, isWebBindingAllowed, normalizeBinding } from './binding.ts'
+import { isWebBindingAllowed, normalizeBinding } from './binding.ts'
 import type { NormalizedBinding, ShortcutBinding, ShortcutCommandId, ShortcutModifier, ShortcutPlatform, ShortcutProfile, ShortcutRuntime } from './binding.ts'
 
 /** Overrides are platform-local; absent commands inherit defaults and null explicitly unbinds. */
@@ -142,12 +142,33 @@ export function effectiveShortcuts(definitions: readonly ShortcutDefinition[], d
     const binding = candidate == null ? null : normalizeBinding(candidate, platform)
     return { id, binding, modified, issue: binding === null ? null : bindingIssue(binding, runtime, platform) }
   })
+  // Preserve declaration order for each physical key. Only chords need the ordered union of two lists.
+  const occupied = [...rows.flatMap(row => row.binding === null || row.issue !== null ? []
+    : [{ id: row.id, binding: row.binding, fixed: false, modified: row.modified }]),
+  ...fixed.map(row => ({ ...row, fixed: true, modified: true }))]
+  type Candidate = (typeof occupied)[number] & { order: number }
+  const byCode = new Map<string, Candidate[]>()
+  for (const [order, entry] of occupied.entries()) {
+    const candidate = { ...entry, order }
+    for (const code of [entry.binding.code, entry.binding.secondCode]) {
+      if (code === undefined) continue
+      const existing = byCode.get(code)
+      if (existing === undefined) byCode.set(code, [candidate])
+      else existing.push(candidate)
+    }
+  }
   return rows.map((row) => {
     const binding = row.binding
-    return { ...row, conflicts: binding === null ? [] : [...new Set([...rows.filter(other => other.id !== row.id
-      && other.binding !== null && other.issue === null && overlappingBindings(other.binding, binding)
-      && (!row.modified || other.modified)).map(other => other.id),
-    ...fixed.filter(other => overlappingBindings(other.binding, binding)).map(other => other.id)])] }
+    if (binding === null) return { ...row, conflicts: [] }
+    const first = byCode.get(binding.code) ?? []
+    const candidates = binding.secondCode === undefined ? first
+      : [...new Set([...first, ...(byCode.get(binding.secondCode) ?? [])])].sort((a, b) => a.order - b.order)
+    const conflicts = new Set<ShortcutCommandId>()
+    for (const other of candidates) {
+      if ((other.fixed || (other.id !== row.id && (!row.modified || other.modified)))
+        && overlappingBindings(binding, other.binding)) conflicts.add(other.id)
+    }
+    return { ...row, conflicts: [...conflicts] }
   })
 }
 
@@ -158,9 +179,12 @@ export function effectiveShortcuts(definitions: readonly ShortcutDefinition[], d
  * @returns whether both bindings require the same modifiers and overlap.
  */
 export function overlappingBindings(left: NormalizedBinding, right: NormalizedBinding): boolean {
-  if (left.modifiers.join('+') !== right.modifiers.join('+')) return false
-  if (left.secondCode !== undefined && right.secondCode !== undefined) return bindingKey(left) === bindingKey(right)
-  return [left.code, left.secondCode].some(code => code !== undefined && (code === right.code || code === right.secondCode))
+  const intersects = left.secondCode !== undefined && right.secondCode !== undefined
+    ? (left.code === right.code && left.secondCode === right.secondCode)
+      || (left.code === right.secondCode && left.secondCode === right.code)
+    : left.code === right.code || left.code === right.secondCode || left.secondCode === right.code
+  if (!intersects || left.modifiers.length !== right.modifiers.length) return false
+  return left.modifiers.every((modifier, index) => modifier === right.modifiers[index])
 }
 
 /**

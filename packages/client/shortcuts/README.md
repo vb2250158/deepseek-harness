@@ -42,6 +42,8 @@ Bindings activate after the first read. Failed reads preserve the last accepted 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
+The registry normalizes command defaults at registration and checks conflicts among bindings that share physical keys. A registration or removal immediately updates the catalog and dispatch table.
+
 <details>
 <summary>Implementation internals — click to expand</summary>
 

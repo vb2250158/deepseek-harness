@@ -42,6 +42,8 @@ Windows 和 macOS Desktop 接受一至两个不同的受支持非修饰键，可
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
+注册表在命令注册时规范化默认快捷键，检查包含相同物理键的绑定是否冲突。注册或移除命令后，目录和分派表立即更新。
+
 <details>
 <summary>实现细节——点击展开</summary>
 
