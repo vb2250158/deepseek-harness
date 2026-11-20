@@ -68,7 +68,7 @@ const GROUPS = [{
 }]
 
 /** Boot the plugin over fake faces + a stateful fake host (current moves on selectModel). */
-async function bench(locale: 'zh' | 'en' = 'zh') {
+async function bench(locale: 'zh' | 'en' = 'zh', connected = true) {
   const ctx = new Context()
   let defaultSelection: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   let selected = defaultSelection
@@ -160,6 +160,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   ctx.provide('productAnalytics', { enabled: true, track } as never)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
+  if (connected) ctx.emit('connection/reset')
   await ctx.plugin(function probe() {}).await()
   const mint = (key: string, blank = false) => {
     const id = sid(key)
@@ -226,6 +227,37 @@ describe('ui-model-selection dual entry', () => {
     expect(b.seat().inject).toBeTypeOf('function')
     // Copy rides the standard locale seat.
     expect(b.seat().locale).toBe('model')
+  })
+
+  it('loads one catalog when the initial Host connection opens', async () => {
+    const b = await bench('zh', false)
+    try {
+      expect(b.calls.models).toBe(0)
+      b.ctx.emit('connection/reset')
+      b.mint('first')
+      b.mint('second')
+      b.seat().inject!(sid('first'))
+      b.seat().inject!(sid('second'))
+      await b.ctx.modelDirectories.directoryFor(sid('first')).load()
+      expect(b.calls.models).toBe(1)
+      b.ctx.emit('connection/reset')
+      await b.ctx.modelDirectories.directoryFor(sid('second')).load()
+      expect(b.calls.models).toBe(2)
+    } finally {
+      await b.ctx.fiber.dispose()
+    }
+  })
+
+  it('loads the catalog for an ordinary Session when the selector missed the connection event', async () => {
+    const b = await bench('zh', false)
+    try {
+      b.mint('late')
+      const face = b.seat().inject!(sid('late'))
+      await vi.waitFor(() => expect(face.directory.getSnapshot().status).toBe('ready'))
+      expect(b.calls.models).toBe(1)
+    } finally {
+      await b.ctx.fiber.dispose()
+    }
   })
 
   it.each([['zh', '新'], ['en', 'New']] as const)('resolves seat badge text for the active %s locale', async (locale, expected) => {
