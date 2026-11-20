@@ -73,9 +73,10 @@ export class ApiSessionList {
   private discovery: {
     readonly records: readonly SessionRecord[]
     readonly expiresAt: number
-    readonly changedId?: SessionId
+    readonly changedIds: Set<SessionId>
   } | undefined
-  private discoveryGeneration = 0
+  private pendingChanges: Set<SessionId> | undefined
+  private changeSequence = 0
   private warmup: { controller: AbortController; done: Promise<void> } | undefined
 
   /**
@@ -87,16 +88,14 @@ export class ApiSessionList {
       this.cancelWarmup()
       this.catalogs.clear()
       this.discovery = undefined
-      this.discoveryGeneration++
+      this.pendingChanges = undefined
     }
     ctx.effect(() => reset, 'api-session.listCatalogs')
     const changed = (session: Session): void => {
-      this.cancelWarmup()
-      this.discoveryGeneration++
-      const cached = this.discovery
-      if (cached === undefined) return
-      this.discovery = cached.changedId === undefined || cached.changedId === session.id
-        ? { ...cached, changedId: session.id } : undefined
+      this.changeSequence++
+      this.pendingChanges?.add(session.id)
+      if (this.discovery && this.discovery.expiresAt <= performance.now()) this.discovery = undefined
+      this.discovery?.changedIds.add(session.id)
     }
     ctx.on('session/created', changed)
     ctx.on('session/disposed', changed)
@@ -138,13 +137,8 @@ export class ApiSessionList {
    */
   warmDiscovery(cacheMs: number): void {
     if (cacheMs === 0 || this.warmup) return
-    const generation = this.discoveryGeneration
     const controller = new AbortController()
-    const done = this.ctx.sessionQuery.listSessions(controller.signal).then((records) => {
-      if (generation === this.discoveryGeneration && !controller.signal.aborted) {
-        this.discovery = { records, expiresAt: performance.now() + cacheMs }
-      }
-    }).catch((error: unknown) => {
+    const done = this.readDiscovery(cacheMs, controller.signal).then(() => undefined).catch((error: unknown) => {
       if (!controller.signal.aborted) this.ctx.logger.warn('Session list prefetch failed', error)
     }).finally(() => {
       if (this.warmup?.controller === controller) this.warmup = undefined
@@ -297,30 +291,42 @@ export class ApiSessionList {
     const source = this.ctx.sessionQuery
     const cached = this.discovery
     if (!fresh && cacheMs > 0 && cached !== undefined && cached.expiresAt > performance.now()) {
-      const id = cached.changedId
-      if (id === undefined) return cached.records
-      if (this.ctx.remoteAccess.allows({ kind: 'session', id })) {
-        const change = await source.filterSessions([{ kind: 'id', values: [id] }], signal)
+      if (cached.changedIds.size === 0) return cached.records
+      const ids = [...cached.changedIds]
+      const sequence = this.changeSequence
+      const changes: SessionRecord[] = []
+      for (const id of ids) {
+        if (!this.ctx.remoteAccess.allows({ kind: 'session', id })) return this.readDiscovery(cacheMs, signal)
+        // A singleton filter reads one header; multi-id filters enumerate the query corpus.
+        const [record] = await source.filterSessions([{ kind: 'id', values: [id] }], signal)
         signal?.throwIfAborted()
-        const records = cached.records.filter(record => record.header.id !== id)
-        const [current] = change
-        if (current !== undefined) {
-          const next = records.findIndex(record => compareSessionRecords(record, current) > 0)
-          records.splice(next < 0 ? records.length : next, 0, current)
-        }
-        if (cached === this.discovery) this.discovery = { records, expiresAt: cached.expiresAt }
-        return records
+        if (record !== undefined) changes.push(record)
       }
+      const replaced = new Set(ids)
+      const records = cached.records.filter(record => !replaced.has(record.header.id)).concat(changes).sort(compareSessionRecords)
+      if (cached === this.discovery && sequence === this.changeSequence) {
+        this.discovery = { records, expiresAt: cached.expiresAt, changedIds: new Set() }
+      }
+      return records
     }
-    if (fresh) { this.discovery = undefined; this.discoveryGeneration++ }
-    const generation = this.discoveryGeneration
-    const records = await source.listSessions(signal)
-    signal?.throwIfAborted()
-    if (generation === this.discoveryGeneration) {
-      this.discovery = cacheMs === 0 ? undefined
-        : { records, expiresAt: performance.now() + cacheMs }
+    if (fresh) this.discovery = undefined
+    return this.readDiscovery(cacheMs, signal)
+  }
+
+  private async readDiscovery(cacheMs: number, signal?: AbortSignal): Promise<readonly SessionRecord[]> {
+    const changedIds = new Set<SessionId>()
+    this.pendingChanges = changedIds
+    try {
+      const records = await this.ctx.sessionQuery.listSessions(signal)
+      signal?.throwIfAborted()
+      if (this.pendingChanges === changedIds) {
+        this.discovery = cacheMs === 0 ? undefined
+          : { records, expiresAt: performance.now() + cacheMs, changedIds }
+      }
+      return records
+    } finally {
+      if (this.pendingChanges === changedIds) this.pendingChanges = undefined
     }
-    return records
   }
 
   /**
@@ -335,7 +341,7 @@ export class ApiSessionList {
     if (requested.size === 0) return []
     const cached = this.discovery
     const records = cached !== undefined && cached.expiresAt > performance.now()
-      && (cached.changedId === undefined || !requested.has(cached.changedId))
+      && ![...requested].some(id => cached.changedIds.has(id))
       && sessionIds.every(id => cached.records.some(record => record.header.id === id))
       ? cached.records : await this.ctx.sessionQuery.filterSessions([{ kind: 'id', values: [...requested] }], signal)
     const items: SessionSummary[] = []

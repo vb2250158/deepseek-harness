@@ -201,7 +201,7 @@ describe('Session-list pages', () => {
     expect(filter.mock.calls).toEqual(Array.from({ length: 2 }, () => [[{ kind: 'id', values: ['a'] }], undefined]))
   })
 
-  it('preserves the original discovery expiry and uses a full scan for multiple changed identities', async () => {
+  it('preserves the original discovery expiry and repairs multiple changed identities together', async () => {
     const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
     await h.list.page({ paged: true }, policy)
@@ -212,10 +212,12 @@ describe('Session-list pages', () => {
     h.clock.now = 101
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(2)
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
     h.attach('b')
     h.detach.get('a')!()
     await h.list.page({ paged: true }, policy)
-    expect(h.listSessions).toHaveBeenCalledTimes(3)
+    expect(exact.mock.calls).toEqual(['b', 'a'].map(id => [[{ kind: 'id', values: [id] }], undefined]))
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
   })
 
   it('retains a persisted row after disposal and removes an ephemeral row from paged and named reads', async () => {
@@ -281,8 +283,9 @@ describe('Session-list pages', () => {
     gate.resolve([])
     await read
     await h.list.page({ paged: true }, policy)
-    expect(exact).toHaveBeenCalledTimes(2)
-    expect(h.listSessions).toHaveBeenCalledTimes(2)
+    expect(exact).toHaveBeenCalledTimes(4)
+    expect(exact.mock.calls.slice(-2)).toEqual(['a', 'b'].map(id => [[{ kind: 'id', values: [id] }], undefined]))
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
   })
 
   it('joins a startup metadata read while letting one browser cancel independently', async () => {
@@ -307,13 +310,33 @@ describe('Session-list pages', () => {
     expect(h.listSessions).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['fresh', 'created', 'replacement'] as const)('drops an in-flight warmup on %s', async (event) => {
+  it('keeps the startup scan through multiple attachments and repairs only the distinct identities', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const records = await h.listSessions()
+    h.listSessions.mockClear()
+    const gate = Promise.withResolvers<SessionRecord[]>()
+    h.listSessions.mockImplementationOnce(() => gate.promise)
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 2000, listInitialPerWorkspace: 10 }
+    h.list.warmDiscovery(2000)
+    const first = h.list.page({ paged: true }, policy)
+    h.attach('a')
+    h.attach('b')
+    h.detach.get('a')!()
+    expect(h.listSessions.mock.calls[0]?.[0]?.aborted).toBe(false)
+    gate.resolve(records)
+    expect((await first).items.map(row => row.sessionId)).toEqual(['a', 'b'])
+    await h.list.page({ paged: true }, policy)
+    expect(exact.mock.calls).toEqual(['a', 'b'].map(id => [[{ kind: 'id', values: [id] }], undefined]))
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['fresh', 'replacement'] as const)('drops an in-flight warmup on %s', async (event) => {
     const h = await harness([{ id: 'a', phase: 'cold' }], 0)
     const gate = Promise.withResolvers<SessionRecord[]>()
     h.listSessions.mockImplementationOnce(() => gate.promise)
     h.list.warmDiscovery(2000)
     const oldSignal = h.listSessions.mock.calls[0]?.[0]
-    if (event === 'created') h.attach('a')
     if (event === 'replacement') await h.replaceSource()
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 2000 }
     expect((await h.list.page({ paged: true, fresh: event === 'fresh' }, policy)).items.map(row => row.sessionId)).toEqual(['a'])
@@ -340,7 +363,7 @@ describe('Session-list pages', () => {
     expect(h.listSessions).toHaveBeenCalledTimes(reads)
   })
 
-  it('does not retain discovery completed after a Session catalog invalidation', async () => {
+  it('retains an in-flight header scan and repairs intervening Session changes', async () => {
     const h = await harness([{ id: 'a', phase: 'cold' }], 0)
     const records = await h.listSessions()
     h.listSessions.mockClear()
@@ -348,11 +371,13 @@ describe('Session-list pages', () => {
     h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
     const read = h.list.page({ paged: true }, policy)
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
     h.attach('a')
     gate.resolve(undefined)
     await read
     await h.list.page({ paged: true }, policy)
-    expect(h.listSessions).toHaveBeenCalledTimes(2)
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+    expect(exact).toHaveBeenCalledWith([{ kind: 'id', values: ['a'] }], undefined)
   })
 
   it('withdraws retained discovery when an explicit fresh read fails', async () => {
