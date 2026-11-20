@@ -31,7 +31,7 @@ kind: "package-reference"
 
 | 操作 | 你得到什么 |
 |---|---|
-| `listSessions()` | 每个逻辑会话，最新的在前，带 `live` 与 `persisted` 可用性标志及可选 `formatStatus` |
+| `listSessions()` | 每个逻辑会话按 `compareSessionRecords` 排序（创建时间降序，时间相同则按身份升序），带 `live` 与 `persisted` 可用性标志及可选 `formatStatus` |
 | `getListMetadata(session)` | 实时或已准备的 Session 是否尚无轮次或显式对话活动、最近真人提示时间，以及可选的命令对话活动时间 |
 | `readSession(id)` | 经过回放校验的完整原始事件日志，且不会让该会话变为实时 |
 | `filterSessions(filters)` | 匹配 AND 连接的元数据与可用性谓词的会话 |

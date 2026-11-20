@@ -31,7 +31,7 @@ Use `ctx.sessionQuery` from application code when you need to read or search ses
 
 | Operation | What you get |
 |---|---|
-| `listSessions()` | Every logical session, newest first, with `live` and `persisted` availability flags and optional `formatStatus` |
+| `listSessions()` | Every logical session in `compareSessionRecords` order (newest creation first, then ascending identity), with `live` and `persisted` availability flags and optional `formatStatus` |
 | `getListMetadata(session)` | Whether a live or prepared Session has no turn or explicit conversation activity, its latest human-authored prompt time, and optional command-activity time |
 | `readSession(id)` | The complete replay-validated raw event log, without making the session live |
 | `filterSessions(filters)` | Sessions matching ANDed metadata and availability predicates |

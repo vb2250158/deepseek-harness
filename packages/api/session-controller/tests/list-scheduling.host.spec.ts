@@ -148,6 +148,22 @@ describe('Session-list pages', () => {
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(2)
   })
+  it('discards discovery and continuations on persistence binding and withdrawal', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    const before = await h.list.page({ paged: true }, policy)
+    class Persistence extends Service {
+      constructor(ctx: Context) { super(ctx, 'sessionPersistence') }
+    }
+    const binding = await h.ctx.plugin(Persistence)
+    await expect(h.list.page({ cursor: before.nextCursor! }, policy)).rejects.toThrow('cursor expired or invalid')
+    const during = await h.list.page({ paged: true }, policy)
+    await binding.dispose()
+    await expect(h.list.page({ cursor: during.nextCursor! }, policy)).rejects.toThrow('cursor expired or invalid')
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+  })
+
   it('uses the current metadata reader after a ranking yield', async () => {
     const h = await harness([{ id: 'a', phase: 'cold' }, { id: 'b', phase: 'cold' }], 20)
     let replaced = false
@@ -176,12 +192,97 @@ describe('Session-list pages', () => {
     expect(h.listSessions).toHaveBeenCalledTimes(2)
     await h.list.page({ paged: true, fresh: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(3)
+    const filter = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
     h.attach('a')
     await h.list.page({ paged: true }, policy)
-    expect(h.listSessions).toHaveBeenCalledTimes(4)
     h.detach.get('a')!()
     await h.list.page({ paged: true }, policy)
-    expect(h.listSessions).toHaveBeenCalledTimes(5)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+    expect(filter.mock.calls).toEqual(Array.from({ length: 2 }, () => [[{ kind: 'id', values: ['a'] }], undefined]))
+  })
+
+  it('preserves the original discovery expiry and uses a full scan for multiple changed identities', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    await h.list.page({ paged: true }, policy)
+    h.clock.now = 90
+    h.attach('a')
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+    h.clock.now = 101
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+    h.attach('b')
+    h.detach.get('a')!()
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(3)
+  })
+
+  it('retains a persisted row after disposal and removes an ephemeral row from paged and named reads', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'live' as const })), 0)
+    const records = await h.listSessions()
+    h.listSessions.mockClear()
+    h.listSessions.mockImplementation(async () => records.slice())
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listInitialPerWorkspace: 10 }
+    await h.list.page({ paged: true }, policy)
+    h.detach.get('a')!()
+    expect((await h.list.page({ paged: true }, policy)).items.map(row => row.sessionId)).toEqual(['a', 'b'])
+    h.detach.get('b')!()
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
+    expect((await h.list.selected([brandString<SessionId>('a')])).map(row => row.sessionId)).toEqual(['a'])
+    expect(exact).not.toHaveBeenCalled()
+    records.splice(records.findIndex(row => row.header.id === 'b'), 1)
+    expect(await h.list.selected([brandString<SessionId>('b')])).toEqual([])
+    expect((await h.list.page({ paged: true }, policy)).items.map(row => row.sessionId)).toEqual(['a'])
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses discovery when a caller cannot read the changed identity', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    await h.list.page({ paged: true }, policy)
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
+    vi.spyOn(h.ctx.remoteAccess, 'allows').mockImplementation(resource => resource.kind !== 'session' || resource.id !== 'a')
+    h.attach('a')
+    expect((await h.list.page({ paged: true }, policy)).items.map(row => row.sessionId)).toEqual(['b'])
+    expect(exact).not.toHaveBeenCalled()
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps fresh discovery when an older targeted repair completes after it', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listInitialPerWorkspace: 10 }
+    await h.list.page({ paged: true }, policy)
+    h.attach('a')
+    const gate = Promise.withResolvers<SessionRecord[]>()
+    vi.spyOn(h.ctx.sessionQuery, 'filterSessions').mockImplementationOnce(() => gate.promise)
+    const older = h.list.page({ paged: true }, policy)
+    const fresh = await h.list.page({ paged: true, fresh: true }, policy)
+    gate.resolve([])
+    await older
+    expect((await h.list.page({ paged: true }, policy)).items).toEqual(fresh.items)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards a targeted repair crossed by another identity and retries a cancelled repair', async () => {
+    const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    await h.list.page({ paged: true }, policy)
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
+    const controller = new AbortController()
+    const reason = new Error('cancel exact metadata repair')
+    exact.mockImplementationOnce(async () => { controller.abort(reason); return [] })
+    h.attach('a')
+    await expect(h.list.page({ paged: true }, policy, controller.signal)).rejects.toBe(reason)
+    const gate = Promise.withResolvers<SessionRecord[]>()
+    exact.mockImplementationOnce(() => gate.promise)
+    const read = h.list.page({ paged: true }, policy)
+    h.attach('b')
+    gate.resolve([])
+    await read
+    await h.list.page({ paged: true }, policy)
+    expect(exact).toHaveBeenCalledTimes(2)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
   })
 
   it('retains discovery when a live summary changes during simultaneous first-page requests', async () => {

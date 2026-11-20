@@ -9,7 +9,7 @@ import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
 import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
-import { SessionQueryError, type SessionRecord, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
+import { compareSessionRecords, SessionQueryError, type SessionRecord, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
 import {
@@ -73,6 +73,7 @@ export class ApiSessionList {
   private discovery: {
     readonly records: readonly SessionRecord[]
     readonly expiresAt: number
+    readonly changedId?: SessionId
   } | undefined
   private discoveryGeneration = 0
 
@@ -81,15 +82,27 @@ export class ApiSessionList {
    * @param workSliceMs - Resolved positive integral list-work budget in milliseconds.
    */
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
-    ctx.effect(() => () => { this.catalogs.clear(); this.discovery = undefined }, 'api-session.listCatalogs')
-    const invalidate = (): void => { this.discovery = undefined; this.discoveryGeneration++ }
-    ctx.on('session/created', invalidate)
-    ctx.on('session/disposed', invalidate)
-    ctx.inject(['sessionQuery'], (sourceCtx) => {
-      const reset = (): void => { this.catalogs.clear(); invalidate() }
+    const reset = (): void => {
+      this.catalogs.clear()
+      this.discovery = undefined
+      this.discoveryGeneration++
+    }
+    ctx.effect(() => reset, 'api-session.listCatalogs')
+    const changed = (session: Session): void => {
+      this.discoveryGeneration++
+      const cached = this.discovery
+      if (cached === undefined) return
+      this.discovery = cached.changedId === undefined || cached.changedId === session.id
+        ? { ...cached, changedId: session.id } : undefined
+    }
+    ctx.on('session/created', changed)
+    ctx.on('session/disposed', changed)
+    const bind = (sourceCtx: Context): void => {
       reset()
       sourceCtx.effect(() => reset, 'api-session.listDiscoverySource')
-    })
+    }
+    ctx.inject(['sessionQuery'], bind)
+    ctx.inject(['sessionPersistence'], bind)
   }
 
   /**
@@ -243,7 +256,22 @@ export class ApiSessionList {
     signal?.throwIfAborted()
     const source = this.ctx.sessionQuery
     const cached = this.discovery
-    if (!fresh && cacheMs > 0 && cached !== undefined && cached.expiresAt > performance.now()) return cached.records
+    if (!fresh && cacheMs > 0 && cached !== undefined && cached.expiresAt > performance.now()) {
+      const id = cached.changedId
+      if (id === undefined) return cached.records
+      if (this.ctx.remoteAccess.allows({ kind: 'session', id })) {
+        const change = await source.filterSessions([{ kind: 'id', values: [id] }], signal)
+        signal?.throwIfAborted()
+        const records = cached.records.filter(record => record.header.id !== id)
+        const [current] = change
+        if (current !== undefined) {
+          const next = records.findIndex(record => compareSessionRecords(record, current) > 0)
+          records.splice(next < 0 ? records.length : next, 0, current)
+        }
+        if (cached === this.discovery) this.discovery = { records, expiresAt: cached.expiresAt }
+        return records
+      }
+    }
     if (fresh) { this.discovery = undefined; this.discoveryGeneration++ }
     const generation = this.discoveryGeneration
     const records = await source.listSessions(signal)
@@ -267,6 +295,7 @@ export class ApiSessionList {
     if (requested.size === 0) return []
     const cached = this.discovery
     const records = cached !== undefined && cached.expiresAt > performance.now()
+      && (cached.changedId === undefined || !requested.has(cached.changedId))
       && sessionIds.every(id => cached.records.some(record => record.header.id === id))
       ? cached.records : await this.ctx.sessionQuery.filterSessions([{ kind: 'id', values: [...requested] }], signal)
     const items: SessionSummary[] = []

@@ -84,7 +84,7 @@ export class SessionCorpus {
         formatStatus: 'current',
       })
     }
-    return [...records.values()].sort(compareSessions)
+    return [...records.values()].sort(compareSessionRecords)
   }
 
   /**
@@ -355,7 +355,13 @@ function snapshotLive(session: Session): LogicalSession {
   }
 }
 
-function compareSessions(a: SessionRecord, b: SessionRecord): number {
+/**
+ * Compare two discovery records in the order returned by the Session query service.
+ * @param a - first record.
+ * @param b - second record.
+ * @returns newest creation first, then ascending Session identity for a tie.
+ */
+export function compareSessionRecords(a: SessionRecord, b: SessionRecord): number {
   return b.header.createdAt - a.header.createdAt || a.header.id.localeCompare(b.header.id)
 }
 
