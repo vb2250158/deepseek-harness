@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { ModuleLoader } from '@deepseek-ai/cordis-plugin-loader'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PackageManifests } from '../src/package-manifest.ts'
+import { directorySpelling } from '../src/directory-spelling.ts'
 
 const require = createRequire(import.meta.url)
 const addon = require('node-addon-require-builtin') as { requireBuiltin(id: string): unknown }
@@ -52,6 +53,26 @@ function fixture() {
   const invalidate = (path: string) => Promise.resolve().then(manifests.invalidate.bind(manifests, path))
   return { root, dir, manifest, importer, importerURL: pathToFileURL(importer).href, manifests, invalidate }
 }
+
+it('a fresh mapped-directory scan follows a retargeted package link with Node’s JavaScript spelling', () => {
+  const f = fixture()
+  const link = join(dirname(f.importer), 'node_modules', 'pkg')
+  const second = join(f.root, 'new-location')
+  for (const dir of [f.dir, second]) {
+    mkdirSync(join(dir, 'a'), { recursive: true })
+    mkdirSync(join(dir, 'b'))
+  }
+  for (const target of [f.dir, second]) {
+    if (target === second) {
+      unlinkSync(link)
+      symlinkSync(second, link, process.platform === 'win32' ? 'junction' : 'dir')
+    }
+    const scan = new Map<string, string>()
+    for (const name of ['a', 'b']) {
+      expect(directorySpelling(join(link, name), scan)).toBe(realpathSync(join(target, name)))
+    }
+  }
+})
 
 function resolveEsm(specifier: string, parentURL: string): string {
   const loader = ModuleLoader.fromInternal()!

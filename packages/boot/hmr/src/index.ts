@@ -14,6 +14,7 @@ import {
 import type {} from '@deepseek-ai/dsh-cmdline'
 import { handleError } from './error.ts'
 import { PackageManifests } from './package-manifest.ts'
+import { directorySpelling } from './directory-spelling.ts'
 import { ModuleFiles } from './module-files.ts'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -1092,18 +1093,24 @@ function mappedDirectories(resolution: RuntimeResolution | undefined): Set<strin
   if (resolution === undefined) return directories
   const dirs = [...resolution.entries.filter(entry => entry.scope === 'profile').map(entry => entry.packageDir),
     ...resolution.linkedRoots.map(root => root.realPath)]
-  for (const dir of dirs) for (const spelling of existsSync(dir) ? realSpellings(dir) : [dir]) directories.add(spelling + sep)
+  const known = new Map<string, string>()
+  for (const dir of new Set(dirs)) {
+    for (const spelling of existsSync(dir) ? realSpellings(dir, known) : [dir]) directories.add(spelling + sep)
+  }
   return directories
 }
 
 /**
  * The JavaScript and native real paths of an existing path. A packed worker's file system has no native realpath.
  * @param path Existing path.
+ * @param known JavaScript directory spellings from the current synchronous scan.
  * @returns The distinct spellings.
  */
-function realSpellings(path: string): string[] {
+function realSpellings(path: string, known?: Map<string, string>): string[] {
   const native: unknown = Reflect.get(realpathSync, 'native')
-  return [realpathSync(path), ...typeof native === 'function' ? [String(Reflect.apply(native, realpathSync, [path]))] : []]
+  if (typeof native !== 'function') return [realpathSync(path)]
+  const js = known === undefined ? realpathSync(path) : directorySpelling(resolve(path), known)
+  return [js, String(Reflect.apply(native, realpathSync, [path]))]
 }
 
 /**

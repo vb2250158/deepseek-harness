@@ -933,6 +933,15 @@ it('retries a failed replacement of a plugin loaded after the last observation',
   expect(f.trace).toEqual(['start:1:1:-', 'stop:1', 'start:3:1:-'])
 })
 
+it('the first unchanged patch notification reloads a replaced transitive dependency', async () => {
+  const f = await fixture()
+  const patches = readProfilePatches('test', f.profile)
+  shared(f.dir, 2)
+  expect(readProfilePatches('test', f.profile)).toEqual(patches)
+  await f.editPatch()
+  expect(f.trace).toContain('start:1:2:-')
+})
+
 it('logs the changed modules its own profile watch leaves', async () => {
   const argv = process.argv
   onTestFinished(() => { process.argv = argv })
