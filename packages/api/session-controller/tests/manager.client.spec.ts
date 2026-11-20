@@ -884,7 +884,7 @@ describe('subagent catalogs', () => {
           childSessionId: S2,
           mode: 'continuable',
         },
-        activate: true, assistantStream: true,
+        activate: true, assistantStream: true, compactProjections: true,
         maxMessages: 500,
         turnWindow: { minMessages: 50, minTurns: 2 },
       },
@@ -1576,7 +1576,7 @@ describe('connected generation', () => {
     })
     await vi.waitFor(() => {
       expect(remote.session.projections.mock.calls.map(([request]) => request)).toEqual([
-        { sessionId: S1 },
+        { sessionId: S1, compactProjections: true },
       ])
     })
     expect(manager.get(S2).getSnapshot().subagent).toEqual({

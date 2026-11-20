@@ -413,6 +413,7 @@ export async function createSessionTestRemote(
     ),
     follow: (request, signal = new AbortController().signal) => direct.follow(request, signal),
     observeProjections: (request, signal = new AbortController().signal) => direct.observeProjections(request, signal),
+    compactControl: (signal = new AbortController().signal) => direct.control(signal),
     control: (signal = new AbortController().signal) => direct.control(signal),
   }
 }

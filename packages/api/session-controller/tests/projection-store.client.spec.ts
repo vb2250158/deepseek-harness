@@ -8,7 +8,7 @@
  * control-stream projection routing pre- and post-instantiation, the list
  * rows' title projection).
  */
-import { describe, expect } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import { ok, type RemoteMock } from '@deepseek-ai/dsh-remote-mock'
@@ -44,6 +44,77 @@ function makeManager(mock: RemoteMock, remote: ClientTestFixtures['remote']): Se
 }
 
 describe('Session projection value semantics', () => {
+  it('loads an observed deferred key once and coalesces newer cuts during its read', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    const store = manager.get(SID).projections
+    const cut = (seq: number) => manager.handleControlFrame({
+      type: 'projection', sessionId: SID, seq, changes: [], deferredKeys: ['test/marks'],
+    })
+    manager.handleControlFrame({ type: 'baseline', value: { projections: {
+      [SID]: { asOfSeq: 7, values: { title: 'Title' }, deferredKeys: ['test/marks'] },
+    } } })
+    const face = store.faceOf('test/marks')
+    const first = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.projections>>>()
+    remote.session.projections.mockReturnValueOnce(first.promise)
+    const stopAny = store.subscribeAny(() => {})
+    await Promise.resolve()
+    expect(remote.session.projections).not.toHaveBeenCalled()
+    const a = face.subscribe(() => {})
+    const b = face.subscribe(() => {})
+    await Promise.resolve()
+    expect(remote.session.projections.mock.calls).toEqual([[{ sessionId: SID, keys: ['test/marks'] }, expect.any(AbortSignal)]])
+    cut(8)
+    cut(10)
+    remote.session.projections.mockResolvedValueOnce(ok({ kind: 'sequenced', asOfSeq: 10, values: { 'test/marks': { marks: ['latest'] } } }))
+    first.resolve(ok({ kind: 'sequenced', asOfSeq: 8, values: { 'test/marks': { marks: ['old'] } } }))
+    await vi.waitFor(() => expect(face.getSnapshot()).toEqual({ marks: ['latest'] }))
+    cut(10)
+    expect(store.get('title')).toBe('Title')
+    expect(remote.session.projections).toHaveBeenCalledTimes(2)
+    const update = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.projections>>>()
+    remote.session.projections.mockReturnValueOnce(update.promise)
+    cut(11)
+    await Promise.resolve()
+    expect(face.getSnapshot()).toEqual({ marks: ['latest'] })
+    store.seed({ asOfSeq: SessionSeq(11), values: {}, deferredKeys: ['test/marks'] })
+    expect(store.get('test/marks')).toEqual({ marks: ['latest'] })
+    update.resolve(ok({ kind: 'sequenced', asOfSeq: 11, values: { 'test/marks': { marks: ['updated'] } } }))
+    await vi.waitFor(() => expect(face.getSnapshot()).toEqual({ marks: ['updated'] }))
+    a()
+    b()
+    stopAny()
+    await manager.dispose()
+  })
+
+  it('cancels abandoned detail reads and rejects a reply from the previous generation', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote)
+    const store = manager.get(SID).projections
+    const opening = () => store.seed({ asOfSeq: SessionSeq(4), values: {}, deferredKeys: ['test/marks'] })
+    const face = store.faceOf('test/marks')
+    const abandoned = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.projections>>>()
+    remote.session.projections.mockReturnValueOnce(abandoned.promise)
+    const stop = face.subscribe(() => {})
+    opening()
+    await Promise.resolve()
+    stop()
+    expect(remote.session.projections.mock.calls[0]?.[1]?.aborted).toBe(true)
+    const previous = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.projections>>>()
+    remote.session.projections.mockReturnValueOnce(previous.promise)
+    const again = face.subscribe(() => {})
+    await Promise.resolve()
+    store.clear()
+    expect(remote.session.projections.mock.calls[1]?.[1]?.aborted).toBe(true)
+    const old = ok({ kind: 'sequenced' as const, asOfSeq: 600, values: { 'test/marks': { marks: ['old'] } } })
+    previous.resolve(old)
+    abandoned.resolve(old)
+    remote.session.projections.mockResolvedValueOnce(ok({ kind: 'sequenced', asOfSeq: 4, values: { 'test/marks': { marks: ['current'] } } }))
+    opening()
+    await vi.waitFor(() => expect(face.getSnapshot()).toEqual({ marks: ['current'] }))
+    expect(remote.session.projections).toHaveBeenCalledTimes(3)
+    again()
+    await manager.dispose()
+  })
+
   it('exposes a watermark only for current Host-sequenced values', () => {
     const store = new ProjectionValueStore()
     expect(store.seqOf('inbox')).toBeUndefined()

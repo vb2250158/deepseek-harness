@@ -177,7 +177,7 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
   mock.stream('$events', (_args, stream) => {
     for (const frame of fixture.remoteEvents) stream.push(structuredClone(frame))
   })
-  mock.stream('session/control', (_args, stream) => {
+  mock.stream('session/compactControl', (_args, stream) => {
     stream.push(structuredClone(fixture.control))
   })
   mock.stream('job/list', (_args, stream) => {

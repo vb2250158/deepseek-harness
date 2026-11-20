@@ -135,6 +135,7 @@ export function apply(ctx: Context): void {
   })
 
   const control = createSessionControlStream(remotes, {
+    compactProjections: true,
     accept: (frame) => { sessions.handleControlFrame(frame) },
     failed: (error) => { console.error('[session-controller] control stream failed:', error) },
   })

@@ -13,8 +13,9 @@
  * bare observable faces feed `useProjection` (ui-renderer binds them).
  */
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
-import type { SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
+import { SessionSeq, type SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { SessionProjectionsValue } from '../../types.ts'
 import { Notifier } from './notifier.ts'
 
 // The single projection type table, typed end to end (host unit, wire block,
@@ -54,6 +55,8 @@ export interface ProjectionsBaseline {
   asOfSeq: SessionSeqCursor
   /** Whole current values by key; a registered key absent here means the capability is absent. */
   values: Readonly<Record<string, unknown>>
+  /** Keys available through an exact, session-scoped detail read. */
+  deferredKeys?: readonly string[]
 }
 
 /**
@@ -75,6 +78,11 @@ interface Channel {
   notifier: Notifier
 }
 
+interface DeferredRead {
+  seq: SessionSeqCursor | null
+  inflight?: AbortController
+}
+
 /**
  * One session's projection values. Framework semantics, uniform across every
  * key. Sequenced writes (a baseline seeds rows at its cut, a push frame
@@ -92,9 +100,19 @@ interface Channel {
 export class ProjectionValueStore {
   private readonly rows = new Map<string, Row>()
   private readonly channels = new Map<string, Channel>()
+  private readonly deferred = new Map<string, DeferredRead>()
+
+  /** @param readDetail - reads one observed key from this Session without activating it. */
+  constructor(private readonly readDetail?: (key: string, signal: AbortSignal) => Promise<SessionProjectionsValue>) {}
+
   private valuesCache: Readonly<Partial<SessionProjectionMap>> | undefined
   /** Coarse any-key channel (no snapshot cache to rebuild: reads hit rows directly). */
   private readonly anyNotifier = new Notifier(() => {})
+
+  /** Whether this store can resolve compact Host projection hints. */
+  get canLoadDetails(): boolean {
+    return this.readDetail !== undefined
+  }
 
   /**
    * Key-addressed bare observable face (the useProjection resolution path).
@@ -157,6 +175,12 @@ export class ProjectionValueStore {
    * @param seq - the unit's watermark at emission.
    */
   apply(key: string, value: unknown, seq: SessionSeqCursor): void {
+    const pending = this.deferred.get(key)
+    if (pending !== undefined) {
+      if (pending.seq !== null && seq < pending.seq) return
+      pending.inflight?.abort()
+      this.deferred.delete(key)
+    }
     const row = this.rows.get(key)
     // higher seq wins among sequenced rows; replays and stale frames drop. A
     // cached row has no comparable seq and always yields.
@@ -175,7 +199,7 @@ export class ProjectionValueStore {
    */
   applyCached(values: Readonly<Record<string, unknown>>): void {
     for (const key of Object.keys(values)) {
-      if (this.rows.get(key)?.kind === 'sequenced') continue
+      if (this.deferred.has(key) || this.rows.get(key)?.kind === 'sequenced') continue
       this.rows.set(key, { kind: 'cached', value: values[key] })
       this.changed(key)
     }
@@ -192,8 +216,16 @@ export class ProjectionValueStore {
    * @param baseline - the response's projections block.
    */
   seed(baseline: ProjectionsBaseline): void {
+    const deferred = baseline.deferredKeys ?? []
+    this.defer(deferred, baseline.asOfSeq)
+    for (const [key, pending] of this.deferred) {
+      if (deferred.includes(key) || Object.hasOwn(baseline.values, key)) continue
+      if (pending.seq !== null && pending.seq > baseline.asOfSeq) continue
+      pending.inflight?.abort()
+      this.deferred.delete(key)
+    }
     for (const [key, row] of this.rows) {
-      if (row.kind !== 'cached') continue
+      if (row.kind !== 'cached' || deferred.includes(key)) continue
       this.rows.delete(key)
       this.changed(key)
     }
@@ -202,7 +234,7 @@ export class ProjectionValueStore {
     const values = baseline.values as Record<string, unknown>
     for (const key of Object.keys(values)) this.apply(key, values[key], baseline.asOfSeq)
     for (const [key, row] of this.rows) {
-      if (Object.hasOwn(values, key)) continue
+      if (Object.hasOwn(values, key) || deferred.includes(key)) continue
       // Every cached row was deleted above; the kind test only narrows the
       // type so `row.seq` is readable.
       if (row.kind === 'sequenced' && row.seq > baseline.asOfSeq) continue
@@ -211,8 +243,61 @@ export class ProjectionValueStore {
     }
   }
 
+  /**
+   * Invalidate detail at the Host's cut. Only keyed observers start an RPC.
+   * @param keys - keys omitted from the compact response.
+   * @param seq - the connected Session's watermark, or null for an unsequenced cache.
+   */
+  defer(keys: readonly string[], seq: SessionSeqCursor | null): void {
+    for (const key of keys) {
+      const row = this.rows.get(key)
+      if (row !== undefined && (seq === null || (row.kind === 'sequenced' && row.seq >= seq))) continue
+      const pending = this.deferred.get(key)
+      if (pending !== undefined) {
+        if (seq === null || (pending.seq !== null && pending.seq >= seq)) continue
+        pending.seq = seq
+      } else {
+        this.deferred.set(key, { seq })
+      }
+      if (this.channels.get(key)?.notifier.observed) this.scheduleDetail(key)
+    }
+  }
+
+  private scheduleDetail(key: string): void {
+    queueMicrotask(() => {
+      const pending = this.deferred.get(key)
+      if (!pending || pending.inflight || !this.readDetail || !this.channels.get(key)?.notifier.observed) return
+      const controller = new AbortController()
+      const cut = pending.seq
+      pending.inflight = controller
+      void this.readDetail(key, controller.signal).then((value) => {
+        if (controller.signal.aborted) return
+        if (value?.kind === 'sequenced') {
+          const values: Readonly<Record<string, unknown>> = value.values
+          this.apply(key, values[key], value.asOfSeq === -1 ? -1 : SessionSeq(value.asOfSeq))
+        } else if (pending.seq === null && value?.kind === 'migration-required') {
+          this.deferred.delete(key)
+          this.applyCached(value.values)
+        } else if (value === null && this.rows.delete(key)) {
+          this.changed(key)
+        }
+      }).catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        if (this.rows.delete(key)) this.changed(key)
+        console.error('[session-controller] projection detail failed:', key, error)
+      }).finally(() => {
+        if (pending.inflight !== controller) return
+        delete pending.inflight
+        // A newer invalidation during this read requires at most one follow-up.
+        if (pending.seq !== cut && this.deferred.has(key)) this.scheduleDetail(key)
+      })
+    })
+  }
+
   /** Discard one Host generation's values and watermarks while preserving subscribed faces. */
   clear(): void {
+    for (const pending of this.deferred.values()) pending.inflight?.abort()
+    this.deferred.clear()
     for (const key of this.rows.keys()) {
       this.rows.delete(key)
       this.changed(key)
@@ -234,7 +319,18 @@ export class ProjectionValueStore {
         notifier,
         face: {
           getSnapshot: () => this.rows.get(key)?.value,
-          subscribe: listener => notifier.subscribe(listener),
+          subscribe: (listener) => {
+            const first = !notifier.observed
+            const stop = notifier.subscribe(listener)
+            if (first && this.deferred.has(key)) this.scheduleDetail(key)
+            return () => {
+              stop()
+              if (notifier.observed) return
+              const pending = this.deferred.get(key)
+              pending?.inflight?.abort()
+              if (pending !== undefined) delete pending.inflight
+            }
+          },
         },
       }
       this.channels.set(key, channel)
