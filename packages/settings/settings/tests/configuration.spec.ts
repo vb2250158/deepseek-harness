@@ -36,6 +36,19 @@ it('isolates instances, hides ordinary fields, rejects invalid edits, and redact
   expect(ctx.settings.describe({ redactSecrets: true }).find(row => row.ns === 'first')!.value).toEqual({ count: 2, list: [] })
 })
 
+it('checks stale writes and publishes the new revision without materializing settings descriptors', async () => {
+  const { ctx } = await fixture({ hmr: false })
+  const [initial] = ctx.settings.describe({ namespaces: ['first'] })
+  const events: number[] = []
+  ctx.on('settings/document-updated', (ns, revision) => { if (ns === 'first') events.push(revision) })
+  const configuration = vi.spyOn(ctx.configEditor, 'configuration')
+  await ctx.settings.update('first', { count: 5 }, initial!.revision)
+  expect(events).toContain(initial!.revision + 1)
+  await expect(ctx.settings.update('first', { count: 6 }, initial!.revision)).rejects.toThrow()
+  expect(configuration).not.toHaveBeenCalled()
+  expect(ctx.settings.describe({ namespaces: ['first'] })[0]?.value).toMatchObject({ count: 5 })
+})
+
 it('refuses an edit shadowed by a higher home layer', async () => {
   const { ctx, home, profile } = await fixture()
   writeFileSync(join(home, 'cordis.patch.yml'), JSON.stringify([{ id: 'default-model', config: { provider: 'test', model: 'home' } }]))

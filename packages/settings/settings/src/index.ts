@@ -284,12 +284,15 @@ export class SettingsForms extends Service {
     queueMicrotask(() => {
       this.scheduled = false
       if (this.closed || this.ownerContext.fiber.state !== FiberState.ACTIVE) return
-      try {
-        const active = new Set<string>()
-        for (const entry of this.ownerContext.configEditor.entries()) this.trackForm(entry, active)
-        this.retireMissing(active)
-      } catch (error) { this.ownerContext.logger.error(error) }
+      try { this.refreshRevisions() }
+      catch (error) { this.ownerContext.logger.error(error) }
     })
+  }
+
+  private refreshRevisions(): void {
+    const active = new Set<string>()
+    for (const entry of this.ownerContext.configEditor.entries()) this.trackForm(entry, active)
+    this.retireMissing(active)
   }
 
   /** Whether the active profile accepts form edits. */
@@ -408,10 +411,11 @@ export class SettingsForms extends Service {
       if (path.length && !isVolatilePath(schema, path)) throw new Error(`Config field "${path.join('.')}" is not volatile`)
     }
     await this.ownerContext.configEditor.edit(entry, (raw, inherited) => {
-      const descriptor = this.describe().find(row => row.ns === ns)
-      if (descriptor === undefined) throw new Error(`Plugin entry "${ns}" is no longer configurable`)
-      if (expected !== undefined && descriptor.revision !== expected) {
-        throw new SettingsConflictError(ns as SettingsNamespace, expected, descriptor.revision)
+      this.refreshRevisions()
+      const currentRevision = this.revisions.get(entry.id)
+      if (currentRevision?.raw === undefined) throw new Error(`Plugin entry "${ns}" is no longer configurable`)
+      if (expected !== undefined && currentRevision.revision !== expected) {
+        throw new SettingsConflictError(ns as SettingsNamespace, expected, currentRevision.revision)
       }
       const current = projectForm(form, raw) as Record<string, unknown>
       const base = projectForm(form, inherited) as Record<string, unknown>
@@ -439,7 +443,7 @@ export class SettingsForms extends Service {
       }
       return mergeLayers(strip(raw, form), next) as Record<string, unknown>
     })
-    this.describe()
+    this.refreshRevisions()
   }
 
   private schema(entry: Entry): z | undefined {
