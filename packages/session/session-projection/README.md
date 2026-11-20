@@ -9,8 +9,6 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-A wire unit may declare `onDemand: true` for values that readers need only when inspecting one Session. Clients requesting compact snapshots receive the changed key and event watermark. Exact named reads and full control subscribers still receive the complete view; the persisted unit state and version are independent of this delivery choice.
-
 Use `dsh-session-projection` when clients need current per-session state—such as todos, goals, or conversation statistics—without replaying the raw event log. Domains define synchronous projections from committed session events, and clients receive complete, schema-validated JSON values through snapshots and change notifications. Snapshots identify the last event reflected by every returned value, so carriers can pair state with the matching history cut. Projection state can be checkpointed for faster cold reads, while host-only projections remain private to the host.
 
 ## Table of Contents
@@ -28,6 +26,8 @@ Use `dsh-session-projection` when clients need current per-session state—such 
 ## Use this package
 
 Mount `dsh-session-projection` wherever client carriers need current values of log-derived session state. Domain plugins register units; carriers read snapshots and subscribe to the change feed; neither knows the other.
+
+A wire unit may declare `onDemand: true` for values that readers need only when inspecting one Session. Clients requesting compact snapshots receive the changed key and event watermark. Exact named reads and full control subscribers still receive the complete view; the persisted unit state and version are independent of this delivery choice.
 
 ### When to choose it
 
