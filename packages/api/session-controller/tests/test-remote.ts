@@ -94,6 +94,7 @@ export interface TestSessionRemote {
   follow(request: SessionFollowRequest, signal?: AbortSignal): AsyncIterable<SessionFollowFrame>
   observeProjections(request: SessionProjectionsRequest, signal?: AbortSignal): AsyncIterable<SessionProjectionFrame>
   control(signal?: AbortSignal): AsyncIterable<SessionControlFrame>
+  compactControl(signal?: AbortSignal): AsyncIterable<SessionControlFrame>
 }
 
 /** Dependencies and policy supplied by a Session Controller unit harness. */
