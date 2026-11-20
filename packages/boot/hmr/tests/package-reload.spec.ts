@@ -546,8 +546,13 @@ it.each(['link', 'missing'] as const)('finds the host module graph through a pro
     file(main, "import './node_modules/shared-lib/index.mjs'\n")
     await ModuleLoader.fromInternal()!.import(pathToFileURL(main).href, import.meta.url, {})
     const entry = join(home, 'bin-dsh')
-    if (kind === 'link') symlinkSync(main, entry)
-    process.argv = [argv[0]!, entry]
+    if (kind === 'link' && process.platform === 'win32') {
+      symlinkSync(dir, entry, 'junction')
+      process.argv = [argv[0]!, join(entry, 'main.mjs')]
+    } else {
+      if (kind === 'link') symlinkSync(main, entry)
+      process.argv = [argv[0]!, entry]
+    }
   })
   shared(f.dir, 2)
   const url = pathToFileURL(join(f.dir, 'node_modules', 'shared-lib', 'index.mjs')).href

@@ -132,6 +132,7 @@ interface ImportContext {
 
 /** Package directories whose manifests are read from disk instead of Node's native cache. */
 export class PackageManifests {
+  /** Exact invalidated directories and their normalized, separator-terminated descendant prefixes. */
   private readonly directories = new Set<string>()
   private readonly configurations = new Map<string, Configuration | undefined>()
   /** Real directory of each directory a lookup reached; linked consumers name a package by its link path. */
@@ -151,6 +152,7 @@ export class PackageManifests {
     const native = this.installPackageHooks()
     const directory = dirname(manifest)
     this.directories.add(directory)
+    this.directories.add(join(directory, sep))
     this.configurations.clear()
     this.realDirectories.clear()
     // A package's entry may resolve outside its directory; cache keys do not record the manifests they consulted.
@@ -168,10 +170,6 @@ export class PackageManifests {
     this.realDirectories.clear()
   }
 
-  private isPathWithinDirectory(path: string, directory: string): boolean {
-    return path === directory || path.startsWith(join(directory, sep))
-  }
-
   private isPathInInvalidatedDirectory(path: string): boolean {
     const parent = dirname(path)
     let real = this.realDirectories.get(parent)
@@ -183,7 +181,10 @@ export class PackageManifests {
       this.realDirectories.set(parent, real)
     }
     const target = join(real, basename(path))
-    for (const directory of this.directories) if (this.isPathWithinDirectory(target, directory)) return true
+    if (this.directories.has(target)) return true
+    for (let end = target.indexOf(sep); end !== -1; end = target.indexOf(sep, end + 1)) {
+      if (this.directories.has(target.slice(0, end + 1))) return true
+    }
     return false
   }
 

@@ -218,9 +218,9 @@ describe('package manifest invalidation', { concurrent: false }, () => {
     expect(resolveEsm('pkg', f.importerURL)).toBe(pathToFileURL(join(f.dir, 'b.mjs')).href)
   })
 
-  it('leaves other package directories to Node and restores native readers on disposal', () => {
+  it('leaves a sibling with the same name prefix to Node and restores its readers on disposal', () => {
     const f = fixture()
-    const other = join(f.root, 'packages', 'other', 'package.json')
+    const other = join(f.root, 'packages', 'pkg-sibling', 'package.json')
     file(other, JSON.stringify({ name: 'other', type: 'commonjs' }))
     file(f.manifest, JSON.stringify({ name: 'pkg', type: 'commonjs' }))
     expect(reader.read(other).type).toBe('commonjs')
@@ -231,6 +231,23 @@ describe('package manifest invalidation', { concurrent: false }, () => {
     expect(binding.readPackageJSON).not.toBe(original)
     f.manifests.dispose()
     expect(binding.readPackageJSON).toBe(original)
+  })
+
+  it('reads fresh manifests at multiple depths under independent invalidated package roots', () => {
+    const f = fixture()
+    const sibling = join(f.root, 'packages', 'pkg-tools')
+    const near = join(f.dir, 'child', 'package.json')
+    const deep = join(sibling, 'lib', 'nested', 'package.json')
+    for (const path of [near, deep]) {
+      file(path, '{"type":"commonjs"}')
+      expect(reader.read(path).type).toBe('commonjs')
+      file(path, '{"type":"module"}')
+    }
+    f.manifests.invalidate(f.manifest)
+    expect(reader.read(near).type).toBe('module')
+    expect(reader.read(deep).type).toBe('commonjs')
+    f.manifests.invalidate(join(sibling, 'package.json'))
+    expect(reader.read(deep).type).toBe('module')
   })
 
   it('reports invalid JSON with its non-file ESM base after invalidation', async () => {
@@ -371,6 +388,11 @@ describe('package manifest reader parity', { concurrent: false }, () => {
     const f = fixture()
     const enclosing = join(f.root, 'packages', 'package.json')
     file(enclosing, JSON.stringify({ name: 'packages', type: 'commonjs' }))
+    const sibling = join(dirname(enclosing), 'sibling.js')
+    const parentScope = reader.getPackageScopeConfig(pathToFileURL(sibling).href)
+    const nearestParent = reader.getNearestParentPackageJSON(sibling)
+    expect(parentScope).toMatchObject({ exists: true, type: 'commonjs' })
+    expect(nearestParent).toBeDefined()
     file(f.manifest, JSON.stringify({ name: 'pkg', type: 'module' }))
     const source = join(f.dir, 'lib', 'entry.js')
     file(source, '')
@@ -378,12 +400,12 @@ describe('package manifest reader parity', { concurrent: false }, () => {
     rmSync(f.manifest)
     f.manifests.invalidate(f.manifest)
     expect(reader.getPackageScopeConfig(pathToFileURL(source).href)).toMatchObject({
-      exists: true, type: 'commonjs', pjsonPath: toNamespacedPath(enclosing),
+      exists: true, type: 'commonjs', pjsonPath: parentScope.pjsonPath,
     })
     expect(formats.defaultGetFormatWithoutErrors(pathToFileURL(join(f.dir, 'bin', 'tool')))).toBe(
       formats.defaultGetFormatWithoutErrors(pathToFileURL(join(f.root, 'packages', 'tool'))),
     )
-    expect(reader.getNearestParentPackageJSON(source)?.path).toBe(toNamespacedPath(enclosing))
+    expect(reader.getNearestParentPackageJSON(source)?.path).toBe(nearestParent?.path)
   })
 
   it('stops a scope lookup at a node_modules boundary like Node', () => {
