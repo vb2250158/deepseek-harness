@@ -148,6 +148,22 @@ describe('Session-list pages', () => {
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(2)
   })
+  it('uses the current metadata reader after a ranking yield', async () => {
+    const h = await harness([{ id: 'a', phase: 'cold' }, { id: 'b', phase: 'cold' }], 20)
+    let replaced = false
+    h.observer.summary = (_phase, id) => {
+      if (id !== 'a' || replaced) return
+      replaced = true
+      betweenRows(() => {
+        vi.spyOn(h.ctx.sessionProjectionCache, 'cachedSnapshot').mockImplementation(header => ({
+          asOfSeq: -1, values: { sessionListMetadata: { blank: false, lastPromptAt: header.id === 'b' ? 200 : null } },
+        }))
+      })
+    }
+    const first = await h.list.page({ paged: true }, { ...pagePolicy, listInitialPerWorkspace: 1 })
+    expect(first.items.map(row => row.sessionId)).toEqual(['b'])
+  })
+
   it('reuses header discovery through Cordis service accessors until expiry, refresh, or a catalog change', async () => {
     const h = await harness(['a', 'b'].map(id => ({ id, phase: 'cold' as const })), 0)
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100, listSnapshotLimit: 8 }
