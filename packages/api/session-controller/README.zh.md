@@ -123,7 +123,7 @@ GUI 模型选择要求确切提供方／模型对出现在可用目录中；不�
 | `listInitialPerWorkspace` | `5` | 首批每个工作区的最近空闲根会话数量 |
 | `listSnapshotLimit` | `8` | 同时保留的目录快照上限 |
 | `listSnapshotTtlMs` | `60000` | 游标有效期，单位为毫秒 |
-| `listDiscoveryCacheMs` | `0` | 分页刷新之间复用已完成 header 发现的毫秒数；零表示不复用 |
+| `listDiscoveryCacheMs` | `0` | 分页刷新复用会话元数据的毫秒数。正值会在 Host 初始化时预读元数据；零表示关闭预读和复用 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-session-controller)是所有受支持字段及其 JSDoc 的完整来源。
 

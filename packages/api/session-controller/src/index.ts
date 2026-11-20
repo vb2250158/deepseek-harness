@@ -225,6 +225,7 @@ export class SessionController extends TypertRemoteService {
     ctx.fiber.assertActive()
     await this.listState.initialize()
     ctx.fiber.assertActive()
+    this.listState.warmDiscovery(this.listPolicy.listDiscoveryCacheMs)
     ctx.plugin(SessionFileReferences)
     ctx.plugin(SessionMediaReferences)
     ctx.plugin(SessionSkillCatalog)

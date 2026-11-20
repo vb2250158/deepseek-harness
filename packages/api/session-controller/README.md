@@ -124,7 +124,7 @@ A successful `selectModel` response acknowledges the recorded Session selection 
 | `listInitialPerWorkspace` | `5` | Recent idle root rows per workspace on the first page |
 | `listSnapshotLimit` | `8` | Maximum retained catalog snapshots |
 | `listSnapshotTtlMs` | `60000` | Continuation lifetime in milliseconds |
-| `listDiscoveryCacheMs` | `0` | Completed header discovery reuse across paged refreshes; zero disables reuse |
+| `listDiscoveryCacheMs` | `0` | Header discovery lifetime for paged refreshes. A positive value starts a metadata-only read during Host initialization; zero disables prefetch and reuse |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-session-controller) is the exhaustive source for accepted fields and their JSDoc.
 

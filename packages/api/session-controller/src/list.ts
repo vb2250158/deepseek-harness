@@ -76,6 +76,7 @@ export class ApiSessionList {
     readonly changedId?: SessionId
   } | undefined
   private discoveryGeneration = 0
+  private warmup: { controller: AbortController; done: Promise<void> } | undefined
 
   /**
    * @param ctx - Host context carrying Session, query, persistence, and projection services.
@@ -83,12 +84,14 @@ export class ApiSessionList {
    */
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
     const reset = (): void => {
+      this.cancelWarmup()
       this.catalogs.clear()
       this.discovery = undefined
       this.discoveryGeneration++
     }
     ctx.effect(() => reset, 'api-session.listCatalogs')
     const changed = (session: Session): void => {
+      this.cancelWarmup()
       this.discoveryGeneration++
       const cached = this.discovery
       if (cached === undefined) return
@@ -122,6 +125,31 @@ export class ApiSessionList {
       },
       stateVersion: 1,
     })
+  }
+
+  private cancelWarmup(): void {
+    this.warmup?.controller.abort()
+    this.warmup = undefined
+  }
+
+  /**
+   * Start a metadata-only catalog read while the Host finishes loading its plugins.
+   * @param cacheMs - completed discovery lifetime, zero disables the startup read.
+   */
+  warmDiscovery(cacheMs: number): void {
+    if (cacheMs === 0 || this.warmup) return
+    const generation = this.discoveryGeneration
+    const controller = new AbortController()
+    const done = this.ctx.sessionQuery.listSessions(controller.signal).then((records) => {
+      if (generation === this.discoveryGeneration && !controller.signal.aborted) {
+        this.discovery = { records, expiresAt: performance.now() + cacheMs }
+      }
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) this.ctx.logger.warn('Session list prefetch failed', error)
+    }).finally(() => {
+      if (this.warmup?.controller === controller) this.warmup = undefined
+    })
+    this.warmup = { controller, done }
   }
 
   /**
@@ -254,6 +282,18 @@ export class ApiSessionList {
 
   private async discover(cacheMs: number, fresh: boolean, signal?: AbortSignal): Promise<readonly SessionRecord[]> {
     signal?.throwIfAborted()
+    const warm = this.warmup
+    if (fresh && warm) {
+      this.cancelWarmup()
+    } else if (warm && cacheMs > 0) {
+      const wake = signal === undefined ? warm.controller.signal : AbortSignal.any([signal, warm.controller.signal])
+      const interrupted = Promise.withResolvers<void>()
+      const resume = (): void => interrupted.resolve()
+      wake.addEventListener('abort', resume, { once: true })
+      try { await Promise.race([warm.done, interrupted.promise]) }
+      finally { wake.removeEventListener('abort', resume) }
+      signal?.throwIfAborted()
+    }
     const source = this.ctx.sessionQuery
     const cached = this.discovery
     if (!fresh && cacheMs > 0 && cached !== undefined && cached.expiresAt > performance.now()) {

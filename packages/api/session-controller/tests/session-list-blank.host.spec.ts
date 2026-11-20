@@ -100,6 +100,7 @@ describe('summary blank = conversation not started', () => {
     const { ctx, remote, attach } = await harness(120_000)
     const session = ctx.sessions.create()
     const discover = vi.spyOn(ctx.sessionQuery, 'listSessions')
+    const repair = vi.spyOn(ctx.sessionQuery, 'filterSessions')
     const first = await remote.list({ paged: true })
     expect(first).toMatchObject({ ok: true, value: { items: [{ blank: true, agentAvailable: false }] } })
     await attach(session)
@@ -109,7 +110,8 @@ describe('summary blank = conversation not started', () => {
     })
     const refreshed = await remote.list({ paged: true })
     expect(refreshed).toMatchObject({ ok: true, value: { items: [{ blank: false, agentAvailable: true }] } })
-    expect(discover).toHaveBeenCalledTimes(1)
+    expect(discover).not.toHaveBeenCalled()
+    expect(repair.mock.calls[0]?.[0]).toEqual([{ kind: 'id', values: [session.id] }])
   })
 
   it('standalone events (command lifecycle, plan/mode, title) keep the session blank', async () => {
@@ -188,10 +190,12 @@ describe('resumed Session summaries', () => {
     expect(await list()).toMatchObject({ ok: true, value: { items: [] } })
     expect(await list(true)).toMatchObject({ ok: true, value: { items: [{ sessionId: id, agentAvailable: false }] } })
     const discover = vi.spyOn(ctx.sessionQuery, 'listSessions')
+    const repair = vi.spyOn(ctx.sessionQuery, 'filterSessions')
     await ctx.agents.resume({ resumeSessionId: id })
     const before = discover.mock.calls.length
     expect(await list()).toMatchObject({ ok: true, value: { items: [{ sessionId: id, agentAvailable: true }] } })
-    expect(discover.mock.calls.length).toBe(before + 1)
+    expect(discover.mock.calls.length).toBe(before)
+    expect(repair).toHaveBeenCalled()
   })
 
   it('cold-reads opted-in commands as conversations and keeps prompt recency empty', async () => {

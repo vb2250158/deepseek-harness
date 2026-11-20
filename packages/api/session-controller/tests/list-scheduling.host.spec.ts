@@ -285,6 +285,45 @@ describe('Session-list pages', () => {
     expect(h.listSessions).toHaveBeenCalledTimes(2)
   })
 
+  it('joins a startup metadata read while letting one browser cancel independently', async () => {
+    const h = await harness([{ id: 'a', phase: 'cold' }], 0)
+    const records = await h.listSessions()
+    const gate = Promise.withResolvers<SessionRecord[]>()
+    h.listSessions.mockClear()
+    h.listSessions.mockImplementationOnce(() => gate.promise)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 2000 }
+    h.list.warmDiscovery(0)
+    expect(h.listSessions).not.toHaveBeenCalled()
+    h.list.warmDiscovery(2000)
+    const first = new AbortController()
+    const abandoned = h.list.page({ paged: true }, policy, first.signal)
+    const kept = h.list.page({ paged: true }, policy)
+    first.abort()
+    await expect(abandoned).rejects.toThrow()
+    expect(h.listSessions.mock.calls[0]?.[0]?.aborted).toBe(false)
+    gate.resolve(records)
+    expect((await kept).items.map(row => row.sessionId)).toEqual(['a'])
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['fresh', 'created', 'replacement'] as const)('drops an in-flight warmup on %s', async (event) => {
+    const h = await harness([{ id: 'a', phase: 'cold' }], 0)
+    const gate = Promise.withResolvers<SessionRecord[]>()
+    h.listSessions.mockImplementationOnce(() => gate.promise)
+    h.list.warmDiscovery(2000)
+    const oldSignal = h.listSessions.mock.calls[0]?.[0]
+    if (event === 'created') h.attach('a')
+    if (event === 'replacement') await h.replaceSource()
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 2000 }
+    expect((await h.list.page({ paged: true, fresh: event === 'fresh' }, policy)).items.map(row => row.sessionId)).toEqual(['a'])
+    expect(oldSignal?.aborted).toBe(true)
+    gate.resolve([])
+    await Promise.resolve()
+    expect((await h.list.page({ paged: true }, policy)).items.map(row => row.sessionId)).toEqual(['a'])
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+  })
+
   it('retains discovery when a live summary changes during simultaneous first-page requests', async () => {
     const h = await harness([{ id: 'a', phase: 'live' }], 0)
     const records = await h.listSessions()
