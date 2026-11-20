@@ -82,8 +82,9 @@ export class ApiSessionList {
   /**
    * @param ctx - Host context carrying Session, query, persistence, and projection services.
    * @param workSliceMs - Resolved positive integral list-work budget in milliseconds.
+   * @param pageSize - Maximum changed identities to retain for individual header reads.
    */
-  constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
+  constructor(private readonly ctx: Context, private readonly workSliceMs: number, private readonly pageSize: number) {
     const reset = (): void => {
       this.cancelWarmup()
       this.catalogs.clear()
@@ -93,9 +94,14 @@ export class ApiSessionList {
     ctx.effect(() => reset, 'api-session.listCatalogs')
     const changed = (session: Session): void => {
       this.changeSequence++
-      this.pendingChanges?.add(session.id)
-      if (this.discovery && this.discovery.expiresAt <= performance.now()) this.discovery = undefined
-      this.discovery?.changedIds.add(session.id)
+      if (this.pendingChanges && !this.markChanged(this.pendingChanges, session.id)) {
+        this.pendingChanges = undefined
+        this.cancelWarmup()
+      }
+      const cached = this.discovery
+      if (cached && (cached.expiresAt <= performance.now() || !this.markChanged(cached.changedIds, session.id))) {
+        this.discovery = undefined
+      }
     }
     ctx.on('session/created', changed)
     ctx.on('session/disposed', changed)
@@ -124,6 +130,12 @@ export class ApiSessionList {
       },
       stateVersion: 1,
     })
+  }
+
+  private markChanged(ids: Set<SessionId>, id: SessionId): boolean {
+    if (ids.size >= this.pageSize && !ids.has(id)) return false
+    ids.add(id)
+    return true
   }
 
   private cancelWarmup(): void {

@@ -220,7 +220,7 @@ export class SessionController extends TypertRemoteService {
     this.historyController = new HistoryController(ctx)
     this.stateController = new StateController(ctx, this.historyController)
     this.webController = new WebController(ctx, this.historyController, (observation) => { this.promote(observation) })
-    this.listState = new ApiSessionList(ctx, this.listWorkSliceMs)
+    this.listState = new ApiSessionList(ctx, this.listWorkSliceMs, this.listPolicy.listPageSize)
     await this.commands.initialize()
     ctx.fiber.assertActive()
     await this.listState.initialize()

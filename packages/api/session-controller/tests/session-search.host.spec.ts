@@ -101,7 +101,7 @@ describe('session.search', () => {
   it('rejects search when the query service is absent', async () => {
     const ctx = await baseContext()
     ctx.provide('attachments', { imageLimits: TEST_IMAGE_LIMITS } as never)
-    const list = new ApiSessionList(ctx, 8)
+    const list = new ApiSessionList(ctx, 8, 50)
     await list.initialize()
 
     await expect(list.search('query', new AbortController().signal)).rejects.toMatchObject({

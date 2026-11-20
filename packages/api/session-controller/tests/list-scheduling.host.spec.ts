@@ -54,7 +54,7 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(RemoteAccessService)
   ctx.provide('attachments', { imageLimits: TEST_IMAGE_LIMITS } as never)
-  const list = new ApiSessionList(ctx, workSliceMs)
+  const list = new ApiSessionList(ctx, workSliceMs, pagePolicy.listPageSize)
   await list.initialize()
   const clock = { now: 0 }
   const prepared = new Map<string, Session>()
@@ -329,6 +329,31 @@ describe('Session-list pages', () => {
     await h.list.page({ paged: true }, policy)
     expect(exact.mock.calls).toEqual(['a', 'b'].map(id => [[{ kind: 'id', values: [id] }], undefined]))
     expect(h.listSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['pending', 'completed'] as const)('rescans after more than one page of distinct changes to a %s discovery', async (state) => {
+    const h = await harness(['a', 'b', 'c'].map(id => ({ id, phase: 'cold' as const })), 0)
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 2000 }
+    const gate = Promise.withResolvers<SessionRecord[]>()
+    if (state === 'pending') {
+      h.listSessions.mockImplementationOnce(() => gate.promise)
+      h.list.warmDiscovery(2000)
+    } else {
+      await h.list.page({ paged: true }, policy)
+    }
+    const exact = vi.spyOn(h.ctx.sessionQuery, 'filterSessions')
+    h.attach('a')
+    h.attach('b')
+    h.detach.get('a')!()
+    h.attach('c')
+    const page = await h.list.page({ paged: true }, policy)
+    if (state === 'pending') {
+      expect(h.listSessions.mock.calls[0]?.[0]?.aborted).toBe(true)
+      gate.resolve([])
+    }
+    expect((await h.list.page({ paged: true }, policy)).items).toEqual(page.items)
+    expect(h.listSessions).toHaveBeenCalledTimes(2)
+    expect(exact).not.toHaveBeenCalled()
   })
 
   it.each(['fresh', 'replacement'] as const)('drops an in-flight warmup on %s', async (event) => {
