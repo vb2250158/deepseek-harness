@@ -1092,6 +1092,13 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
  * @returns one complete baseline followed by live replacement frames.
  */
 @Remote({ mode: 'stream' }) async *control(signal: AbortSignal): AsyncIterable<SessionControlFrame>
+
+/**
+ * Open the live control stream with watermarks for units marked on demand.
+ * @param signal - Remote stream cancellation.
+ * @returns an opening snapshot followed by changes to authorized Sessions.
+ */
+@Remote({ mode: 'stream' }) async *compactControl(signal: AbortSignal): AsyncIterable<SessionControlFrame>
 ```
 
 Types: [SessionId](core.zh.md) · [SessionInspection](persistence.zh.md) · [SessionSearchRequest](session-query.zh.md)

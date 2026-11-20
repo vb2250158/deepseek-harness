@@ -94,6 +94,8 @@ interface ProjectionDefinition<K extends string, S> {
      * @default true
      */
     summary?: boolean
+    /** Send a key watermark instead of this value to clients requesting compact snapshots. */
+    onDemand?: boolean
   } : never
   /**
    * Non-negative persisted-cache invalidation version. Bump when state fields or fold
@@ -398,6 +400,12 @@ snapshot( session: Session, keys?: ProjectionKeySelection, ): ProjectionSnapshot
  * @returns the current summary key set; do not mutate it.
  */
 summaryKeys(): ReadonlySet<Extract<keyof SessionProjectionMap, string>>
+
+/**
+ * Split registered wire keys for a compact read. Both sets use the same registration cut.
+ * @returns eagerly delivered keys and keys available through a named projection read.
+ */
+controlKeys(): { eager: ReadonlySet<Extract<keyof SessionProjectionMap, string>> deferred: ReadonlySet<Extract<keyof SessionProjectionMap, string>> }
 
 /**
  * State-level checkpoint of every persisted unit for one session, read

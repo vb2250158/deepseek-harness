@@ -3520,6 +3520,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'signal', description: 'cancellation owned by the Remote stream carrier.' }],
         returns: 'one complete baseline followed by live replacement frames.',
       },
+      {
+        signature: '@Remote({ mode: \'stream\' }) async *compactControl(signal: AbortSignal): AsyncIterable<SessionControlFrame>',
+        description: 'Open the live control stream with watermarks for units marked on demand.',
+        parameters: [{ name: 'signal', description: 'Remote stream cancellation.' }],
+        returns: 'an opening snapshot followed by changes to authorized Sessions.',
+      },
     ],
   },
   {
@@ -3701,6 +3707,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'The keys a Session summary carries: every registered client-visible key whose unit does not declare `summary: false`. The returned set is stable — the same instance on every call — until a registration or its disposal changes the key table, so a consumer may hold it across rows. Callers pass it to a key-taking read face such as `snapshot(session, summaryKeys())` or `viewCheckpoint(rows, summaryKeys())`; those faces use the set as-is.',
         parameters: [],
         returns: 'the current summary key set; do not mutate it.',
+      },
+      {
+        signature: 'controlKeys(): { eager: ReadonlySet<Extract<keyof SessionProjectionMap, string>> deferred: ReadonlySet<Extract<keyof SessionProjectionMap, string>> }',
+        description: 'Split registered wire keys for a compact read. Both sets use the same registration cut.',
+        parameters: [],
+        returns: 'eagerly delivered keys and keys available through a named projection read.',
       },
       {
         signature: 'checkpoint(session: Session): ProjectionCheckpoint',
@@ -9212,7 +9224,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ProjectionDefinition',
-    declaration: 'export interface ProjectionDefinition<K extends string, S> {\n    key: K;\n    stateSchema: ZodType<S>;\n    init(header: SessionHeader, inheritedEventCount: SessionLogOffset): NoInfer<S>;\n    apply(state: NoInfer<S>, event: SessionEvent): NoInfer<S>;\n    wire?: K extends keyof SessionProjectionMap ? {\n        viewSchema: ZodType<SessionProjectionViewValue<SessionProjectionMap[K]>>;\n        view(state: NoInfer<S>): SessionProjectionViewValue<SessionProjectionMap[K]>;\n        summary?: boolean;\n    } : never;\n    stateVersion: number;\n}',
+    declaration: 'export interface ProjectionDefinition<K extends string, S> {\n    key: K;\n    stateSchema: ZodType<S>;\n    init(header: SessionHeader, inheritedEventCount: SessionLogOffset): NoInfer<S>;\n    apply(state: NoInfer<S>, event: SessionEvent): NoInfer<S>;\n    wire?: K extends keyof SessionProjectionMap ? {\n        viewSchema: ZodType<SessionProjectionViewValue<SessionProjectionMap[K]>>;\n        view(state: NoInfer<S>): SessionProjectionViewValue<SessionProjectionMap[K]>;\n        summary?: boolean;\n        onDemand?: boolean;\n    } : never;\n    stateVersion: number;\n}',
   },
   {
     name: 'ProjectionEventChangeListener',
@@ -9964,7 +9976,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionFollowRequest',
-    declaration: 'export interface SessionFollowRequest extends Pick<SessionPageRequest, \'maxMessages\' | \'turnWindow\'> {\n    readonly address: SessionAddress;\n    readonly activate?: boolean;\n    readonly assistantStream?: true;\n}',
+    declaration: 'export interface SessionFollowRequest extends Pick<SessionPageRequest, \'maxMessages\' | \'turnWindow\'> {\n    readonly compactProjections?: true;\n    readonly address: SessionAddress;\n    readonly activate?: boolean;\n    readonly assistantStream?: true;\n}',
   },
   {
     name: 'SessionForkRequest',
@@ -10148,7 +10160,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionProjectionBaseline',
-    declaration: 'export interface SessionProjectionBaseline {\n    readonly asOfSeq: number;\n    readonly values: SessionProjectionValues;\n}',
+    declaration: 'export interface SessionProjectionBaseline {\n    readonly deferredKeys?: readonly string[];\n    readonly asOfSeq: number;\n    readonly values: SessionProjectionValues;\n}',
   },
   {
     name: 'SessionProjectionChange',
@@ -10168,7 +10180,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionProjectionsRequest',
-    declaration: 'export interface SessionProjectionsRequest {\n    readonly sessionId: SessionId;\n}',
+    declaration: 'export interface SessionProjectionsRequest {\n    readonly keys?: readonly string[];\n    readonly compactProjections?: true;\n    readonly sessionId: SessionId;\n}',
   },
   {
     name: 'SessionProjectionSummaryExcluded',
@@ -10184,11 +10196,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionProjectionsValue',
-    declaration: 'export type SessionProjectionsValue = (SessionProjectionBaseline & {\n    readonly kind: \'sequenced\';\n}) | {\n    readonly kind: \'migration-required\';\n    readonly values: SessionProjectionValues;\n} | null;',
+    declaration: 'export type SessionProjectionsValue = (SessionProjectionBaseline & {\n    readonly kind: \'sequenced\';\n}) | {\n    readonly kind: \'migration-required\';\n    readonly values: SessionProjectionValues;\n    readonly deferredKeys?: readonly string[];\n} | null;',
   },
   {
     name: 'SessionProjectionUpdate',
-    declaration: 'export interface SessionProjectionUpdate {\n    readonly sessionId: SessionId;\n    readonly seq: number;\n    readonly changes: readonly {\n        readonly key: string;\n        readonly val: SessionProjectionValue;\n    }[];\n}',
+    declaration: 'export interface SessionProjectionUpdate {\n    readonly deferredKeys?: readonly string[];\n    readonly sessionId: SessionId;\n    readonly seq: number;\n    readonly changes: readonly {\n        readonly key: string;\n        readonly val: SessionProjectionValue;\n    }[];\n}',
   },
   {
     name: 'SessionProjectionValue',

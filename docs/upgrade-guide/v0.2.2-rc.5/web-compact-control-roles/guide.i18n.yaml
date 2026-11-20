@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.5/web-compact-control-roles/guide.md
+/:
+  en: 58d1f7964fdb070f
+  zh: 5af9bea4b1c2cdaf
+/grant-compact-session-control-to-custom-web-roles:
+  en: 61f1bce5c7b6395c
+  zh: 8af13cedd64ce772
+/grant-compact-session-control-to-custom-web-roles/change:
+  en: 5d6f83363555a41d
+  zh: cc79972612691609
+/grant-compact-session-control-to-custom-web-roles/migration:
+  en: 00c508ece0fbdb36
+  zh: fd95dab40ddaf602
