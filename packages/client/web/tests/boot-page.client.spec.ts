@@ -42,6 +42,11 @@ describe('BootPage', () => {
     expect(el.textContent).toContain('@deepseek-ai/dsh-client-ui-tool')
     expect(el.textContent).not.toContain('ok')
     expect(el.textContent).not.toContain('Loading plugins…')
+    page.setState('@deepseek-ai/dsh-client-ui-layout', 'pending')
+    expect(el.textContent).not.toContain('@deepseek-ai/dsh-client-ui-layout')
+    expect(el.textContent).toContain('@deepseek-ai/dsh-client-ui-tool')
+    page.setState('@deepseek-ai/dsh-client-ui-tool', 'active')
+    expect(el.textContent).toContain('Loading plugins…')
   })
 
   it('shows the complete sweep report', () => {

@@ -59,10 +59,14 @@ export class BootPage {
    * @param state - Projected fiber state.
    */
   setState(id: string, state: LoaderEntryState): void {
+    const previous = this.states.get(id)
+    if (previous === state) return
     this.states.set(id, state)
-    if (state === 'active') this.active.add(id)
-    this.updateProgress()
-    this.render()
+    if (state === 'active' && !this.active.has(id)) {
+      this.active.add(id)
+      this.updateProgress()
+    }
+    if (state === 'failed' || previous === 'failed') this.render()
   }
 
   /**
