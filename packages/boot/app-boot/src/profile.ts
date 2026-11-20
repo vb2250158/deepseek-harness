@@ -22,6 +22,8 @@
  */
 
 import { createRequire } from 'node:module'
+import { performance } from 'node:perf_hooks'
+import { scheduler } from 'node:timers/promises'
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -257,7 +259,9 @@ function symlinksUnder(modules: string): string[] {
  * Active profile `node_modules` entries linked outside the shared profiles tree and the active profile.
  * Missing targets and files are not linked roots; invalid link chains retain Node's diagnostic.
  */
-function linkedProfileRoots(profile: Profile, profilesDir: string): LinkedRoot[] {
+async function linkedProfileRoots(
+  profile: Profile, profilesDir: string, yieldIfDue: YieldIfDue,
+): Promise<LinkedRoot[]> {
   const modules = join(profile.dir, 'node_modules')
   const links = symlinksUnder(modules)
   if (links.length === 0) return []
@@ -272,6 +276,8 @@ function linkedProfileRoots(profile: Profile, profilesDir: string): LinkedRoot[]
   const excludedTrees = [tree, realModuleDirectory(profile.dir) + sep]
   const roots: LinkedRoot[] = []
   for (const linkPath of links) {
+    const pause = yieldIfDue()
+    if (pause !== undefined) await pause
     let realPath: string
     try {
       realPath = realModuleDirectory(linkPath)
@@ -314,15 +320,27 @@ function profileDependencyNames(manifest: ProfileManifest): string[] {
     ...Object.keys(manifest.optionalDependencies ?? {})]
 }
 
+type YieldIfDue = () => Promise<void> | undefined
+
+/** Share one I/O work deadline across the private maps built for one generation. */
+function resolutionWorkSlice(): YieldIfDue {
+  const sliceMs = 8
+  let deadline = performance.now() + sliceMs
+  return () => {
+    if (performance.now() < deadline) return undefined
+    return scheduler.yield().then(() => { deadline = performance.now() + sliceMs })
+  }
+}
+
 /** Resolve the installation packages that the runtime resolver supplies to every profile. */
-function collectInstallationScopePackages(
-  installAnchor: string, skippedBundles: ReadonlySet<string>,
-): {
+async function collectInstallationScopePackages(
+  installAnchor: string, skippedBundles: ReadonlySet<string>, yieldIfDue: YieldIfDue,
+): Promise<{
   packageNames: ReadonlySet<string>
   packageDirs: ReadonlyMap<string, string>
   declarers: ReadonlyMap<string, string>
   versions: ReadonlyMap<string, string | undefined>
-} {
+}> {
   // Real declaring paths keep workspace symlinks under node_modules from disabling tsx path mappings.
   const canonicalAnchor = join(realModuleDirectory(dirname(installAnchor)), basename(installAnchor))
   const appManifest = readPackageManifest(canonicalAnchor)
@@ -346,6 +364,8 @@ function collectInstallationScopePackages(
     // dependencies, yet out-of-tree plugins import them directly.
     /* v8 ignore next -- a real app manifest always declares dependencies */
     for (const dep of profileDependencyNames(next.manifest)) {
+      const pause = yieldIfDue()
+      if (pause !== undefined) await pause
       if (links.has(dep)) continue
       const dir = packageDirFromAnchor(next.anchor, dep)
       // A declared-but-uninstalled dependency cannot be a loader-visible
@@ -379,7 +399,7 @@ export interface RuntimeResolutionOptions {
 }
 
 /**
- * Compute the runtime resolution without writing module-resolution files.
+ * Build one complete runtime resolution, letting the event loop run between dependency and link lookups.
  * @param options - installation anchor, optional loaded profile, and Harness home.
  * @returns the complete immutable runtime resolution.
  */
@@ -389,18 +409,18 @@ export async function createRuntimeResolution(
   const { installAnchor, profile, home = resolveDshHome() } = options
   const profilesDir = join(home, PROFILES_DIR)
   const manifest = readOptionalProfileManifest(profile)
-  const { packageNames, packageDirs, declarers, versions } = collectInstallationScopePackages(
-    installAnchor, new Set(profile?.skippedBundles.map(skipped => skipped.packageName)),
+  const yieldIfDue = resolutionWorkSlice()
+  const { packageNames, packageDirs, declarers, versions } = await collectInstallationScopePackages(
+    installAnchor, new Set(profile?.skippedBundles.map(skipped => skipped.packageName)), yieldIfDue,
   )
   const profileDeclarers = new Map<string, string>()
   const profileVersions = new Map<string, string | undefined>()
-  const localPackageNames = profile === undefined ? [] : installedProfilePackageNames(profile, manifest)
+  const localPackageNames = profile === undefined ? [] : await installedProfilePackageNames(profile, manifest, yieldIfDue)
   const profilePackages: ReadonlyMap<string, string> = profile === undefined
     ? new Map<string, string>()
-    : collectProfileScopePackages(profile, packageNames, profileDeclarers, profileVersions)
-  const linkedRoots = profile === undefined ? [] : linkedProfileRoots(profile, profilesDir)
-  // The Promise return type is the pre-stable API; construction has no asynchronous step.
-  return await Promise.resolve(new ProfileRuntimeResolution({ installAnchor, profileDir: profile?.dir, home }, {
+    : await collectProfileScopePackages(profile, packageNames, yieldIfDue, profileDeclarers, profileVersions)
+  const linkedRoots = profile === undefined ? [] : await linkedProfileRoots(profile, profilesDir, yieldIfDue)
+  return new ProfileRuntimeResolution({ installAnchor, profileDir: profile?.dir, home }, {
     profilesDir,
     profileDir: profile?.dir,
     localPackageNames: Object.freeze(localPackageNames),
@@ -415,7 +435,7 @@ export async function createRuntimeResolution(
         declarer: profileDeclarers.get(name) as string, scope: 'profile' as const,
       })),
     ]),
-  }))
+  })
 }
 
 /** Inputs a {@link ProfileRuntimeResolution} reuses to compute its successor. */
@@ -478,18 +498,25 @@ function readOptionalProfileManifest(profile: Profile | undefined): ProfileManif
 }
 
 /** Return installed direct dependencies that Node resolves before profile fallback. */
-function installedProfilePackageNames(profile: Profile, manifest: ProfileManifest | undefined): string[] {
-  if (manifest === undefined) return []
-  return profileDependencyNames(manifest)
-    .filter(name => existsSync(join(profile.dir, 'node_modules', name, 'package.json')))
+async function installedProfilePackageNames(
+  profile: Profile, manifest: ProfileManifest | undefined, yieldIfDue: YieldIfDue,
+): Promise<string[]> {
+  const installed: string[] = []
+  if (manifest === undefined) return installed
+  for (const name of profileDependencyNames(manifest)) {
+    const pause = yieldIfDue()
+    if (pause !== undefined) await pause
+    if (existsSync(join(profile.dir, 'node_modules', name, 'package.json'))) installed.push(name)
+  }
+  return installed
 }
 
 /** Collect the first resolvable package directory for each dependency name. */
-function dependencyClosure(
-  anchors: readonly string[], reserved: ReadonlySet<string>,
+async function dependencyClosure(
+  anchors: readonly string[], reserved: ReadonlySet<string>, yieldIfDue: YieldIfDue,
   declarers?: Map<string, string>,
   versions?: Map<string, string | undefined>,
-): Map<string, string> {
+): Promise<Map<string, string>> {
   const links = new Map<string, string>()
   const visited = new Set(reserved)
   for (const anchor of anchors) {
@@ -508,6 +535,8 @@ function dependencyClosure(
       // Service Provider packages commonly expose Service Definitions as peers.
       /* v8 ignore next -- an installable package manifest always declares dependencies or peers */
       for (const dep of profileDependencyNames(next.manifest)) {
+        const pause = yieldIfDue()
+        if (pause !== undefined) await pause
         if (visited.has(dep)) continue
         const dir = packageDirFromAnchor(next.anchor, dep)
         // A declared-but-uninstalled dependency cannot be loader-visible.
@@ -526,15 +555,15 @@ function dependencyClosure(
 }
 
 /** Collect packages carried by the profile's selected bundles that the installation does not supply. */
-function collectProfileScopePackages(
-  profile: Profile, installationPackageNames: ReadonlySet<string>,
+async function collectProfileScopePackages(
+  profile: Profile, installationPackageNames: ReadonlySet<string>, yieldIfDue: YieldIfDue,
   declarers?: Map<string, string>,
   versions?: Map<string, string | undefined>,
-): Map<string, string> {
+): Promise<Map<string, string>> {
   const bundleAnchors = profile.layers
     .filter(layer => !installationPackageNames.has(layer.packageName))
     .map(layer => join(layer.packageDir, 'package.json'))
-  const bundleLinks = dependencyClosure(bundleAnchors, installationPackageNames, declarers, versions)
+  const bundleLinks = await dependencyClosure(bundleAnchors, installationPackageNames, yieldIfDue, declarers, versions)
   for (const layer of profile.layers) bundleLinks.delete(layer.packageName)
   return bundleLinks
 }

@@ -8,6 +8,8 @@ import {
   existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { performance } from 'node:perf_hooks'
+import { scheduler } from 'node:timers/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -506,6 +508,31 @@ describe('composeEntries', () => {
 })
 
 describe('createRuntimeResolution', () => {
+  it('waits for a work slice before publishing the complete installation graph', async () => {
+    const anchor = stageInstallation({ first: {}, second: {} })
+    const home = tmp()
+    const gate = Promise.withResolvers<undefined>()
+    const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(10)
+    const pause = vi.spyOn(scheduler, 'yield').mockImplementationOnce(() => gate.promise)
+    let published = false
+    try {
+      const building = createRuntimeResolution({ installAnchor: anchor, home }).then((result) => {
+        published = true
+        return result
+      })
+      expect(pause).toHaveBeenCalledOnce()
+      await Promise.resolve()
+      expect(published).toBe(false)
+      gate.resolve(undefined)
+      const result = await building
+      expect(result.entries.map(entry => entry.name)).toEqual(expect.arrayContaining(['first', 'second']))
+    } finally {
+      gate.resolve(undefined)
+      pause.mockRestore()
+      clock.mockRestore()
+    }
+  })
+
   it('collects the app and bundle dependencies without writing profile packages', async () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '[]\n', deps: { 'dep-of-a': '0.0.0', 'ghost-dep': '0.0.0' } },
