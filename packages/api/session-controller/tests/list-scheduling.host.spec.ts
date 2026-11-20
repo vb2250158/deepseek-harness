@@ -156,16 +156,32 @@ describe('Session-list pages', () => {
     await h.list.selected([brandString<SessionId>('b')])
     expect(h.listSessions).toHaveBeenCalledTimes(1)
     h.clock.now += 101
-    const refreshed = await h.list.page({ paged: true }, policy)
+    await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(2)
     await h.list.page({ paged: true, fresh: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(3)
-    h.ctx.emit('api-session/added', refreshed.items[0]!)
+    h.attach('a')
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(4)
-    h.ctx.emit('api-session/removed', brandString<SessionId>('b'))
+    h.detach.get('a')!()
     await h.list.page({ paged: true }, policy)
     expect(h.listSessions).toHaveBeenCalledTimes(5)
+  })
+
+  it('retains discovery when a live summary changes during simultaneous first-page requests', async () => {
+    const h = await harness([{ id: 'a', phase: 'live' }], 0)
+    const records = await h.listSessions()
+    const gate = Promise.withResolvers<undefined>()
+    h.listSessions.mockClear()
+    h.listSessions.mockImplementation(async () => { await gate.promise; return records })
+    const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
+    const pages = [h.list.page({ paged: true }, policy), h.list.page({ paged: true }, policy)]
+    const reads = h.listSessions.mock.calls.length
+    h.ctx.emit('api-session/added', h.list.summaryFor(h.ctx.sessions.list()[0]!))
+    gate.resolve(undefined)
+    await Promise.all(pages)
+    await h.list.page({ paged: true }, policy)
+    expect(h.listSessions).toHaveBeenCalledTimes(reads)
   })
 
   it('does not retain discovery completed after a Session catalog invalidation', async () => {
@@ -176,7 +192,7 @@ describe('Session-list pages', () => {
     h.listSessions.mockImplementationOnce(async () => { await gate.promise; return records })
     const policy = { ...pagePolicy, listDiscoveryCacheMs: 100 }
     const read = h.list.page({ paged: true }, policy)
-    h.ctx.emit('api-session/removed', brandString<SessionId>('a'))
+    h.attach('a')
     gate.resolve(undefined)
     await read
     await h.list.page({ paged: true }, policy)

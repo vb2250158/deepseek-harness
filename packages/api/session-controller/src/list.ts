@@ -83,8 +83,8 @@ export class ApiSessionList {
   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
     ctx.effect(() => () => { this.catalogs.clear(); this.discovery = undefined }, 'api-session.listCatalogs')
     const invalidate = (): void => { this.discovery = undefined; this.discoveryGeneration++ }
-    ctx.on('api-session/added', invalidate)
-    ctx.on('api-session/removed', invalidate)
+    ctx.on('session/created', invalidate)
+    ctx.on('session/disposed', invalidate)
     ctx.inject(['sessionQuery'], (sourceCtx) => {
       const reset = (): void => { this.catalogs.clear(); invalidate() }
       reset()

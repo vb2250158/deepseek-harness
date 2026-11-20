@@ -10,7 +10,7 @@
  * read before publication.
  */
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,14 +40,16 @@ afterEach(async () => {
   ownedRoots.clear()
 })
 
-async function harness(): Promise<{ ctx: Context; remote: TestSessionRemote; attach: (session: Session) => Promise<void> }> {
+async function harness(
+  listDiscoveryCacheMs = 0,
+): Promise<{ ctx: Context; remote: TestSessionRemote; attach: (session: Session) => Promise<void> }> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
   return {
     ctx,
-    remote: await createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' }),
+    remote: await createSessionTestRemote(ctx, { listDiscoveryCacheMs, defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' }),
     attach: async (session) => {
       await ctx.agents.register({ id: session.id, session, status: 'idle', ctx } as Agent)
     },
@@ -94,6 +96,22 @@ describe('summary blank = conversation not started', () => {
     expect(session.snapshotEvents().map(event => event.type)).toEqual(['command/run', 'command/done'])
   })
 
+  it('reuses paged discovery across agent availability and conversation activity while serving fresh summaries', async () => {
+    const { ctx, remote, attach } = await harness(120_000)
+    const session = ctx.sessions.create()
+    const discover = vi.spyOn(ctx.sessionQuery, 'listSessions')
+    const first = await remote.list({ paged: true })
+    expect(first).toMatchObject({ ok: true, value: { items: [{ blank: true, agentAvailable: false }] } })
+    await attach(session)
+    session.append('command/run', {
+      commandId: brandString<CommandId>('activity'), name: 'conversation', args: '',
+      source: { kind: 'user' }, startsConversation: true,
+    })
+    const refreshed = await remote.list({ paged: true })
+    expect(refreshed).toMatchObject({ ok: true, value: { items: [{ blank: false, agentAvailable: true }] } })
+    expect(discover).toHaveBeenCalledTimes(1)
+  })
+
   it('standalone events (command lifecycle, plan/mode, title) keep the session blank', async () => {
     const { ctx, remote, attach } = await harness()
     const session = ctx.sessions.create()
@@ -118,14 +136,14 @@ describe('summary blank = conversation not started', () => {
  * cache, whose creation checkpoint would otherwise compute every unit before
  * the Session Controller observes the published Session.
  */
-async function resumeHarness(): Promise<{ ctx: Context; remote: TestSessionRemote; cwd: string }> {
+async function resumeHarness(listDiscoveryCacheMs = 0): Promise<{ ctx: Context; remote: TestSessionRemote; cwd: string }> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-list-blank-'))
   ownedRoots.add(root)
   const ctx = new Context()
   ownedContexts.add(ctx)
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(JsonlSessionPersistence, { root })
-  const remote = await createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: root })
+  const remote = await createSessionTestRemote(ctx, { listDiscoveryCacheMs, defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: root })
   await mountAgentLoopTestHarness(ctx)
   return { ctx, remote, cwd: root }
 }
@@ -161,6 +179,21 @@ async function resumeAndObserve(ctx: Context, remote: TestSessionRemote, id: Ses
 }
 
 describe('resumed Session summaries', () => {
+  it('discovers an offline import on explicit refresh and an attached Session immediately', async () => {
+    const { ctx, remote, cwd } = await resumeHarness(120_000)
+    const list = (fresh = false) => remote.list({ paged: true, fresh })
+    expect(await list()).toMatchObject({ ok: true, value: { items: [] } })
+    const id = brandString<SessionId>('offline-import')
+    await storeSession(ctx, id, cwd, configurationEvents)
+    expect(await list()).toMatchObject({ ok: true, value: { items: [] } })
+    expect(await list(true)).toMatchObject({ ok: true, value: { items: [{ sessionId: id, agentAvailable: false }] } })
+    const discover = vi.spyOn(ctx.sessionQuery, 'listSessions')
+    await ctx.agents.resume({ resumeSessionId: id })
+    const before = discover.mock.calls.length
+    expect(await list()).toMatchObject({ ok: true, value: { items: [{ sessionId: id, agentAvailable: true }] } })
+    expect(discover.mock.calls.length).toBe(before + 1)
+  })
+
   it('cold-reads opted-in commands as conversations and keeps prompt recency empty', async () => {
     const { ctx, remote, cwd } = await resumeHarness()
     const id = 'session-resumed-command' as SessionId

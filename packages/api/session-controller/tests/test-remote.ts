@@ -107,6 +107,7 @@ export interface TestSessionRemoteDefaults {
   readonly openFileApplication?: SessionControllerInternals['openFileApplication']
   readonly revealPath?: (path: string, signal: AbortSignal) => Promise<void>
   readonly canOpenPath?: () => boolean
+  readonly listDiscoveryCacheMs?: number
   readonly listWorkSliceMs?: number
 }
 
@@ -319,6 +320,7 @@ async function installControllers(
       ctx,
       {
         ...defaults.nativeOpen === undefined ? {} : { nativeOpen: defaults.nativeOpen },
+        ...defaults.listDiscoveryCacheMs === undefined ? {} : { listDiscoveryCacheMs: defaults.listDiscoveryCacheMs },
         ...defaults.listWorkSliceMs === undefined ? {} : { listWorkSliceMs: defaults.listWorkSliceMs },
       },
       {
