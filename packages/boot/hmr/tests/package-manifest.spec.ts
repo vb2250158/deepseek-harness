@@ -3,10 +3,11 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import NodeModule, { createRequire, registerHooks } from 'node:module'
 import { tmpdir } from 'node:os'
+import { scheduler } from 'node:timers/promises'
 import { dirname, join, toNamespacedPath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { ModuleLoader } from '@deepseek-ai/cordis-plugin-loader'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PackageManifests } from '../src/package-manifest.ts'
 import { directorySpelling } from '../src/directory-spelling.ts'
 
@@ -72,6 +73,25 @@ it('a fresh mapped-directory scan follows a retargeted package link with Node’
       expect(directorySpelling(join(link, name), scan)).toBe(realpathSync(join(target, name)))
     }
   }
+})
+
+it('keeps the active loader hooks until preparation finishes and installs all hooks on invalidation', async () => {
+  const f = fixture()
+  const originalLoad: unknown = Reflect.get(NodeModule, '_load')
+  const gate = Promise.withResolvers<undefined>()
+  const pause = vi.spyOn(scheduler, 'yield').mockImplementationOnce(() => gate.promise)
+  cleanup.push(() => { gate.resolve(undefined); pause.mockRestore() })
+  const preparation = f.manifests.prepareInvalidation()
+  expect(pause).toHaveBeenCalledOnce()
+  expect(Reflect.get(NodeModule, '_load')).toBe(originalLoad)
+  gate.resolve(undefined)
+  await preparation
+  expect(Reflect.get(NodeModule, '_load')).toBe(originalLoad)
+  await f.invalidate(f.manifest)
+  expect(Reflect.get(NodeModule, '_load')).not.toBe(originalLoad)
+  pause.mockClear()
+  await f.manifests.prepareInvalidation()
+  expect(pause).not.toHaveBeenCalled()
 })
 
 function resolveEsm(specifier: string, parentURL: string): string {

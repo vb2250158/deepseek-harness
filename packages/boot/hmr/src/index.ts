@@ -970,9 +970,10 @@ class Hmr extends Service {
       }
       // Modules whose links or evaluation failed are evicted, so the recomposition retries failed imports against a
       // corrected file or a dependency installed since.
-      await this.contained('expiring failed imports', () => {
+      await this.contained('expiring failed imports', async () => {
         // Without an ES module cache no failed module is known.
         if (unavailable) return
+        await this.manifests.prepareInvalidation()
         const roots = compared?.roots ?? [realpathSync(profile.dir) + sep]
         // A dependency installed since the failed import can sit in a directory Node recorded as having no manifest.
         for (const root of roots) this.manifests.invalidate(join(root, 'package.json'))

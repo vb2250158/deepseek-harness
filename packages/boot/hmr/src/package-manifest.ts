@@ -1,5 +1,6 @@
 /** Expire Node's cached package configuration for package directories whose manifest changed. */
 import { isUtf8 } from 'node:buffer'
+import { scheduler } from 'node:timers/promises'
 import { hasDirectoryPrefix } from './directory-prefix.ts'
 import { readFileSync, realpathSync } from 'node:fs'
 import { createRequire, isBuiltin } from 'node:module'
@@ -84,16 +85,20 @@ function requireInternal(id: string): unknown {
   }
 }
 
-function loadNodeInternals(): NativeAccess {
+function* loadNodeInternals(): Generator<undefined, NativeAccess> {
   const realm = requireInternal('internal/bootstrap/realm') as { internalBinding(id: 'modules'): PackageBinding }
+  yield undefined
   const esm = requireInternal('internal/modules/esm/loader') as {
     getOrInitializeCascadedLoader(): NativeAccess['esmLoader']
   }
+  yield undefined
+  const reader = requireInternal('internal/modules/package_json_reader') as PackageReader
+  yield undefined
+  const { ResolveCache } = requireInternal('internal/modules/esm/module_map') as { ResolveCache: ResolveCacheClass }
+  yield undefined
+  const { Module: cjs } = requireInternal('internal/modules/cjs/loader') as { Module: CommonJsModule }
   return {
-    binding: realm.internalBinding('modules'),
-    reader: requireInternal('internal/modules/package_json_reader') as PackageReader,
-    ResolveCache: (requireInternal('internal/modules/esm/module_map') as { ResolveCache: ResolveCacheClass }).ResolveCache,
-    cjs: (requireInternal('internal/modules/cjs/loader') as { Module: CommonJsModule }).Module,
+    binding: realm.internalBinding('modules'), reader, ResolveCache, cjs,
     esmLoader: esm.getOrInitializeCascadedLoader(),
   }
 }
@@ -139,10 +144,23 @@ export class PackageManifests {
   /** Real directory of each directory a lookup reached; linked consumers name a package by its link path. */
   private readonly realDirectories = new Map<string, string>()
   private native: NativeAccess | undefined
+  private prepared: NativeAccess | undefined
   private rawBinding!: PackageBinding
   private rawReader!: PackageReader
   private rawCommonJs!: Pick<CommonJsModule, '_load'>
   private readonly restorers: Array<() => void> = []
+
+  /** Read the Node interfaces for the first profile invalidation, yielding before each independent lookup. */
+  async prepareInvalidation(): Promise<void> {
+    if (this.native !== undefined || this.prepared !== undefined) return
+    const reads = loadNodeInternals()
+    let step: IteratorResult<undefined, NativeAccess>
+    do {
+      await scheduler.yield()
+      step = reads.next()
+    } while (!step.done)
+    this.prepared = step.value
+  }
 
   /**
    * Expire cached configuration for one package directory. Loaded modules stay evaluated; later resolutions and
@@ -168,6 +186,7 @@ export class PackageManifests {
   dispose(): void {
     for (const restore of this.restorers.splice(0).reverse()) restore()
     this.native = undefined
+    this.prepared = undefined
     this.realDirectories.clear()
   }
 
@@ -194,7 +213,14 @@ export class PackageManifests {
 
   private installPackageHooks(): NativeAccess {
     if (this.native !== undefined) return this.native
-    const native = loadNodeInternals()
+    let native = this.prepared
+    if (native === undefined) {
+      const reads = loadNodeInternals()
+      let step = reads.next()
+      while (!step.done) step = reads.next()
+      native = step.value
+    }
+    this.prepared = undefined
     this.native = native
     const binding = createReplaceHelper(native.binding)
     const reader = createReplaceHelper(native.reader)
