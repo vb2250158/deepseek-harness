@@ -230,9 +230,11 @@ describe('package manifest invalidation', { concurrent: false }, () => {
     file(f.manifest, JSON.stringify({ name: 'pkg', type: 'module' }))
     f.manifests.invalidate(f.manifest)
     expect(formats.defaultGetFormatWithoutErrors(pathToFileURL(source))).toBe('module')
-    expect(reader.getNearestParentPackageJSON(source)?.data.type).toBe('module')
+    expect(reader.getNearestParentPackageJSON(source)).toMatchObject({
+      data: { type: 'module' }, path: toNamespacedPath(f.manifest),
+    })
     expect(reader.getPackageScopeConfig(pathToFileURL(source).href)).toMatchObject({
-      exists: true, type: 'module', pjsonPath: toNamespacedPath(f.manifest),
+      exists: true, type: 'module', pjsonPath: f.manifest,
     })
   })
 
@@ -332,6 +334,23 @@ describe('package manifest reader parity', { concurrent: false }, () => {
     expect(result.signal, stderr).toBeNull()
     expect(result.code, stderr).toBe(0)
     expect(stdout).toBe('scope traversal completed\n')
+  })
+
+  it('keeps the native ESM scope path for an invalidated enclosing manifest', async () => {
+    const f = fixture()
+    const ancestor = join(f.root, 'scope-parent', 'package.json')
+    file(ancestor, '{"type":"commonjs"}')
+    const source = join(dirname(ancestor), 'deeper', 'entry.js')
+    file(source, 'void 0')
+    const url = pathToFileURL(source).href
+    const initialScope = reader.getPackageScopeConfig(url)
+    expect(initialScope).toMatchObject({ exists: true, type: 'commonjs', pjsonPath: ancestor })
+    file(ancestor, '{"type":"module"}')
+    await f.manifests.invalidate(ancestor)
+    expect(reader.getPackageScopeConfig(url)).toMatchObject({ ...initialScope, type: 'module' })
+    expect(reader.getNearestParentPackageJSON(source)).toMatchObject({
+      data: { type: 'module' }, path: toNamespacedPath(ancestor),
+    })
   })
 
   it('reads valid JSON with a non-file ESM base like Node', async () => {
