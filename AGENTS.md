@@ -91,7 +91,7 @@ Package groups: [packages/README.md](packages/README.md). [Experimental status](
 ## Commands
 
 ```sh
-pnpm install            # pnpm workspaces, node >=24.9
+pnpm install            # node ^24.22.3 || >=26.13.1
 pnpm run clean           # remove build outputs and safe residue from deleted packages
 pnpm run test           # unit tests
 pnpm run test:coverage  # CI coverage gate: per-file 100% on packages/*/*/src
@@ -171,8 +171,8 @@ Real-API tests/demos read `DEEPSEEK_API_KEY`, optional `DEEPSEEK_BASE_URL`, and 
 - **Testing policy** — [docs/testing.md](docs/testing.md). Every non-trivial model- or product-user-visible change updates a keyless recorded-session snapshot; [snapshot ownership](snapshots/AGENTS.md) reserves the top-level tree for session-driven cases and keeps other expected output owner-local. Fix the owner fixtures while preserving replay normalization semantics; use this fork's declared test environment.
 - **Design each tool's UI presentation up front.** Host presenters stay pure; Web cards derive from raw events and persisted result metadata ([cookbook](docs/cookbook/adding-a-tool.md)).
 - **Plan unit, e2e, and snapshot coverage** for capability seams, lifecycle paths, and transcript output; include missing snapshot-harness support in the same change.
-- **Both SDKs project the loop.** Agent-loop, session-lifecycle, and `SessionEventMap` changes update the TypeScript and Python SDK expected outputs in the same PR; run their dedicated SDK snapshot checks ([surfaces](docs/testing.md#when-a-snapshot-test-is-required)).
-- **Choose PR history deliberately.** Split independent changes and fix the introducing PR before propagation. Standalone/stack branches may merge-forward or rebase. Rewrites use `--force-with-lease`, recheck the remote after concurrent changes; preserve an in-progress merge-forward checkpoint before taking a newer base ([rationale](.agents/notes/implemented/process/2026-08-02-native-github-stacks-and-optional-rebases.md)).
+- **Both SDKs project the loop.** Agent-loop, session-lifecycle, and `SessionEventMap` changes update the TypeScript and Python SDK expected outputs in the same PR; run their dedicated SDK snapshot checks because `pnpm run test` covers neither ([surfaces](docs/testing.md#when-a-snapshot-test-is-required)).
+- **Choose PR history deliberately.** Split independent changes and fix the introducing PR before propagation. Rebase branches with `rerere.enabled`; merge-forward only on the PR author's explicit request, keeping in-progress checkpoints. Rewrites use `--force-with-lease`, abort on remote movement, never raw `--force` ([rationale](.agents/notes/implemented/process/2026-11-19-prefer-rebase-with-rerere.md)).
 - **Labels:** one PR `kind/*`, all material `area/*`, and native Issue Type ([taxonomy](.agents/notes/implemented/process/2026-08-08-unified-github-label-taxonomy.md)).
 - **PR descriptions:** write and update every PR description with [dsh-pr-description](.agents/skills/dsh-pr-description/SKILL.md).
 - TODO markers: `FIXME`/`TODO`/`XXX` by urgency ([semantics](docs/development.md)).
@@ -192,7 +192,7 @@ Docs accompany every code change: update affected README and JSDoc contracts tog
 
 ## Editing these instructions
 
-`CLAUDE.md` symlinks `AGENTS.md` at root and `packages/`; edit the real file. Keep each rule self-contained while linking high-level docs. Condense when clarity survives; raise a `verify-doc-budgets` ceiling when the required content genuinely needs more space.
+`CLAUDE.md` symlinks `AGENTS.md` at root and `packages/`; edit the real file. Keep each rule self-contained while linking high-level docs. Condense when clarity survives; raise a `verify-doc-budgets` ceiling when the required content needs more space.
 
 ## Vendoring policy
 

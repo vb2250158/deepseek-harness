@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "checkedOn": "2026-11-19",
+  "checkedOn": "2026-11-23",
   "host": {
-    "version": "0.2.2-rc.5",
+    "version": "0.2.3-alpha.2",
     "repository": "https://github.com/vb2250158/deepseek-harness",
     "source": "Fixed official-source Web export",
     "revisionEvidence": "host.version and candidateVerification describe the current source test target; productionAtLastVerification records the separately verified installation",
@@ -13,10 +13,10 @@
     "platform": "win32",
     "arch": "x64",
     "referenceWindowsVersion": "10.0.22631",
-    "node": "24.15.0",
+    "node": "24.22.3",
     "nodeAbi": "137",
     "pnpm": "11.28.5",
-    "npm": "11.12.1"
+    "npm": "11.19.1"
   },
   "scope": {
     "onlyDeclaredTarget": true,
@@ -32,18 +32,16 @@
     "note": "This single CI image is separate from the local Windows reference build; it is not an OS compatibility matrix."
   },
   "candidateVerification": {
-    "hostVersion": "0.2.2-rc.5",
-    "sourceRevisionEvidence": "Maintained master merges the official 0.2.2-rc.5 source. The workflow summary identifies the fixed maintained commit.",
-    "sourceWeb": "The Windows source Web workflow checks the current candidate. Formal adoption requires a separate check of the selected plugin combination.",
+    "hostVersion": "0.2.3-alpha.2",
+    "sourceRevisionEvidence": "Maintained master integrates the official 0.2.3-alpha.2 source. The workflow summary reports the tested maintained commit.",
+    "sourceWeb": "The Windows source Web workflow checks this candidate. Formal adoption requires a separate check of the selected plugin combination.",
     "coverage": [
-      "Declared Windows x64, Node 24.15.0 and pnpm 11.28.5 target",
-      "Conversation Workspace adoption, per-occurrence delivery choice and first-screen selection commits",
-      "Session persistence, terminal and changed plugin composition in source Web"
+      "Declared Windows x64, Node 24.22.3 and pnpm 11.28.5 target"
     ],
     "productionInstalled": false,
     "selectedPluginCombinationVerified": false,
     "guiVerified": false,
-    "note": "Source candidate only; formal Core remains the rc.1 source recorded below."
+    "note": "Source test target. Production status below is the last recorded verification."
   },
   "productionAtLastVerification": {
     "hostVersion": "0.2.2-rc.1",

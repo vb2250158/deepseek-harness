@@ -95,7 +95,7 @@ turn/start
      reject, or a first enter rewritten empty -> close the turn with no step
      step/start
      agent/request -> prepareCall (cancellation commits neither system nor users)
-     reconcile system/message using the prepared call capability
+     commit system/message updates; rebuild the system head after compaction
      append entered messages as user/message; reconcile retained runtime context
      log request/header and request/context as needed
      agent/request-context
@@ -117,7 +117,9 @@ fork 创建存储调用方提供的历史；共享前缀的后端先持久化父
 
 输入通过同一个 inbox 到达驱动器；注入的上下文等待一条唤醒消息。AgentLoop 的持久 `inbox` 投影使待处理输入在没有活跃 Agent 时仍可读取。
 
-循环在工具解析与组装之前，通过 `agent/resolve-model` 将捕获的原始选择解析为供 pre-step 与重试使用的实际选择；省略推理强度时使用适配器默认值。`agent/pre-step` 可改写或拒绝输入；首次领取被拒绝或为空时，关闭不含步骤的持久轮次。失败的领取不重放，相邻输入启动独立轮次。改写须保留 `startsRequestSeries`，它会记录新的 header。组装与 `step/start` 之后，`agent/request` 只调整控制参数，不改变路由。`prepareCall()` 绑定适配器，再提交提示词与已接纳用户消息；在任一异步阶段取消都不提交这两者。提示词准入依据已准备调用的能力，而非先前的请求上下文。每次尝试刷新运行时事实、协调提示词／用户消息／运行时上下文、记录 header/context，再冻结请求。重试不重复组装或 pre-step。附接后的替换和图片省略开启新请求序列，未变化的恢复延续原序列。系统头预留、空渲染文本、受支持的提示词／工具更新与序列归并规则见 [agent-loop](../packages/core/agent-loop/README.zh.md#understand-the-implementation) 和[系统提示词决策](../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.zh.md)。
+循环在工具解析与组装之前，通过 `agent/resolve-model` 将捕获的原始选择解析为供 `AssembleContext.modelSelection` 与 `agent/pre-step.modelSelection` 使用的实际选择。省略推理强度时使用适配器默认值。`agent/pre-step` 可改写或拒绝输入；首次领取被拒绝或为空时，关闭不含步骤的持久轮次。失败的领取不重放，相邻输入启动独立轮次。改写须保留 `startsRequestSeries`，它会记录新的 header。组装与 `step/start` 之后，已弃用的 `agent/request` hook 只调整控制参数，不改变路由。`prepareCall()` 绑定适配器，再提交提示词与已接纳用户消息；在任一异步阶段取消都不提交这两者。提示词准入依据已准备调用的能力，而非先前的请求上下文。每次尝试刷新运行时事实、协调提示词／用户消息／运行时上下文、记录 header/context，再冻结请求。系统头预留、空渲染文本、受支持的提示词／工具更新与序列归并规则见 [agent-loop](../packages/core/agent-loop/README.zh.md#understand-the-implementation) 和[系统提示词决策](../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.zh.md)。
+
+重试保留模型选择与组装结果。此后的来源变化留到下一次组装处理。surface 替换和图片省略决定开启新请求序列；未变化的恢复延续序列。每次尝试追加该组装的 `systemUpdates()` 写入；在已记录压缩摘要之后的首次尝试（包括重试）中，这些写入通过普通 `system/message` 事件清空保留的系统增量，并以捕获的指令替换初始系统节点。[Agent-loop](../packages/core/agent-loop/README.zh.md#understand-the-implementation) 规定请求与重试时序。
 
 循环发送不可变请求，同时保持取消有效，仅对完全冻结的对象复用冻结证据；[agent-loop](../packages/core/agent-loop/README.zh.md) 负责请求构建与取消原因。
 

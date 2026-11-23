@@ -2069,13 +2069,20 @@ describe('runtime resolution', { concurrent: false }, () => {
     },
   )
 
-  it('excludes profile symlinks to files from linked roots', async () => {
+  it('excludes profile symlinks to files from linked roots', async ({ skip }) => {
     const f = fixture()
     const modules = join(f.profile.dir, 'node_modules')
     const target = join(f.root, 'work', 'file.cjs')
     file(target, 'module.exports = { marker: 5 }\n')
     mkdirSync(join(modules, '@scope'), { recursive: true })
-    symlinkSync(target, join(modules, 'file-link'), 'file')
+    try {
+      symlinkSync(target, join(modules, 'file-link'), 'file')
+    } catch (error) {
+      if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
+        return skip(true, 'Windows denied creation of file symlinks')
+      }
+      throw error
+    }
     symlinkSync(target, join(modules, '@scope', 'file-link'), 'file')
 
     const resolution = await resolutionOf(f)

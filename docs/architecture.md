@@ -64,6 +64,8 @@ Electron starts the private Host in Node mode through the shared CLI profile run
 | [`core/scope`](subsystems/scope.md) | The per-agent scoped-registration primitive | library, no key |
 | [`llm/llm`](subsystems/llm-streaming.md) | Message and stream vocabulary plus the adapter seam | `ctx.llm` |
 
+<a id="events"></a>
+
 ## Events
 
 Events provide extension points in three domains.
@@ -78,6 +80,8 @@ AgentLoop rolls back failed initialization and awaits serial `agent/created` bef
 
 [Event producers and consumers](event-producer-consumer.md).
 
+<a id="turn-flow"></a>
+
 ## Turn flow
 
 A **step** is one model request plus the tools it calls. A **turn** is zero or more steps: it opens before its first input is claimed and closes once nothing is owed.
@@ -91,7 +95,7 @@ turn/start
      reject, or a first enter rewritten empty -> close the turn with no step
      step/start
      agent/request -> prepareCall (cancellation commits neither system nor users)
-     reconcile system/message using the prepared call capability
+     commit system/message updates; rebuild the system head after compaction
      append entered messages as user/message; reconcile retained runtime context
      log request/header and request/context as needed
      agent/request-context
@@ -113,7 +117,9 @@ Fork creation stores the caller-supplied history; a sharing backend persists the
 
 One inbox feeds the driver; injected context waits for a waking message. AgentLoop’s durable `inbox` projection exposes pending input without live Agents.
 
-Before tools and assembly, `agent/resolve-model` resolves captured source into effective selection for pre-step and retries; omitted effort uses adapter defaults. `agent/pre-step` may rewrite or reject input; rejection or an empty first claim closes a durable stepless turn. Failed claims are not replayed; adjacent input starts separately. Rewrites preserve `startsRequestSeries`, which logs a fresh header. After assembly and `step/start`, `agent/request` adjusts controls without changing routing. `prepareCall()` binds the adapter before committing the prompt and accepted users; cancellation during either async phase commits neither. Prepared capabilities govern prompt admission, not preceding request context. Each attempt refreshes runtime facts, reconciles prompt/users/runtime context, logs header/context and freezes the request. Retries repeat neither assembly nor pre-step. Post-attachment replacements and image offloads start new series; unchanged resume continues one. System-head reservation, empty renderings, supported prompt/tool updates and series consolidation follow [agent-loop](../packages/core/agent-loop/README.md#understand-the-implementation) and the [system-prompt decision](../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.md).
+Before conditional tools and assembly, the loop resolves the captured model selection through `agent/resolve-model` and carries the result in `AssembleContext.modelSelection` and `agent/pre-step.modelSelection`. Omitted effort uses adapter defaults. `agent/pre-step` may rewrite or reject input; rejection or an empty first claim closes a durable stepless turn. Failed claims are not replayed; adjacent input starts separately. Rewrites preserve `startsRequestSeries`, which logs a fresh header. After assembly and `step/start`, the deprecated `agent/request` hook adjusts controls without changing routing. `prepareCall()` binds the adapter before committing the prompt and accepted users; cancellation during either async phase commits neither. Prepared capabilities govern prompt admission, not preceding request context. Each attempt refreshes runtime facts, reconciles prompt/users/runtime context, logs header/context and freezes the request. System-head reservation, empty renderings, supported prompt/tool updates and series consolidation follow [agent-loop](../packages/core/agent-loop/README.md#understand-the-implementation) and the [system-prompt decision](../.agents/notes/implemented/architecture/2026-09-02-system-prompt-as-surface-node.md).
+
+Retries retain the model selection and assembly. Later source changes wait for the next assembly. Surface replacements and image-offload decisions start a new request series; unchanged resume continues it. Each attempt appends the assembly’s `systemUpdates()` writes; at the first attempt after a logged compaction summary, including a retry, they clear retained system additions and replace the initial system node with the captured instructions through ordinary `system/message` events. [Agent-loop](../packages/core/agent-loop/README.md#understand-the-implementation) owns request and retry timing.
 
 The loop sends immutable requests with live cancellation and reuses freeze evidence for frozen identities; [agent-loop](../packages/core/agent-loop/README.md) owns construction and cancellation causes.
 

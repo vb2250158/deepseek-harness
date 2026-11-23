@@ -116,6 +116,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Declares optional provider-local elapsed-time measurement. External plugins can provide the timing service; consumers preserve task results and rejections without timing downstream listeners.',
   },
   {
+    key: 'remoteConnection',
+    pkg: 'client-remote-connection',
+    title: 'Remote browser login',
+    mode: 'service',
+    note: 'Owns QR invitations, approved pairing requests, Remote browser credentials and the anonymous login document; its Client provides approval controls and an independent Token-link shortcut.',
+  },
+  {
     key: 'actionCards',
     pkg: 'action-cards',
     title: 'Optional action cards',

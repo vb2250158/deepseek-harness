@@ -64,7 +64,7 @@ it('composition and selection away from the end suppress completion', async () =
 })
 it('the existing menu owns Tab before suggestions', async () => {
   const f = fixture()
-  const menu = registerComposerKeymap(f.editor, { arbitrate: () => 'consumed', dismissPopup() {}, space: () => false, canSubmit: () => true, submit() {}, intakeFiles() {}, pasteText() {} })
+  const menu = registerComposerKeymap(f.editor, { arbitrate: () => 'consumed', dismissPopup() {}, space: () => false, recallHistory: () => false, canSubmit: () => true, submit() {}, intakeFiles() {}, pasteText() {} })
   onTestFinished(menu)
   await vi.advanceTimersByTimeAsync(100)
   f.editor.dispatchCommand(KEY_TAB_COMMAND, new KeyboardEvent('keydown', { key: 'Tab', cancelable: true }))
