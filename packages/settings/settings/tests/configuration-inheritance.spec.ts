@@ -15,7 +15,7 @@ it('publishes presentation changes from live entries without reading the profile
   ctx.on('settings/document-updated', (ns, revision) => { events.push([ns, revision]) })
   const read = vi.spyOn(appBoot, 'loadProfileDirectory')
   try {
-    const undo = ctx.settings.configure({ auto: false }, entry.fiber!)
+    const undo = ctx.settings.configure({ auto: false }, entry.fiber)
     await Promise.resolve()
     undo()
     await Promise.resolve()

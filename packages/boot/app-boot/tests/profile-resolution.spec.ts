@@ -2079,7 +2079,8 @@ describe('runtime resolution', { concurrent: false }, () => {
       symlinkSync(target, join(modules, 'file-link'), 'file')
     } catch (error) {
       if (process.platform === 'win32' && error instanceof Error && 'code' in error && error.code === 'EPERM') {
-        return skip(true, 'Windows denied creation of file symlinks')
+        skip(true, 'Windows denied creation of file symlinks')
+        return
       }
       throw error
     }

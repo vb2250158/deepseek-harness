@@ -47,9 +47,9 @@ describe('Session projection value semantics', () => {
   it('loads an observed deferred key once and coalesces newer cuts during its read', async ({ mock, remote }) => {
     const manager = makeManager(mock, remote)
     const store = manager.get(SID).projections
-    const cut = (seq: number) => manager.handleControlFrame({
-      type: 'projection', sessionId: SID, seq, changes: [], deferredKeys: ['test/marks'],
-    })
+    const cut = (seq: number) => {
+      manager.handleControlFrame({ type: 'projection', sessionId: SID, seq, changes: [], deferredKeys: ['test/marks'] })
+    }
     manager.handleControlFrame({ type: 'baseline', value: { projections: {
       [SID]: { asOfSeq: 7, values: { title: 'Title' }, deferredKeys: ['test/marks'] },
     } } })
@@ -67,7 +67,7 @@ describe('Session projection value semantics', () => {
     cut(10)
     remote.session.projections.mockResolvedValueOnce(ok({ kind: 'sequenced', asOfSeq: 10, values: { 'test/marks': { marks: ['latest'] } } }))
     first.resolve(ok({ kind: 'sequenced', asOfSeq: 8, values: { 'test/marks': { marks: ['old'] } } }))
-    await vi.waitFor(() => expect(face.getSnapshot()).toEqual({ marks: ['latest'] }))
+    await vi.waitFor(() => { expect(face.getSnapshot()).toEqual({ marks: ['latest'] }) })
     cut(10)
     expect(store.get('title')).toBe('Title')
     expect(remote.session.projections).toHaveBeenCalledTimes(2)
@@ -79,7 +79,7 @@ describe('Session projection value semantics', () => {
     store.seed({ asOfSeq: SessionSeq(11), values: {}, deferredKeys: ['test/marks'] })
     expect(store.get('test/marks')).toEqual({ marks: ['latest'] })
     update.resolve(ok({ kind: 'sequenced', asOfSeq: 11, values: { 'test/marks': { marks: ['updated'] } } }))
-    await vi.waitFor(() => expect(face.getSnapshot()).toEqual({ marks: ['updated'] }))
+    await vi.waitFor(() => { expect(face.getSnapshot()).toEqual({ marks: ['updated'] }) })
     a()
     b()
     stopAny()
@@ -89,7 +89,9 @@ describe('Session projection value semantics', () => {
   it('cancels abandoned detail reads and rejects a reply from the previous generation', async ({ mock, remote }) => {
     const manager = makeManager(mock, remote)
     const store = manager.get(SID).projections
-    const opening = () => store.seed({ asOfSeq: SessionSeq(4), values: {}, deferredKeys: ['test/marks'] })
+    const opening = () => {
+      store.seed({ asOfSeq: SessionSeq(4), values: {}, deferredKeys: ['test/marks'] })
+    }
     const face = store.faceOf('test/marks')
     const abandoned = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.projections>>>()
     remote.session.projections.mockReturnValueOnce(abandoned.promise)
@@ -109,7 +111,7 @@ describe('Session projection value semantics', () => {
     abandoned.resolve(old)
     remote.session.projections.mockResolvedValueOnce(ok({ kind: 'sequenced', asOfSeq: 4, values: { 'test/marks': { marks: ['current'] } } }))
     opening()
-    await vi.waitFor(() => expect(face.getSnapshot()).toEqual({ marks: ['current'] }))
+    await vi.waitFor(() => { expect(face.getSnapshot()).toEqual({ marks: ['current'] }) })
     expect(remote.session.projections).toHaveBeenCalledTimes(3)
     again()
     await manager.dispose()

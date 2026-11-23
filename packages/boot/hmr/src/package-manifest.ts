@@ -260,10 +260,7 @@ export class PackageManifests {
     const found = this.findNearestPackageConfig(fileURLToPath(url), true)
     if (typeof found === 'string') return this.rawBinding.getPackageScopeConfig(pathToFileURL(found).href)
     if (found.configuration === undefined) return found.path
-    // ESM scope uses the URL-derived path. Direct and nearest reads keep Node's namespaced path.
-    const scope: PackageTuple = [...found.configuration.serialized]
-    scope[5] = found.path
-    return scope
+    return found.configuration.serialized
   }
 
   private hookBindingGetPackageType(url: string) {

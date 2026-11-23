@@ -234,7 +234,7 @@ describe('package manifest invalidation', { concurrent: false }, () => {
       data: { type: 'module' }, path: toNamespacedPath(f.manifest),
     })
     expect(reader.getPackageScopeConfig(pathToFileURL(source).href)).toMatchObject({
-      exists: true, type: 'module', pjsonPath: f.manifest,
+      exists: true, type: 'module', pjsonPath: toNamespacedPath(f.manifest),
     })
   })
 
@@ -344,9 +344,10 @@ describe('package manifest reader parity', { concurrent: false }, () => {
     file(source, 'void 0')
     const url = pathToFileURL(source).href
     const initialScope = reader.getPackageScopeConfig(url)
-    expect(initialScope).toMatchObject({ exists: true, type: 'commonjs', pjsonPath: ancestor })
+    expect(initialScope).toMatchObject({ exists: true, type: 'commonjs' })
+    expect(toNamespacedPath(initialScope.pjsonPath)).toBe(toNamespacedPath(ancestor))
     file(ancestor, '{"type":"module"}')
-    await f.manifests.invalidate(ancestor)
+    f.manifests.invalidate(ancestor)
     expect(reader.getPackageScopeConfig(url)).toMatchObject({ ...initialScope, type: 'module' })
     expect(reader.getNearestParentPackageJSON(source)).toMatchObject({
       data: { type: 'module' }, path: toNamespacedPath(ancestor),

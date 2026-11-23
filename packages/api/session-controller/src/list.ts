@@ -294,7 +294,7 @@ export class ApiSessionList {
     } else if (warm && cacheMs > 0) {
       const wake = signal === undefined ? warm.controller.signal : AbortSignal.any([signal, warm.controller.signal])
       const interrupted = Promise.withResolvers<void>()
-      const resume = (): void => interrupted.resolve()
+      const resume = (): void => { interrupted.resolve() }
       wake.addEventListener('abort', resume, { once: true })
       try { await Promise.race([warm.done, interrupted.promise]) }
       finally { wake.removeEventListener('abort', resume) }

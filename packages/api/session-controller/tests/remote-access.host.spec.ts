@@ -304,7 +304,9 @@ describe('Session Controller access', () => {
     const compact = controller.compactControl(abort.signal)[Symbol.asyncIterator]()
     const full = controller.control(abort.signal)[Symbol.asyncIterator]()
     try {
-      const first = (await compact.next()).value
+      const baseline = await compact.next()
+      if (baseline.done === true) throw new Error('compact control stream ended before the baseline')
+      const first = baseline.value
       expect(first).toMatchObject({ type: 'baseline', value: { projections: {
         [SHARED]: { deferredKeys: ['controlDetailTest'] },
       } } })
@@ -314,9 +316,9 @@ describe('Session Controller access', () => {
       } } })
       shared.inbox.append('next-turn', message('work'))
       expect((await compact.next()).value).toMatchObject({ type: 'projection', deferredKeys: ['controlDetailTest'] })
-      expect((await full.next()).value).toMatchObject({ type: 'projection', changes: expect.arrayContaining([
-        { key: 'controlDetailTest', val: largeValue + '!' },
-      ]) })
+      const changed = await full.next()
+      if (changed.done === true || changed.value.type !== 'projection') throw new Error('missing full projection change')
+      expect(changed.value.changes).toContainEqual({ key: 'controlDetailTest', val: largeValue + '!' })
       const follow = controller.follow({ address: { kind: 'session', sessionId: SHARED },
         compactProjections: true }, abort.signal)[Symbol.asyncIterator]()
       const opening = await follow.next()
@@ -327,7 +329,9 @@ describe('Session Controller access', () => {
       guestPolicy(ctx, READS_SHARED)
       const read = (sessionId: SessionId) => guestCall(ctx, 'projections', { request: { sessionId, keys: ['controlDetailTest'] } })
       const detail = await read(SHARED)
-      expect(detail).toEqual({ kind: 'sequenced', asOfSeq: expect.any(Number), values: { controlDetailTest: largeValue + '!' } })
+      expect(detail).toMatchObject({ kind: 'sequenced', values: { controlDetailTest: largeValue + '!' } })
+      if (typeof detail !== 'object' || detail === null || !('asOfSeq' in detail)) throw new Error('missing Session sequence')
+      expect(detail.asOfSeq).toBeTypeOf('number')
       await expect(read(PRIVATE)).rejects.toMatchObject({ code: 'remote-access/denied' })
     } finally {
       abort.abort()

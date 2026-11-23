@@ -253,7 +253,7 @@ describe('ui-model-selection dual entry', () => {
     try {
       b.mint('late')
       const face = b.seat().inject!(sid('late'))
-      await vi.waitFor(() => expect(face.directory.getSnapshot().status).toBe('ready'))
+      await vi.waitFor(() => { expect(face.directory.getSnapshot().status).toBe('ready') })
       expect(b.calls.models).toBe(1)
     } finally {
       await b.ctx.fiber.dispose()
