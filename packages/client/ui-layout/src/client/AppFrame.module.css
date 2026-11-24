@@ -8,11 +8,8 @@
   background: var(--dsw-alias-bg-base);
 }
 
-/* Only discrete collapse/expand and fold changes ease the tracks (the TSX holds
-   data-animating across the toggle on the deepsuite sider curve). Steady-state
-   tracks move only with the viewport, and those updates must land instantly:
-   an eased track chases the live window edge and the centre column visibly
-   rubber-bands while the user resizes the window. */
+/* The frame arms track easing for animated panel and fold changes.
+   Rail toggles and viewport resizes apply the final widths immediately. */
 .frame[data-animating] {
   transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }

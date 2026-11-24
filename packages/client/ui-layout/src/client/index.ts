@@ -135,6 +135,8 @@ export interface SidebarOwnerProps {
   width: number
   /** Present the retained sidebar content as an overlay drawer. */
   drawer: boolean
+  /** Switch to the compact browser rail before paint, skipping the collapse fade. */
+  instantCollapse?: boolean
 }
 
 /** Right column owner share: resolved normal geometry and opening eligibility. */

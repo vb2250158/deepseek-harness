@@ -1,6 +1,6 @@
 /**
  * Sidebar shell: column geometry and global panel navigation.
- * Collapse is a slide plus crossfade:
+ * On an animated collapse or drawer transition, the expanded
  * content freezes at its expanded width (inline style) and fades out in place
  * while the sliding column (AppFrame grid tracks) clips it — nothing reflows
  * mid-slide. At settle the wide-only content unmounts and the upper
@@ -148,6 +148,7 @@ export function SidebarRoot({
   collapsed,
   width,
   drawer,
+  instantCollapse,
   startSession,
   toggleSidebar,
   selectPanel,
@@ -177,10 +178,11 @@ export function SidebarRoot({
   // A closed drawer retains its content with the rail phase already settled.
   const [settled, setSettled] = useState(collapsed)
   useEffect(() => {
+    if (instantCollapse) return
     if (drawer || !collapsed) { setSettled(collapsed); return }
     const timer = window.setTimeout(() => { setSettled(true) }, COLLAPSE_SETTLE_MS)
     return () => { window.clearTimeout(timer) }
-  }, [collapsed, drawer])
+  }, [collapsed, drawer, instantCollapse])
   const windowsTitlebar = document.documentElement.hasAttribute('data-windows-titlebar')
   const wide = drawer || (windowsTitlebar ? !collapsed : !collapsed || !settled)
   const [scrollHandoff] = useState(createScrollHandoff)
@@ -214,6 +216,8 @@ export function SidebarRoot({
   useModalLayer(column, drawer && !collapsed, toggleSidebar)
   useLayoutEffect(() => {
     if (!collapsed) return
+    // Compact the rail before paint, after the outgoing controls can hand off focus.
+    if (instantCollapse) setSettled(true)
     const controlled = sidebarFocus.current?.getAttribute('aria-controls')?.split(/\s+/) ?? []
     const ownsMenuFocus = controlled.some(id => document.getElementById(id)?.contains(document.activeElement))
     if (sidebarFocus.current !== document.activeElement && !ownsMenuFocus) return
@@ -221,7 +225,7 @@ export function SidebarRoot({
       ? column.current?.ownerDocument.querySelector<HTMLElement>('[data-sidebar-opener]')
       : column.current?.querySelector<HTMLElement>('[data-sidebar-toggle]')
     if (opener != null && !isBehindModal(opener)) focusWithoutRing(opener, { preventScroll: true })
-  }, [drawer, collapsed])
+  }, [drawer, collapsed, instantCollapse])
   const [pointerInside, setPointerInside] = useState(false)
   // Inside is decided by the column's BOX, not by DOM containment, for every
   // pointer move that reaches the column. ui-settings renders its
@@ -285,7 +289,7 @@ export function SidebarRoot({
       aria-label={drawer ? t('navigation.label') : undefined}
       tabIndex={drawer ? -1 : undefined}
       className={clsx(
-        css.root, !wide && css.collapsed, !wide && animateRail.current && css.railIn,
+        css.root, !wide && css.collapsed, !wide && !instantCollapse && animateRail.current && css.railIn,
         !drawer && collapsed && wide && css.fading, !pointerInside && css.quietBars,
       )}
       style={wide ? { width: !drawer && collapsed ? lastWideWidth.current : width } : undefined}

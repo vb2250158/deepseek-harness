@@ -70,11 +70,10 @@ function mountShell({ collapsed = false, width = 300, drawer = false, shortcuts 
   let sessionActionChildren: ReactNode
   const brandMark = <span data-testid="custom-brand-mark">M</span>
   const brandName = <span data-testid="custom-brand-name">Custom Brand</span>
-  let current = { collapsed, width, drawer }
+  let current: Pick<SidebarRootComponentProps, 'collapsed' | 'width' | 'drawer' | 'instantCollapse'> = { collapsed, width, drawer }
   const root = () => (
     <SidebarRoot
-      drawer={current.drawer}
-      collapsed={current.collapsed} width={current.width}
+      {...current}
       useSessions={neverHook} useSessionStatus={useSessionStatus} useSessionRetainInfo={neverHook}
       usePanelInfo={usePanelInfo} selectPanel={() => {}} usePanels={selector => selector(panels)} useEntryPins={selector => selector([])}
       useEntryActions={selector => selector(false)} setPinned={vi.fn()}
@@ -668,6 +667,14 @@ it('moves focus from drawer search to the rail toggle before wide content unmoun
   screen.getByRole('textbox', { name: 'Search' }).focus()
   h.rerender({ drawer: false, collapsed: true, width: 56 })
   act(() => { vi.advanceTimersByTime(150) })
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open sidebar' }))
+})
+
+it('compacts the rail and moves focus without waiting for a fade', () => {
+  const h = mountShell({ content: <input aria-label="Search" /> })
+  screen.getByRole('textbox', { name: 'Search' }).focus()
+  h.rerender({ collapsed: true, width: 56, instantCollapse: true })
+  expect(document.querySelector('[data-sidebar-scrollport]')).toBeNull()
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open sidebar' }))
 })
 

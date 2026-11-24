@@ -527,6 +527,19 @@ it('overlays the conversation and closes after navigation without losing its sid
         await posture.send('Emulation.setDevicePostureOverride', { posture: { type: 'folded' } })
         await expect.poll(async () => (await main.boundingBox())?.x).toBe(475.5)
         await page.emulateMedia({ reducedMotion: 'no-preference' })
+        await posture.send('Emulation.clearDevicePostureOverride')
+        await expect.poll(() => wideFrame.getAttribute('data-animating')).toBeNull()
+        await wideFrame.evaluate((el) => { el.style.setProperty('--ds-transition-duration-slow', '100s') })
+        await collapseSidebar.tap()
+        const railOpener = page.getByRole('button', { name: 'Open sidebar', exact: true })
+        await railOpener.waitFor()
+        expect((await main.boundingBox())?.x).toBe(56)
+        expect(await wideFrame.getAttribute('data-animating')).toBeNull()
+        await railOpener.tap()
+        await collapseSidebar.waitFor()
+        expect((await main.boundingBox())?.x).toBe(280)
+        expect(await wideFrame.getAttribute('data-animating')).toBeNull()
+        await wideFrame.evaluate((el) => { el.style.removeProperty('--ds-transition-duration-slow') })
         await page.setViewportSize({ width: 669, height: 951 })
         await expect.poll(() => frame.getAttribute('data-sidebar-collapsed')).toBe('true')
         await drawer.waitFor({ state: 'hidden' })
@@ -610,6 +623,7 @@ it('overlays the conversation and closes after navigation without losing its sid
         'rotation: 844x390 then 390x844 restores shell height and sidebar breakpoint',
         'folded landscape: 951px frame splits at 475.5px without a resize handle; unfolding restores 280px and search focus; portrait retains the drawer',
         'fold transitions: sidebar controls follow the divider in both directions; reduced motion changes width without animation',
+        'browser rail toggles: the main column reaches x=56 on collapse and x=280 on expand without a grid transition',
         'drawer mask: opacity transitions from 0 to 1 on open and 1 to 0 on close',
         'reduced motion: drawer and mask settle without transitions',
         'Web header: only the sidebar opener remains, with 48px leading clearance',

@@ -281,7 +281,7 @@ describe('AppFrame', () => {
     const { frame, instance, sidebarOwner, getByTestId, queryByTestId } = mountFrame()
     act(() => { instance.actions.toggleSidebar() })
     expect(tracks(frame)).toEqual([56, 0])
-    expect(sidebarOwner()).toEqual({ collapsed: true, width: 56, drawer: false })
+    expect(sidebarOwner()).toEqual({ collapsed: true, width: 56, drawer: false, instantCollapse: true })
     expect(getByTestId('sidebar-content')).toBeTruthy()
     expect(frame.querySelector('[data-side="sidebar"]')).toBeNull()
     // The rail keeps the window chrome housed: no shell.leading seat.
@@ -489,7 +489,7 @@ describe('AppFrame right panel presentation', () => {
     // Window-driven track updates follow the frame edge instantly.
     resize(1600)
     expect(frame.dataset.animating).toBeUndefined()
-    act(() => { instance.actions.toggleSidebar() })
+    act(() => { instance.actions.openRightbar(true, false) })
     expect(frame.dataset.animating).toBe('true')
     // Foreign transition ends (e.g. the handle's left) do not settle it...
     act(() => {
@@ -503,16 +503,19 @@ describe('AppFrame right panel presentation', () => {
     expect(frame.dataset.animating).toBeUndefined()
   })
 
-  it('lands the responsive auto-collapse instantly, keeping user toggles eased', () => {
+  it('changes browser rail widths immediately for resize, expand and collapse', () => {
     const { frame, instance } = mountFrame()
     // Shrinking across the breakpoint flips the collapse in the same update as
     // the viewport change: no easing, the tracks land with the window edge.
     resize(900)
     expect(frame.dataset.sidebarCollapsed).toBe('true')
     expect(frame.dataset.animating).toBeUndefined()
-    // A user toggle at the now-stable viewport still eases.
     act(() => { instance.actions.toggleSidebar() })
-    expect(frame.dataset.animating).toBe('true')
+    expect(tracks(frame)[0]).toBe(280)
+    expect(frame.dataset.animating).toBeUndefined()
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)[0]).toBe(56)
+    expect(frame.dataset.animating).toBeUndefined()
   })
 
   it('skips drawer entry motion from a collapsed rail while retaining explicit toggle motion', () => {
@@ -816,7 +819,7 @@ describe('sidebar drawer', () => {
     expect(sidebarOwner().collapsed).toBe(true)
     act(() => { instance.actions.toggleSidebar() })
     resize(768)
-    expect(sidebarOwner()).toEqual({ collapsed: true, width: 56, drawer: false })
+    expect(sidebarOwner()).toEqual({ collapsed: true, width: 56, drawer: false, instantCollapse: true })
     expect(tracks(frame)).toEqual([56, 0])
     resize(767)
     expect(sidebarOwner().collapsed).toBe(true)

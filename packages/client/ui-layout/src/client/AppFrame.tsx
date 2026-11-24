@@ -195,6 +195,7 @@ export function AppFrame({
   // the Windows caption row; neither platform keeps an icon rail.
   const darwin = document.documentElement.dataset.platform === 'darwin'
   const collapsedWidth = drawer || darwin || windowsTitlebar ? 0 : SIDEBAR_COLLAPSED
+  const instantRail = collapsedWidth === SIDEBAR_COLLAPSED && !centeredSidebar
   // Opening on a narrow frame collapses the left sidebar. Eligibility must
   // include that space before the occupant's first shown report arrives.
   const normal = computeColumns(
@@ -216,32 +217,23 @@ export function AppFrame({
   // Track-level transitions pause for the whole gesture: eased tracks would
   // detach the column edge from the pointer (AppFrame.module.css).
   const [dragging, setDragging] = useState(false)
-  // Track easing is scoped to discrete open/close and fold changes: data-animating
-  // goes up when the sidebar presentation or the rightbar track flips and comes down
-  // at transition end (timeout as the reduced-motion/covered-frame fallback).
-  // Steady-state viewport updates stay instant (AppFrame.module.css), and so
-  // does a toggle arriving together with a viewport change — that is the
-  // responsive auto-collapse firing mid window-resize, where easing would
-  // chase the live window edge. The counter restarts the settle window when a
-  // re-toggle interrupts a running transition.
+  // A browser rail toggle commits the final column width in one layout pass.
+  // Width interpolation otherwise reflows the active main panel on every frame.
   const [animating, setAnimating] = useState(0)
-  const trackToggle = `${sidebarCollapsed}:${layoutInfo.rightbarTrack}:${centeredSidebar}`
-  const previousToggle = useRef(trackToggle)
-  const previousViewport = useRef(viewport)
+  const rightbarTrack = layoutInfo.rightbarTrack
+  const previousTracks = useRef({ viewport, sidebarCollapsed, rightbarTrack, centeredSidebar })
+  const previous = previousTracks.current
+  const sidebarChanged = previous.sidebarCollapsed !== sidebarCollapsed
+  const animateChange = previous.rightbarTrack !== rightbarTrack || previous.centeredSidebar !== centeredSidebar
+    || sidebarChanged && !instantRail
+  const instantChange = previous.viewport !== viewport || sidebarChanged && !animateChange
   // Arm the transition before child layout effects measure the new column widths.
-  const animateTracks = previousViewport.current === viewport && (animating > 0 || previousToggle.current !== trackToggle)
+  const animateTracks = !instantChange && (animating > 0 || animateChange)
   useLayoutEffect(() => {
-    const viewportChanged = previousViewport.current !== viewport
-    previousViewport.current = viewport
-    if (viewportChanged) {
-      previousToggle.current = trackToggle
-      setAnimating(0)
-      return
-    }
-    if (previousToggle.current === trackToggle) return
-    previousToggle.current = trackToggle
-    setAnimating(token => token + 1)
-  }, [trackToggle, viewport])
+    previousTracks.current = { viewport, sidebarCollapsed, rightbarTrack, centeredSidebar }
+    if (instantChange) setAnimating(0)
+    else if (animateChange) setAnimating(token => token + 1)
+  }, [viewport, sidebarCollapsed, rightbarTrack, centeredSidebar, instantChange, animateChange])
   useEffect(() => {
     if (animating === 0) return
     const frame = frameRef.current
@@ -283,7 +275,8 @@ export function AppFrame({
     collapsed: sidebarCollapsed,
     width: sidebarWidth,
     drawer,
-  }), [renderSlot, sidebarCollapsed, sidebarWidth, drawer])
+    ...(instantRail && sidebarCollapsed ? { instantCollapse: true } : {}),
+  }), [renderSlot, sidebarCollapsed, sidebarWidth, drawer, instantRail])
   const main = useMemo(() => (
     <MainPanel usePanelInfo={usePanelInfo} renderSlot={renderSlot} />
   ), [usePanelInfo, renderSlot])
