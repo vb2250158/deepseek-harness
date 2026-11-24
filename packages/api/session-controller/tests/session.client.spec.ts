@@ -358,7 +358,7 @@ describe('paging', () => {
     await session.open()
     await session.loadOlder()
     const snapshot = session.getSnapshot()
-    expect(mock.log.requests(FOLLOW)).toMatchObject([{ maxMessages: 500, turnWindow: { minMessages: 50, minTurns: 2 } }])
+    expect(mock.log.requests(FOLLOW)).toMatchObject([{ maxMessages: 12, turnWindow: { minMessages: 8, minTurns: 2 } }])
     expect(mock.log.requests(PAGE)).toEqual([
       { address: ADDRESS, throughSeq: 11, beforeSeq: 6, maxMessages: 500, turnWindow: { minMessages: 50, minTurns: 2 } },
     ])
@@ -851,7 +851,7 @@ describe('prompt and cancel errors', () => {
     expect(steered).toEqual({ ok: true, value: { accepted: true } })
     expect(cancelled).toEqual({ ok: true, value: { accepted: true } })
     expect(mock.log.requests(FOLLOW)).toEqual([
-      { address: { kind: 'subagent', ...CHILD }, activate: true, assistantStream: true, maxMessages: 500, turnWindow: { minMessages: 50, minTurns: 2 } },
+      { address: { kind: 'subagent', ...CHILD }, activate: true, assistantStream: true, maxMessages: 12, turnWindow: { minMessages: 8, minTurns: 2 } },
     ])
     expect(mock.log.requests(PAGE)).toEqual([])
     // The prompt mode crosses the wire as the request's delivery.
@@ -959,7 +959,7 @@ describe('prompt and cancel errors', () => {
     expect(mock.log.requests('subagents/prompt')).toMatchObject([{ childSessionId: SID }])
     expect(mock.log.calls('subagents/interruptByUser').map(call => call.args)).toEqual([[SID]])
     expect(mock.log.requests(FOLLOW)).toEqual([
-      { address: { kind: 'subagent', ...CHILD, mode: 'one-shot' }, activate: true, assistantStream: true, maxMessages: 500, turnWindow: { minMessages: 50, minTurns: 2 } },
+      { address: { kind: 'subagent', ...CHILD, mode: 'one-shot' }, activate: true, assistantStream: true, maxMessages: 12, turnWindow: { minMessages: 8, minTurns: 2 } },
     ])
     expect(mock.log.requests(PAGE)).toEqual([])
     expect(mock.log.requests('session/cancel')).toEqual([])

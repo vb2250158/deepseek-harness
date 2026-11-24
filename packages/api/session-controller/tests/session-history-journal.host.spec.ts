@@ -766,8 +766,9 @@ describe('Session history raw journal', () => {
     { name: 'navigation until 200 messages', replies: [9, 49, 49, 49, 49], beforeMessage: undefined, firstTurn: 2, steering: false, minMessages: 200 },
     { name: 'steering within one Turn', replies: [9, 39, 39], beforeMessage: undefined, firstTurn: 2, steering: true },
     { name: 'exhausted history below both minima', replies: [9], beforeMessage: undefined, firstTurn: 1, steering: false },
+    { name: 'the 12-message opening cap inside one Turn', replies: [60], beforeMessage: undefined, firstTurn: undefined, steering: false, minMessages: 8, maxMessages: 12 },
     { name: 'the 500-message cap inside one Turn', replies: [9, 600], beforeMessage: undefined, firstTurn: undefined, steering: false },
-  ])('paginates $name in one contiguous Turn window', async ({ replies, beforeMessage, firstTurn, steering, minMessages = 50 }) => {
+  ])('paginates $name in one contiguous Turn window', async ({ replies, beforeMessage, firstTurn, steering, minMessages = 50, maxMessages = 500 }) => {
     const { ctx } = await harness()
     onTestFinished(() => ctx.fiber.dispose())
     const remote = await createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
@@ -792,16 +793,16 @@ describe('Session history raw journal', () => {
       address: { kind: 'session', sessionId: session.id },
       throughSeq: session.seq - 1,
       beforeSeq,
-      maxMessages: 500,
+      maxMessages,
       turnWindow: { minMessages, minTurns: 2 },
     })
     if (!response.ok) throw new Error('expected a history page')
     const page = pageEvents(response.value)
-    const expectedStart = firstTurn === undefined ? messages.at(-1)!.at(-500)!.seq : starts[firstTurn - 1]!.seq
+    const expectedStart = firstTurn === undefined ? messages.at(-1)!.at(-maxMessages)!.seq : starts[firstTurn - 1]!.seq
     expect(page.map(event => event.seq)).toEqual(Array.from({ length: beforeSeq - expectedStart }, (_, index) => expectedStart + index))
     expect(response.value.hasMore).toBe(expectedStart > 0)
     if (firstTurn === undefined) {
-      expect(page.filter(event => event.type === 'user/message' || event.type === 'assistant/message')).toHaveLength(500)
+      expect(page.filter(event => event.type === 'user/message' || event.type === 'assistant/message')).toHaveLength(maxMessages)
       expect(page.some(event => event.type === 'user/message')).toBe(false)
     } else {
       expect(page[0]?.type).toBe('turn/start')
@@ -811,7 +812,7 @@ describe('Session history raw journal', () => {
       const abort = new AbortController()
       const stream = remote.follow({
         address: { kind: 'session', sessionId: session.id },
-        maxMessages: 500,
+        maxMessages,
         turnWindow: { minMessages, minTurns: 2 },
       }, abort.signal)[Symbol.asyncIterator]()
       try {

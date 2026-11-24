@@ -49,10 +49,14 @@ function projectionsBaseline(value: SessionProjectionBaseline): ProjectionsBasel
   }
 }
 
-/** Minimum message count for ordinary history windows. */
+/** Minimum message count when extending or retaining an ordinary history window. */
 export const PAGE_MESSAGES = 50
 
 const HISTORY_PAGE_OPTIONS = { maxMessages: 500, turnWindow: { minMessages: PAGE_MESSAGES, minTurns: 2 } }
+const OPENING_PAGE_OPTIONS = {
+  maxMessages: 12,
+  turnWindow: { ...HISTORY_PAGE_OPTIONS.turnWindow, minMessages: 8 },
+}
 
 /** Minimum messages per page while a turn jump loops backwards. */
 export const JUMP_PAGE_MESSAGES = 200
@@ -764,7 +768,7 @@ export class Session implements SessionFace {
     })
     this.events = events
     try {
-      await events.open(HISTORY_PAGE_OPTIONS)
+      await events.open(OPENING_PAGE_OPTIONS)
       if (generation !== this.openGeneration || this.events !== events) return
       this.openState = 'open'
     } catch (error) {
