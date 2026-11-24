@@ -115,11 +115,12 @@ describe('main panel selection', () => {
       const snapshots: ReturnType<typeof store.getSnapshot>[] = []
       const unsubscribe = store.subscribe(() => { snapshots.push(store.getSnapshot()) })
       actions.selectPanel(panelA, true)
-      expect(snapshots).toEqual([expect.objectContaining({
-        panelInfo: { activePanelId: panelA },
-        layoutInfo: expect.objectContaining({ sidebar, narrowExpanded: false }),
-      })])
       unsubscribe()
+      expect(snapshots.map(({ panelInfo, layoutInfo }) => ({
+        activePanelId: panelInfo.activePanelId,
+        sidebar: layoutInfo.sidebar,
+        narrowExpanded: layoutInfo.narrowExpanded,
+      }))).toEqual([{ activePanelId: panelA, sidebar, narrowExpanded: false }])
     },
   )
 
