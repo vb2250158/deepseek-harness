@@ -87,9 +87,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Panel navigation and geometry actions exposed through ctx.layout.',
     methods: [
       {
-        signature: 'selectPanel(panelId: MainPanelId | null): void',
+        signature: 'selectPanel(panelId: MainPanelId | null, options?: { readonly collapseSidebar?: boolean }): void',
         description: 'Select a global central panel without changing the current Session.',
-        parameters: [{ name: 'panelId', description: 'registered main key, or null to show the Conversation.' }],
+        parameters: [{ name: 'panelId', description: 'registered main key, or null to show the Conversation.' }, { name: 'options', description: 'optionally collapse the left sidebar in the same layout update.' }],
         throws: ['if the selected main key is not registered; preserves the current selection.'],
       },
       {
