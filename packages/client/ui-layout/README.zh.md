@@ -33,7 +33,7 @@ kind: "package-reference"
 
 抽屉遮罩使用与面板相同的时长和缓动，在打开与关闭时渐变透明度；减少动态效果时两者均不播放动画。从已收起的侧栏切换到抽屉布局时，抽屉立即隐藏；已展开的侧栏保留收起动画。抽屉边缘不绘制分隔线，外层框架不滚动。macOS 抽屉与 Web 使用相同的不透明背景，毛玻璃仅用于普通侧栏。框架铺满外壳的布局视口，在键盘抬起时保留原有高度。抽屉背景和遮罩覆盖外壳完整高度，包括 `shell.bottom`，并显示在全屏和浮动右侧面板之上。浏览器管理的状态栏和地址栏位于外壳之外；布局不添加模拟安全区边距。
 
-全局面板占据 root 作用域的 `main` keyed slot；`conversation` 是为会话界面保留的 key。`ctx.layout.selectPanel(id)` 选中已注册面板，`null` 则选中会话界面，但不改变当前会话。Plugins 页面是默认组合中的一个全局面板。
+全局面板占据 root 作用域的 `main` keyed slot；`conversation` 是为会话界面保留的 key。`ctx.layout.selectPanel(id)` 选中已注册面板，`null` 则选中会话界面，但不改变当前会话。传入第二个参数 `{ collapseSidebar: true }`，可在同一次布局更新中选中面板并收起左侧栏。Plugins 页面是默认组合中的一个全局面板。
 
 主区域首次提交全局面板时，[启动诊断](../store/README.zh.md#startup-diagnostics) 将主会话记为 `not-visible`，原因为 `initial-main-panel`。这不表示所选插件面板已就绪。后续用户导航不会改变该初始结果。
 

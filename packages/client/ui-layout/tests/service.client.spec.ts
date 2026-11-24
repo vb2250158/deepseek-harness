@@ -51,12 +51,20 @@ describe('LayoutController', () => {
     service.selectPanel(panelId)
     service.selectPanel(panelId)
     service.selectPanel(null)
-    expect(panels.selectPanel).toHaveBeenNthCalledWith(1, panelId)
-    expect(panels.selectPanel).toHaveBeenNthCalledWith(2, panelId)
-    expect(panels.selectPanel).toHaveBeenNthCalledWith(3, null)
+    expect(panels.selectPanel).toHaveBeenNthCalledWith(1, panelId, undefined)
+    expect(panels.selectPanel).toHaveBeenNthCalledWith(2, panelId, undefined)
+    expect(panels.selectPanel).toHaveBeenNthCalledWith(3, null, undefined)
     expect(panels.toggleSidebar).not.toHaveBeenCalled()
     expect(panels.openRightbar).not.toHaveBeenCalled()
     expect(panels.closeRightbar).not.toHaveBeenCalled()
+  })
+
+  it('forwards a request to select the panel and collapse the sidebar together', () => {
+    const panels = fakePanels()
+    const service = new LayoutController(panels, () => true, createSnapshotStore({ activePanelId: null }))
+    const panelId = 'panel-a' as MainPanelId
+    service.selectPanel(panelId, { collapseSidebar: true })
+    expect(panels.selectPanel).toHaveBeenCalledExactlyOnceWith(panelId, true)
   })
 
   it('keeps separately constructed controllers bound to their own instances', () => {

@@ -105,6 +105,24 @@ describe('main panel selection', () => {
     expect(store.getSnapshot().panelInfo.activePanelId).toBe(panelA)
   })
 
+  it.each([[1440, 0], [900, 400], [600, 400]])(
+    'selects a panel with the sidebar already collapsed at %ipx',
+    (viewportWidth, sidebar) => {
+      const { store, actions } = createLayoutStore().create()
+      actions.setSidebar(400)
+      actions.setViewportWidth(viewportWidth)
+      if (viewportWidth < 1024) actions.toggleSidebar()
+      const snapshots: ReturnType<typeof store.getSnapshot>[] = []
+      const unsubscribe = store.subscribe(() => { snapshots.push(store.getSnapshot()) })
+      actions.selectPanel(panelA, true)
+      expect(snapshots).toEqual([expect.objectContaining({
+        panelInfo: { activePanelId: panelA },
+        layoutInfo: expect.objectContaining({ sidebar, narrowExpanded: false }),
+      })])
+      unsubscribe()
+    },
+  )
+
   it('returns to the Conversation only when the selected main registration disappears', () => {
     const { store, actions } = createLayoutStore().create()
     const initial = store.getSnapshot()
