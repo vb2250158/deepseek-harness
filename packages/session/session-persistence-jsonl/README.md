@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+Clearing history publishes a synced replacement for the current JSONL generation under the Session’s write lease. Earlier format artifacts are retained according to the [migration policy](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md).
+
 `dsh-session-persistence-jsonl` stores each session in a current append-only JSONL log and retains immutable historical format generations — checksummed Zstandard frames by default, raw newline-delimited lines when compression is disabled. It serves the current logical `SessionEvent` stream through persistence handles, so format migration, compression, historical decoding, and crash recovery remain storage-internal details. Choose it when consumers need a per-session file on disk; the logs are readable as plain lines when `compression: 'none'` is selected. A root directory is the one required configuration; durability, lazy materialization, [supported historical-format migration](../session-format-catalog/README.md), and torn-tail crash recovery come with the backend.
 
 ## Table of Contents

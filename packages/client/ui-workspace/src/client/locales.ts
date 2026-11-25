@@ -6,6 +6,11 @@
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
+  'clearHistory.action': '清空会话',
+  'clearHistory.description': '清空「{title}」的消息历史和对话上下文，保留会话 ID。清空后无法撤销。',
+  'clearHistory.pending': '正在清空会话…',
+  'clearHistory.busy': '会话有任务正在运行，请结束后重试',
+  'clearHistory.failed': '清空失败，请刷新会话后重试',
   'defaultWorkspace.failed': '无法创建默认工作区，请通过“选择工作区”选择文件夹',
   'draft.workspaceRequired': '请先选择工作区',
   'draft.initializationFailed': '暂时无法填入草稿，请稍后重试',
@@ -148,6 +153,11 @@ export type WorkspaceKey = keyof typeof zh
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
+  'clearHistory.action': 'Clear session',
+  'clearHistory.description': 'Clear the message history and conversation context for “{title}” and keep its Session ID. This cannot be undone.',
+  'clearHistory.pending': 'Clearing session…',
+  'clearHistory.busy': 'Finish the active session work, then try again.',
+  'clearHistory.failed': 'Refresh the session and try clearing it again.',
   'defaultWorkspace.failed': 'Unable to create default workspace. Use Choose workspace to select a folder.',
   'draft.workspaceRequired': 'Choose a workspace first.',
   'draft.initializationFailed': 'Could not fill the draft. Please try again shortly.',
@@ -287,6 +297,11 @@ export const en = {
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {
+  'clearHistory.action': 'セッションを消去',
+  'clearHistory.description': '「{title}」のメッセージ履歴と会話コンテキストを消去します。セッション ID は保持されます。この操作は取り消せません。',
+  'clearHistory.pending': 'セッションを消去しています…',
+  'clearHistory.busy': 'セッションの作業が終わってから再試行してください。',
+  'clearHistory.failed': 'セッションを再読み込みしてから再試行してください。',
   'sessions.loadMore': '会話をさらに読み込む',
   'sessions.showMore': 'さらに表示',
   'sessions.loadingMore': '会話を読み込み中…',
@@ -426,6 +441,11 @@ export const ja = {
 
 /** Spanish dictionary, checked against the English keys. */
 export const es = {
+  'clearHistory.action': 'Borrar sesión',
+  'clearHistory.description': 'Borra el historial de mensajes y el contexto de «{title}». Se conserva el ID de sesión. Esta acción no se puede deshacer.',
+  'clearHistory.pending': 'Borrando sesión…',
+  'clearHistory.busy': 'Espera a que termine la actividad de la sesión e inténtalo de nuevo.',
+  'clearHistory.failed': 'Actualiza la sesión e intenta borrarla de nuevo.',
   'sessions.loadMore': 'Cargar más sesiones',
   'sessions.showMore': 'Mostrar más',
   'sessions.loadingMore': 'Cargando más sesiones…',
@@ -565,6 +585,11 @@ export const es = {
 
 /** French dictionary, checked against the English keys. */
 export const fr = {
+  'clearHistory.action': 'Effacer la session',
+  'clearHistory.description': 'Efface l’historique des messages et le contexte de « {title} ». L’identifiant de session est conservé. Cette action est irréversible.',
+  'clearHistory.pending': 'Effacement de la session…',
+  'clearHistory.busy': 'Attendez la fin de l’activité de la session, puis réessayez.',
+  'clearHistory.failed': 'Actualisez la session et réessayez de l’effacer.',
   'sessions.loadMore': 'Charger plus de sessions',
   'sessions.showMore': 'Afficher plus',
   'sessions.loadingMore': 'Chargement des sessions…',
@@ -704,6 +729,11 @@ export const fr = {
 
 /** German dictionary, checked against the English keys. */
 export const de = {
+  'clearHistory.action': 'Sitzung leeren',
+  'clearHistory.description': 'Verlauf und Gesprächskontext von „{title}“ werden gelöscht. Die Sitzungs-ID bleibt erhalten. Das lässt sich nicht rückgängig machen.',
+  'clearHistory.pending': 'Sitzung wird geleert…',
+  'clearHistory.busy': 'Warte, bis die Sitzung ihre Arbeit beendet hat, und versuche es erneut.',
+  'clearHistory.failed': 'Aktualisiere die Sitzung und versuche es erneut.',
   'sessions.loadMore': 'Weitere Sitzungen laden',
   'sessions.showMore': 'Mehr anzeigen',
   'sessions.loadingMore': 'Weitere Sitzungen werden geladen…',
@@ -843,6 +873,11 @@ export const de = {
 
 /** Russian dictionary, checked against the English keys. */
 export const ru = {
+  'clearHistory.action': 'Очистить сеанс',
+  'clearHistory.description': 'История сообщений и контекст «{title}» будут удалены. Идентификатор сеанса сохранится. Это действие нельзя отменить.',
+  'clearHistory.pending': 'Очистка сеанса…',
+  'clearHistory.busy': 'Дождитесь завершения работы в сеансе и повторите попытку.',
+  'clearHistory.failed': 'Обновите сеанс и повторите попытку.',
   'sessions.loadMore': 'Загрузить ещё сессии',
   'sessions.showMore': 'Показать ещё',
   'sessions.loadingMore': 'Загрузка сессий…',
@@ -982,6 +1017,11 @@ export const ru = {
 
 /** Portuguese dictionary, checked against the English keys. */
 export const pt = {
+  'clearHistory.action': 'Limpar sessão',
+  'clearHistory.description': 'Apaga o histórico de mensagens e o contexto de “{title}”. O ID da sessão é mantido. Esta ação é irreversível.',
+  'clearHistory.pending': 'Limpando sessão…',
+  'clearHistory.busy': 'Aguarde a conclusão da atividade da sessão e tente novamente.',
+  'clearHistory.failed': 'Atualize a sessão e tente limpá-la novamente.',
   'sessions.loadMore': 'Carregar mais sessões',
   'sessions.showMore': 'Mostrar mais',
   'sessions.loadingMore': 'Carregando mais sessões…',

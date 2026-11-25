@@ -168,6 +168,7 @@ export class ReactLoopAgent implements Agent {
   }
 
   send(message: UserMessage, target: InboxTarget, wakeup: boolean): void {
+    this.lifetimeSignal.throwIfAborted()
     // Waking input cannot join an aborted activity, so it starts the next turn.
     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted

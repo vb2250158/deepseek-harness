@@ -445,6 +445,14 @@ abstract create(header: SessionHeader, options?: SessionPersistenceCreateOptions
 abstract open(id: SessionId, access: SessionAccess, options?: SessionPersistenceOpenOptions): Promise<SessionHandle>
 
 /**
+ * Replace the current log under exclusive write ownership, when supported by the backend.
+ * @param id - identity to keep.
+ * @param replacement - builds a new detached lifecycle from the exclusively held snapshot.
+ * @returns the replacement after its log is durably published.
+ */
+clearHistory?(id: SessionId, replacement: (stored: SessionInspection) => Session): Promise<Session>
+
+/**
  * Flush every active write handle owned by this service instance in one
  * durability barrier: each handle's routed live events drain durably and
  * its session materializes, exactly as that handle's own
@@ -509,7 +517,7 @@ abstract list(options?: SessionPersistenceListOptions): Promise<readonly Session
 async withReadScope<T>( callback: (scope: SessionPersistenceReadScope) => Promise<T>, options?: SessionPersistenceListOptions, ): Promise<T>
 ```
 
-Types: [SessionId](core.zh.md)
+Types: [Session](session.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/session/session-persistence/src/index.ts`](../../packages/session/session-persistence/src/index.ts)
 <!-- END GENERATED cordis-surface -->

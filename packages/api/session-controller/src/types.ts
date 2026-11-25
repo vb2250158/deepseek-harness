@@ -146,6 +146,8 @@ export type QueueAction =
 
 /** One Session list entry. */
 export interface SessionSummary {
+  /** The live addition replaces a previous history lifecycle under this id. */
+  readonly historyCleared?: true
   /** Whether this Session currently owns a live Agent. */
   readonly agentAvailable: boolean
   /** Current for attached Sessions; otherwise the persistence format status when reported. */
@@ -200,6 +202,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'session/steer-unavailable': { readonly itemId: MessageId }
     'session/title-invalid': { readonly sessionId: SessionId }
     'session/fork-unavailable': { readonly sessionId: SessionId }
+    'session/clear-unavailable': { readonly sessionId: SessionId }
     'session/migration-required': { readonly sessionId: SessionId }
     'subagent/not-found': {
       readonly parentSessionId: SessionId

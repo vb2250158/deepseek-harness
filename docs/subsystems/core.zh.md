@@ -862,12 +862,13 @@ register(agent: Agent): ReturnType<Context['effect']>
  * returned detach closure into its pre-installed composite teardown before
  * calling {@link announce}. Ordinary callers use {@link register}.
  * @param agent - the prepared, unpublished agent.
+ * @param retireIdle - optional factory-owned retirement of this exact Agent while idle.
  * @returns an idempotent closure that removes this exact entry and emits
  *   `agent/disposed` with listener failures contained. When called from a
  *   `agent/created` listener, removal and disposal wait until the serial
  *   creation dispatch settles.
  */
-enter(agent: Agent): () => void
+enter(agent: Agent, retireIdle?: () => Promise<boolean>): () => void
 
 /**
  * Announce an agent previously inserted with {@link enter}.
@@ -887,6 +888,13 @@ async announce(agent: Agent, source: SessionStartSource, signal?: AbortSignal): 
  * @returns the agent, or undefined when no live agent has that id.
  */
 get(id: SessionId): Agent | undefined
+
+/**
+ * Retire one idle lifecycle through the factory that owns it.
+ * @param agent - the exact published Agent to retire.
+ * @returns whether the lifecycle finished retiring.
+ */
+async retireIdle(agent: Agent): Promise<boolean>
 
 /**
  * All live agents, in registration order.

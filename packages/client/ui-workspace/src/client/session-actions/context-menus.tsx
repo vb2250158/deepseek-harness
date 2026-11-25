@@ -7,12 +7,13 @@ import type { MenuContribution, ContextMenuTargetMap } from '@deepseek-ai/dsh-cl
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-session-status/client'
 import type {
-  ArchiveSessionInjected, ForkSessionInjected, PinSessionInjected, RenameSessionInjected, SessionIdInjected,
+  ArchiveSessionInjected, ForkSessionInjected, PinSessionInjected, RenameSessionInjected, SessionClearTarget, SessionIdInjected,
 } from '../contract/slots.ts'
 
 type Actions = Omit<PinSessionInjected & ArchiveSessionInjected, 'hooks'>
   & ForkSessionInjected & RenameSessionInjected & SessionIdInjected
   & { readonly markSession: (sessionId: SessionId, unread: boolean) => void }
+  & { readonly requestClearHistory: (target: SessionClearTarget) => void }
 
 /**
  * Register built-in actions while retaining the legacy Slot for external components.
@@ -83,4 +84,8 @@ export function registerSessionMenus(ctx: Context, actions: Actions): void {
       run: () => { (restoring ? actions.unarchiveSession : actions.archiveSession)(target.sessionId) },
     }]
   })
+  register('clear-history', 610, ['session/clearHistory'], target => !archived(target) && allowed(target, 'session/clearHistory') ? [{
+    id: 'clear', label: t('clearHistory.action'), icon: { key: 'workspace.delete' }, danger: true, afterContent: true,
+    run: () => { actions.requestClearHistory(target) },
+  }] : [])
 }

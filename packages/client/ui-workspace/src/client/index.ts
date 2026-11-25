@@ -47,6 +47,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session-status/client'
 import {
   type ArchiveSessionInjected, type DirectoryFlowSlotName, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
   type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
+  type SessionClearInjected, type SessionClearTarget,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
   type WorkspaceActionRequest, type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
 } from './contract/slots.ts'
@@ -55,6 +56,7 @@ import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
+import { SessionClearDialog } from './session-actions/ClearSession.tsx'
 import { derive } from './session-actions/derived.ts'
 import { registerSessionMenus } from './session-actions/context-menus.tsx'
 import { PinSessionRowButton } from './session-actions/PinSession.tsx'
@@ -143,7 +145,7 @@ const NS = 'workspace'
  * and reloads with it.
  */
 export const inject = ['contextMenus',
-  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout', 'shortcuts', 'remoteAccess',
+  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'remote.session', 'layout', 'shortcuts', 'remoteAccess',
   'uiSession', 'uiSession.sessionStatus',
 ]
 
@@ -214,6 +216,17 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
   // its bound hook.
   const renameRequest = derive(shortcutControls.state, state => state.renameTarget)
   const archiveRequest = createSnapshotStore<SessionArchiveConfirmRequest | null>(null)
+  const clearTarget = createSnapshotStore<SessionClearTarget | null>(null)
+  const clearInjected = (): SessionClearInjected => ({
+    hooks: { clearTarget },
+    dismissClear: () => { clearTarget.set(null) },
+    clearHistory: async (sessionId) => {
+      const result = await ctx.remote.session.clearHistory(sessionId)
+      if (result.ok) return
+      const t = ctx.locale.bind(NS)
+      throw new Error(t(result.error.code === 'session/agent-busy' ? 'clearHistory.busy' : 'clearHistory.failed'))
+    },
+  })
   const requestSessionRename = shortcutControls.rename
   const unarchiveSession = (sessionId: SessionId): void => {
     uiWorkspace.unarchiveSession(sessionId).catch((reason: unknown) => {
@@ -406,7 +419,7 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
   }, SessionMenu))
   registerSessionMenus(ctx, {
     ...pinInjected(), ...archiveInjected(), ...renameInjected(), ...forkInjected(), ...sessionIdInjected(),
-    markSession,
+    markSession, requestClearHistory: (target) => { clearTarget.set(target) },
   })
   ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'archive', order: 100, locale: NS, inject: archiveInjected }, ArchiveSessionRowButton)
@@ -421,6 +434,9 @@ export function apply(ctx: Context, config: SyncedConfig<WorkspaceNavigationConf
     yield ctx.slots.register({
       name: 'shell.overlay', id: 'workspace.session-archive', locale: NS, inject: archiveConfirmInjected,
     }, SessionArchiveConfirmDialog)
+    yield ctx.slots.register({
+      name: 'shell.overlay', id: 'workspace.session-clear', locale: NS, inject: clearInjected,
+    }, SessionClearDialog)
     yield ctx.slots.register({
       name: 'shell.overlay', id: 'workspace.row-toast', inject: rowToastInjected,
       children: { 'workspace.toast': { kind: 'keyed', scope: 'root' } },

@@ -446,6 +446,8 @@ export interface SessionEventMap {
    * so tolerating concurrent writers needs a signal beyond the log.
    */
   'session/end-seed': { inherited?: true }
+  /** Preserves a reset Session's sidebar identity without adding a model message. */
+  'session/history-cleared': { startsConversation: true }
 }
 
 /** The appendable event-type keys of {@link SessionEventMap}, plugin-merged extensions included. */

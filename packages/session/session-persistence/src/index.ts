@@ -7,7 +7,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionHandle, SessionAccess } from './handle.ts'
 import type { SessionLocation } from './errors.ts'
 import type { SessionPersistenceRevision } from './revision.ts'
@@ -245,6 +245,14 @@ export abstract class SessionPersistence extends Service {
    * @throws {SessionAlreadyOwnedError} for `write` when ownership is taken.
    */
   abstract open(id: SessionId, access: SessionAccess, options?: SessionPersistenceOpenOptions): Promise<SessionHandle>
+
+  /**
+   * Replace the current log under exclusive write ownership, when supported by the backend.
+   * @param id - identity to keep.
+   * @param replacement - builds a new detached lifecycle from the exclusively held snapshot.
+   * @returns the replacement after its log is durably published.
+   */
+  clearHistory?(id: SessionId, replacement: (stored: SessionInspection) => Session): Promise<Session>
 
   /**
    * Flush every active write handle owned by this service instance in one

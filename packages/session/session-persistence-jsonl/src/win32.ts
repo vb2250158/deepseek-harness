@@ -37,6 +37,7 @@ interface Win32ErrnoException extends NodeJS.ErrnoException {
 }
 
 const MOVEFILE_WRITE_THROUGH = 0x00000008
+const MOVEFILE_REPLACE_EXISTING = 0x00000001
 const WAIT_OBJECT_0 = 0
 const WAIT_TIMEOUT = 0x00000102
 const ERROR_FILE_NOT_FOUND = 2
@@ -135,6 +136,17 @@ export async function publishNewFileWin32(existing: string, replacement: string)
   const api = await win32()
   const ok = api.moveFileExW(toNamespacedPath(existing), toNamespacedPath(replacement), MOVEFILE_WRITE_THROUGH)
   if (ok === 0) throw win32Error('MoveFileExW', api.getLastError(), existing, replacement)
+}
+
+/**
+ * Atomically publish a synced replacement under the caller's exclusive log lease.
+ * @param existing - staging path on the same volume.
+ * @param destination - current log path to replace.
+ */
+export async function replaceFileWin32(existing: string, destination: string): Promise<void> {
+  const api = await win32()
+  const ok = api.moveFileExW(toNamespacedPath(existing), toNamespacedPath(destination), MOVEFILE_WRITE_THROUGH | MOVEFILE_REPLACE_EXISTING)
+  if (ok === 0) throw win32Error('MoveFileExW', api.getLastError(), existing, destination)
 }
 
 /**

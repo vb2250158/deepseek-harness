@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url'
 import { chromium, type Browser, type Locator, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createUserMessage, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, Session, type SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-title'
 import { launchWebScaffold, seedSession, watchConsole, type WebScaffold } from './scaffold.ts'
-import { saveFailureShot } from './support.ts'
+import { newEnglishPage, saveFailureShot, writeComposerDraft } from './support.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
 
 const GIF = Buffer.from('R0lGODdhMAAgAIEAAEtu5gAAAAAAAAAAACwAAAAAMAAgAEAIQQABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDihxJsqTJkyhTqlzJsqXLlzBjypxJs6bNmQEBADs=', 'base64')
@@ -35,6 +35,85 @@ function fixture(title: string): string {
   return [JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION, id: '{{sessionId}}', createdAt: 0, cwd: '{{cwd}}', isSeeded: false, delegationDepth: 0 }),
     ...session.snapshotEvents().map(event => JSON.stringify({ ...event, time: 1_000 + event.seq * 1_000 })), ''].join('\n')
 }
+
+class ResetProbeAdapter extends LlmAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  override async listModels(provider: string) { return [{ provider, id: 'probe', name: 'Reset probe' }] }
+
+  override async *stream(request: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(request)
+    const text = 'FRESH_CONTEXT_REPLY'
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'text-delta', index: 0, text }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
+
+it('clears history in open tabs and sends the next prompt under the original Session ID', async () => {
+  const scaffold = await launchWebScaffold()
+  const browser = await chromium.launch()
+  try {
+    const adapter = new ResetProbeAdapter()
+    scaffold.ctx.effect(() => scaffold.ctx.llm.registerAdapter(['reset-probe'], adapter), 'clear session test model')
+    await scaffold.ctx.agentDefaultModel.saveSelection({ provider: 'reset-probe', model: 'probe' })
+    const id = await seedSession(scaffold, fixture('Session to keep'), 'clear-history-test')
+    const page = await newEnglishPage(browser)
+    const peer = await newEnglishPage(browser)
+    const select = async (view: Page) => {
+      await view.route('https://images.example/original.gif', route => route.fulfill({ body: GIF, contentType: 'image/gif' }))
+      await view.goto(scaffold.authenticatedUrl)
+      await view.locator('[data-row-key^="workspace:"]').filter({ hasText: 'Ungrouped' }).click()
+      const row = view.locator(`[data-row-key="session:${id}"]`)
+      await row.click()
+      await view.getByText('CONTEXT_MENU_READY', { exact: true }).waitFor()
+      return row
+    }
+    const row = await select(page)
+    await select(peer)
+    const activateClear = async () => {
+      await row.click({ button: 'right' })
+      await page.getByRole('menuitem', { name: 'Clear session' }).click()
+      return page.getByRole('dialog', { name: 'Clear session' })
+    }
+    await (await activateClear()).getByRole('button', { name: 'Cancel' }).click()
+    expect(await page.getByText('CONTEXT_MENU_READY', { exact: true }).isVisible()).toBe(true)
+    const dialog = await activateClear()
+    await dialog.getByRole('button', { name: 'Clear session' }).click()
+    await dialog.waitFor({ state: 'hidden' })
+    for (const view of [page, peer]) {
+      await view.getByText('CONTEXT_MENU_READY', { exact: true }).waitFor({ state: 'hidden' })
+      await view.locator(`[data-row-key="session:${id}"]`).getByText('Session to keep', { exact: true }).waitFor()
+    }
+    {
+      using cleared = await scaffold.ctx.sessionQuery.observeSession(id)
+      expect(cleared.header.id).toBe(id)
+      const types = cleared.events.map(event => event.type)
+      expect(types).toEqual(expect.arrayContaining(['session/history-cleared', 'permission/preset']))
+      expect(types.filter(type => /^(turn|step|user|assistant|request|tool)\//u.test(type))).toEqual([])
+      expect(cleared.events.find(event => event.type === 'session/title')?.data)
+        .toEqual({ title: 'Session to keep', messageSeqs: [], source: { kind: 'user' } })
+    }
+    await page.reload()
+    await row.getByText('Session to keep', { exact: true }).waitFor()
+    await row.click()
+    const input = page.locator('[data-composer-input]').first()
+    const settled = scaffold.whenTurnSettled()
+    const fresh = 'First prompt after clearing the conversation.'
+    await writeComposerDraft(page, input, fresh)
+    await input.press('Enter')
+    expect(await settled).toBe(id)
+    await page.getByText('FRESH_CONTEXT_REPLY', { exact: true }).waitFor()
+    const prompt = adapter.requests[0]?.messages.filter(message => message.role === 'user' || message.role === 'assistant')
+    expect(prompt?.flatMap(message => message.content)).toContainEqual({ type: 'text', text: fresh })
+    expect(JSON.stringify(prompt)).not.toContain('Show the output.')
+    expect(JSON.stringify(prompt)).not.toContain('CONTEXT_MENU_READY')
+  } finally {
+    await browser.close()
+    await scaffold.close()
+  }
+})
 
 describe.each(['MacIntel', 'Win32', 'Linux x86_64'])('web context menus on %s', (platform) => {
   let scaffold: WebScaffold, browser: Browser, page: Page
@@ -79,7 +158,7 @@ describe.each(['MacIntel', 'Win32', 'Linux x86_64'])('web context menus on %s', 
       'Pin session', 'Rename', 'Mark as unread', 'Fork session', 'Copy Session ID',
     ])
     expect(names).not.toContain('Open in')
-    expect(names.at(-1)).toBe('Archive session')
+    expect(names.slice(-2)).toEqual(['Archive session', 'Clear session'])
     expect(await menu.getByRole('menuitem').evaluateAll(rows => rows.every(row => row.querySelector('svg[data-icon]')))).toBe(true)
     expect(await menu.getByRole('separator').count()).toBe(2)
     expect(await menu.getByRole('menuitem', { name: 'Archive session', exact: true }).evaluate(row =>

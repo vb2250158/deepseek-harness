@@ -1,0 +1,14 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {"key":"event:session/history-cleared","kind":"event","event":"session/history-cleared","surface":false,"digest":"ce7d7beacf158c2b402b3a8fe0791b117b2f2327b1e0b87de87790ba8fdcb7bf"}
+  ],
+  "types": [],
+  "nodes": {
+    "0657d3ca5ac4e7bf": {"kind":"primitive","type":"number"},
+    "37df2df6835a5c84": {"kind":"object","properties":[{"name":"startsConversation","type":"dacf3d5f3e4ff619","optional":false}],"indices":[]},
+    "ce7d7beacf158c2b": {"kind":"object","properties":[{"name":"data","type":"37df2df6835a5c84","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"e1c108e95ae03743","optional":false}],"indices":[]},
+    "dacf3d5f3e4ff619": {"kind":"literal","value":true},
+    "e1c108e95ae03743": {"kind":"literal","value":"session/history-cleared"}
+  }
+}

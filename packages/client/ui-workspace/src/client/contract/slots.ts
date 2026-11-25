@@ -456,6 +456,23 @@ export interface SessionArchiveConfirmInjected {
   stopAndArchiveSession: (sessionId: SessionId) => Promise<void>
 }
 
+/** Clear-history confirmation requested by a Session row. */
+export interface SessionClearTarget {
+  /** Identity whose history is cleared. */
+  readonly sessionId: SessionId
+  /** Title displayed in the confirmation. */
+  readonly displayTitle: string
+}
+
+/** Inputs and actions for the clear-history confirmation. */
+export interface SessionClearInjected {
+  hooks: { clearTarget: HostObservable<SessionClearTarget | null> }
+  /** Dismiss the confirmation. */
+  dismissClear: () => void
+  /** Clear the captured Session's history. */
+  clearHistory: (sessionId: SessionId) => Promise<void>
+}
+
 /** Fork action share. */
 export interface ForkSessionInjected {
   /** Fork a Session at its last completed turn; the child arrives through the Host list. */
@@ -527,6 +544,10 @@ export type SessionArchiveConfirmProps =
   & PropsLocale<'workspace'>
   & Omit<SessionArchiveConfirmInjected, 'hooks'>
   & PropsHooks<SessionArchiveConfirmInjected['hooks']>
+
+/** Props of the clear-history dialog in `shell.overlay`. */
+export type SessionClearProps = PropsRuntime<'shell.overlay'> & PropsLocale<'workspace'>
+  & Omit<SessionClearInjected, 'hooks'> & PropsHooks<SessionClearInjected['hooks']>
 
 /** Props of the existing overlay's keyed notice dispatcher. */
 export type RowToastProps =

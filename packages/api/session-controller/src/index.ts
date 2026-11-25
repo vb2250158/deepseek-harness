@@ -238,10 +238,10 @@ export class SessionController extends TypertRemoteService {
       ctx.emit('api-session/added', this.listState.summaryFor(session))
     })
     ctx.on('session/disposed', (session) => {
-      ctx.emit('api-session/removed', session.id)
+      if (!this.agents.isClearingHistory(session.id)) ctx.emit('api-session/removed', session.id)
     })
     const publishAgentAvailability = ({ agent }: { agent: Agent }): undefined => {
-      if (ctx.sessions.get(agent.id) === agent.session) {
+      if (!this.agents.isClearingHistory(agent.id) && ctx.sessions.get(agent.id) === agent.session) {
         ctx.emit('api-session/added', this.listState.summaryFor(agent.session))
       }
     }
@@ -269,6 +269,10 @@ export class SessionController extends TypertRemoteService {
    */
   private promote(observation: SessionObservation): void {
     const sessionId = observation.header.id
+    if (this.agents.isClearingHistory(sessionId)) {
+      observation[Symbol.dispose]()
+      return
+    }
     const task = (async () => {
       using ownedObservation = observation
       const result = await this.agents.resolveObservedAgent(ownedObservation)
@@ -493,6 +497,23 @@ export class SessionController extends TypertRemoteService {
   @Remote('rename')
   rename(request: SessionRenameRequest): Promise<SessionRenameValue> {
     return this.commands.rename(request)
+  }
+
+  /**
+   * Clear an idle Session's history and model context under the original identity.
+   * @param sessionId - Session to reset.
+   * @returns acknowledgement after the replacement log is durable.
+   */
+  @Remote('clearHistory')
+  async clearHistory(sessionId: SessionId): Promise<{ readonly cleared: true }> {
+    await this.agents.clearHistory(sessionId, async (session) => {
+      const cache = this.ctx.get('sessionProjectionCache')
+      await cache?.write(session).catch((error: unknown) => {
+        this.ctx.logger.warn(`session "${sessionId}": reset projection checkpoint failed: ${String(error)}`)
+      })
+      this.ctx.emit('api-session/added', { ...this.listState.summaryFor(session), historyCleared: true })
+    })
+    return { cleared: true }
   }
 
   /**

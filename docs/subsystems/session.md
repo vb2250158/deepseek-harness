@@ -170,6 +170,8 @@ interface SessionEventMap {
    * so tolerating concurrent writers needs a signal beyond the log.
    */
   'session/end-seed': { inherited?: true }
+  /** Preserves a reset Session's sidebar identity without adding a model message. */
+  'session/history-cleared': { startsConversation: true }
 }
 ```
 
@@ -990,6 +992,13 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
  * @returns the accepted title and durable event sequence.
  */
 @Remote('rename') rename(request: SessionRenameRequest): Promise<SessionRenameValue>
+
+/**
+ * Clear an idle Session's history and model context under the original identity.
+ * @param sessionId - Session to reset.
+ * @returns acknowledgement after the replacement log is durable.
+ */
+@Remote('clearHistory') async clearHistory(sessionId: SessionId): Promise<{ readonly cleared: true }>
 
 /**
  * Fork one cold-readable exact event prefix into a new Session. An omitted

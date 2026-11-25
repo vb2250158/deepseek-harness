@@ -224,6 +224,7 @@ const DISPOSED_INITIATOR_MESSAGE = 'agent initiator scope is disposed'
 /** All mutable lifecycle state for one exact registry entry. */
 interface AgentEntry {
   readonly id: SessionId
+  readonly retireIdle?: () => Promise<boolean>
   readonly agent: Agent
   readonly carrier: Scoped<Agent>
   announced: boolean
@@ -488,12 +489,13 @@ export class AgentRegistry extends Service {
    * returned detach closure into its pre-installed composite teardown before
    * calling {@link announce}. Ordinary callers use {@link register}.
    * @param agent - the prepared, unpublished agent.
+   * @param retireIdle - optional factory-owned retirement of this exact Agent while idle.
    * @returns an idempotent closure that removes this exact entry and emits
    *   `agent/disposed` with listener failures contained. When called from a
    *   `agent/created` listener, removal and disposal wait until the serial
    *   creation dispatch settles.
    */
-  enter(agent: Agent): () => void {
+  enter(agent: Agent, retireIdle?: () => Promise<boolean>): () => void {
     const id = agent.id
     if (id !== agent.session.id) {
       throw new Error(`agent id "${id}" does not match session id "${agent.session.id}"`)
@@ -505,6 +507,7 @@ export class AgentRegistry extends Service {
     const entry: AgentEntry = {
       id,
       agent,
+      ...(retireIdle === undefined ? {} : { retireIdle }),
       carrier,
       announced: false,
       announcing: false,
@@ -601,6 +604,16 @@ export class AgentRegistry extends Service {
    */
   get(id: SessionId): Agent | undefined {
     return this.store.get(id)?.agent
+  }
+
+  /**
+   * Retire one idle lifecycle through the factory that owns it.
+   * @param agent - the exact published Agent to retire.
+   * @returns whether the lifecycle finished retiring.
+   */
+  async retireIdle(agent: Agent): Promise<boolean> {
+    const entry = this.store.get(agent.id)
+    return entry?.agent === agent && entry.retireIdle !== undefined && await entry.retireIdle()
   }
 
   /**

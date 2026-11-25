@@ -730,6 +730,23 @@ export class Session implements SessionFace {
     await events?.dispose()
   }
 
+  /** Drop the prior lifecycle's transcript and open a fresh cursor for an existing view. */
+  async resetHistory(): Promise<void> {
+    const wasOpen = this.openState !== 'cold'
+    this.historyWasPartial = false
+    this.promptError = null
+    this.lastAgentError = null
+    this.firstPromptPendingTurn = false
+    for (const [requestId, { admitted }] of this.submissionSettlements) {
+      if (admitted === undefined) this.retireFailedSubmission(requestId)
+      else this.scheduleObservedRetirement(requestId, admitted)
+    }
+    const disconnected = this.disconnect()
+    const generation = this.openGeneration
+    await disconnected
+    if (wasOpen && generation === this.openGeneration) await this.open()
+  }
+
   /**
    * Stop the Session's live Remote source.
    * @returns when the Remote iterator has completed teardown.

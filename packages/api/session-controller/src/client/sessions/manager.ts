@@ -846,6 +846,16 @@ export class SessionManager {
    * @param summary - current Host summary for the added Session.
    */
   handleSessionAdded(summary: SessionSummary): void {
+    if (summary.historyCleared === true) {
+      const id = summary.sessionId
+      this.projectionInflight.get(id)?.controller.abort()
+      this.projectionInflight.delete(id)
+      this.projectionLoads.delete(id)
+      this.projectionStores.get(id)?.clear()
+      void this.sessions.get(id)?.resetHistory().catch((error: unknown) => {
+        console.error('[session-controller] reopening cleared history failed:', error)
+      })
+    }
     this.mergeSummary(summary)
     if (!this.disposed && summary.running) this.engagedSessions.add(summary.sessionId)
     this.sessions.get(summary.sessionId)?.handleBlank(this.effectiveBlank(summary))

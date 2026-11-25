@@ -8,6 +8,8 @@ English | [中文](README.zh.md)
 
 Desktop analytics follows the [product collection policy](../../client/product-analytics/README.md), including its launch-time switch. Web usage is excluded.
 
+`session/clearHistory` resets an idle ordinary Session under the same ID when the store supports replacement. It pins the current title, preserves the preset, model, directory and permission settings, and tells open Web clients to reload the conversation and projection values from the replacement.
+
 The Web client requests compact Session control, follow, and projection snapshots. A key declared on-demand carries a watermark until a component subscribes through `useProjection(key)`. Concurrent readers share the exact Session-scoped request, and reconnect discards reads belonging to the previous Host.
 
 ## Summary
@@ -109,7 +111,7 @@ GUI model selection requires the exact provider/model pair in the available cata
 
 Concurrent `modelCatalog()` reads with the same captured default share one provider-catalog build. Completion, rejection, provider/model notifications, settings or credential changes, and controller disposal release that shared reference; subsequent reads build a fresh catalog, including after partial provider failures. An old read cannot clear a newer shared read. Each RPC retains its existing completion lifetime; disposal does not wait for an adapter lookup that offers no cancellation.
 
-A successful `selectModel` response acknowledges the recorded Session selection without waiting for the default profile setting to save. The loop registers its projection; a change applies to the next step while a prepared step retains its captured choice. Default saves run in the background in submission order; a failure logs a warning and leaves the Session selection intact. A Session with no recorded selection or request reads the last successfully saved default through live `AgentOptions` accessors. An explicit choice is recorded even when it equals that default. Omitting reasoning effort clears the explicit effort and lets each request use the adapter default.
+A successful `selectModel` response carries the recorded Session selection and its log cursor. The response is independent of the background save of the default profile setting. The loop registers its projection; a change applies to the next step while a prepared step retains its captured choice. Default saves run in the background in submission order; a failure logs a warning and leaves the Session selection intact. A Session with no recorded selection or request reads the last successfully saved default through live `AgentOptions` accessors. An explicit choice is recorded even when it equals that default. Omitting reasoning effort clears the explicit effort and lets each request use the adapter default.
 
 -----
 

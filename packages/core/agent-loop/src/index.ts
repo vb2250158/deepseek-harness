@@ -645,7 +645,22 @@ export class AgentLoop extends Service implements AgentFactory {
           assertLive()
           // The mounted backend routes announced live events into the active
           // write handle by session id; the loop only owns the handle itself.
-          detachAgent = loopCtx.agents.enter(agent)
+          detachAgent = loopCtx.agents.enter(agent, async () => {
+            if (!ready || abort.signal.aborted || agent.inbox.hasPending) return false
+            let retirement: Promise<void> | undefined
+            try {
+              // Claim true idle before teardown. The maintenance task must settle before teardown can drain.
+              await agent.runMaintenance(() => {
+                retirement = dispose()
+                return Promise.resolve()
+              })
+            } catch (error: unknown) {
+              if (retirement !== undefined) throw error
+              return false
+            }
+            await retirement
+            return true
+          })
           await loopCtx.agents.announce(agent, source, abort.signal)
           assertLive()
           ready = true

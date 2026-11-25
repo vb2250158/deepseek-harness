@@ -14,7 +14,7 @@ import {
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
-import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
+import { open, mkdir, readdir, realpath, link, rename, rm, stat, truncate } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -31,14 +31,14 @@ import {
   type SessionLocation, type SessionPersistenceCreateOptions,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceMetadata, type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
-  type SessionPersistenceReadScope,
+  type SessionInspection, type SessionPersistenceReadScope,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
 import { JsonlBackendTracker, JsonlSessionHandle, type StorageHandleState } from './storage.ts'
 import { SessionWriteLease } from './lease.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { SESSION_FORMAT_VERSION, SessionLogOffset } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
   assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath, logPath, logSuffix,
   parseGenerationLogFilename, projectDir, scanLog, sessionDir, SessionLogScanner, toHeaderLine,
@@ -47,7 +47,7 @@ import {
 import {
   compressZstdFrame, createZstdFrameDecoder, decompressZstdFrame, decompressZstdPrefix, scanZstdFrames,
 } from './zstd.ts'
-import { ensureDurableDirectoryWin32, publishNewFileWin32 } from './win32.ts'
+import { ensureDurableDirectoryWin32, publishNewFileWin32, replaceFileWin32 } from './win32.ts'
 import { verifyCurrentGenerationInWorker } from './migration-verifier.ts'
 import { prepareCatalogFacts } from './catalog-migration.ts'
 import {
@@ -563,6 +563,45 @@ export class JsonlSessionPersistence extends SessionPersistence {
         throw new AggregateError([failure, releaseFailure], `session "${id}": write open failed and its lock release failed`)
       }
       throw failure
+    }
+  }
+
+  override async clearHistory(id: SessionId, replacement: (stored: SessionInspection) => Session): Promise<Session> {
+    await this.ensureRootEncoding()
+    this.tracker.claimWrite(id)
+    let lease: SessionWriteLease | undefined
+    try {
+      const selected = await this.findLog(id)
+      if (selected === undefined) throw new SessionPersistenceNotFoundError(id)
+      lease = await this.acquireLease(id, undefined, dirname(selected.sourcePath))
+      const stored = await this.requireStoredLog(id)
+      if (stored.status !== 'current' || selected.sourcePath !== selected.currentPath) {
+        throw new SessionFormatUnsupportedError('Open this Session to migrate it before clearing its history.')
+      }
+      const session = replacement(stored)
+      if (session.id !== id || session.header.cwd !== stored.meta.cwd || session.header.createdAt <= stored.meta.createdAt) {
+        throw new Error(`session "${id}": invalid replacement identity`)
+      }
+      // oxlint-disable-next-line typescript/no-deprecated -- Encode the complete detached replacement log at the persistence boundary.
+      const events = session.snapshotEvents()
+      const content = await this.encodeMaterialization(session.header, session.inheritedEventCount, events, true)
+      const tmp = await this.writeSyncedTempFile(selected.sourcePath, content)
+      try {
+        if (process.platform === 'win32') await replaceFileWin32(tmp, selected.sourcePath)
+        else {
+          await rename(tmp, selected.sourcePath)
+          await this.syncDirPosix(dirname(selected.sourcePath))
+        }
+      } finally {
+        this.coldLogMemo.delete(id)
+        await rm(tmp, { force: true }).catch((error: unknown) => {
+          this.ctx.logger.warn(`session "${id}": could not remove replacement staging file: ${String(error)}`)
+        })
+      }
+      return session
+    } finally {
+      try { await lease?.release() }
+      finally { this.tracker.releaseClaim(id) }
     }
   }
 
@@ -1719,12 +1758,14 @@ export class JsonlSessionPersistence extends SessionPersistence {
     meta: SessionHeader,
     inheritedEventCount: SessionLogOffsetType,
     events: readonly SessionEvent[],
+    validateReplacement = false,
   ): Promise<Buffer | string> {
     const header = JSON.stringify(toHeaderLine(meta, meta.isSeeded ? inheritedEventCount : undefined)) + '\n'
+    const body = events.length === 0 ? '' : eventLines(events) + '\n'
+    if (validateReplacement) scanLog(Buffer.from(header + body))
     if (events.length === 0) {
       return this.compression === 'none' ? header : compressZstdFrame(header)
     }
-    const body = eventLines(events) + '\n'
     if (this.compression === 'none') return header + body
     const headerFrame = await compressZstdFrame(header)
     const eventFrame = await compressZstdFrame(body)

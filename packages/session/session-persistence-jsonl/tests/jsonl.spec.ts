@@ -8,7 +8,7 @@ import * as fileSystem from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { scheduler } from 'node:timers/promises'
-import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq, type SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, SessionLogOffset, SessionSeq, type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -1563,6 +1563,39 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
   })
   afterEach(async () => { await ctx.fiber.dispose() })
+
+  it('replaces one Session history under the same ID after its writer releases ownership', async () => {
+    const store = ctx.sessionPersistence
+    const header = meta('clear-history', root)
+    const writer = await store.create(header)
+    await writer.append(oneTurnLog())
+    const build = vi.fn(({ meta: current }: { meta: SessionHeader }) => {
+      const result = Session.create(current.id, undefined, { ...current, createdAt: current.createdAt + 1 })
+      result.append('session/history-cleared', { startsConversation: true }, { ignorable: true })
+      return result
+    })
+    await expect(store.clearHistory!(header.id, build)).rejects.toThrow('active write handle')
+    expect(build).not.toHaveBeenCalled()
+    await writer.close()
+    const previous = await store.stat(header.id)
+    await expect(store.clearHistory!(header.id, () => { throw new Error('replacement refused') })).rejects.toThrow('replacement refused')
+    await expect(store.clearHistory!(header.id, ({ meta: current }) => {
+      const invalid = Session.create(current.id, undefined, { ...current, createdAt: current.createdAt + 1 })
+      invalid.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      return invalid
+    })).rejects.toThrow('turn/end does not match the open turn')
+    expect((await store.stat(header.id))?.revision).toBe(previous?.revision)
+    await store.clearHistory!(header.id, build)
+    const next = await store.stat(header.id)
+    expect(next?.header).toEqual({ ...previous?.header, createdAt: header.createdAt + 1 })
+    expect(next?.revision).not.toBe(previous?.revision)
+    const reader = await store.open(header.id, 'read')
+    try {
+      expect((await reader.read()).events.map(event => event.type)).toEqual(['session/history-cleared'])
+    } finally {
+      await reader.close()
+    }
+  })
 
   it('lazy materialization: create() writes no file until the first append', async () => {
     const m = meta('lazy', '/work')

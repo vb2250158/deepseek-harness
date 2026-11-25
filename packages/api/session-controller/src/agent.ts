@@ -9,11 +9,35 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import type { Session, SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
+import { Session, isConversationActivityEvent, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
+import { SessionAlreadyOwnedError, SessionFormatUnsupportedError, SessionPersistenceNotFoundError, type SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-typert-registry'
+
+const RESET_SETTINGS: ReadonlySet<string> = new Set([
+  'agent-preset/selected', 'approval/policy', 'model/selection', 'permission/preset', 'plan/mode',
+  'sandbox/mode', 'session/title', 'working-directory/change', 'workspace-root/change',
+])
+
+/** Rebuild current Session settings in their original relative order. */
+function appendResetSettings(session: Session, events: readonly SessionEvent[]): void {
+  const latest = new Map<string, SessionEvent>()
+  for (const event of events) {
+    if (RESET_SETTINGS.has(event.type)) latest.set(event.type, event)
+  }
+  for (const event of [...latest.values()].sort((a, b) => a.seq - b.seq)) {
+    if (event.type === 'session/title') {
+      session.append(event.type, { title: event.data.title, messageSeqs: [], source: { kind: 'user' } })
+    } else {
+      session.append(event.type, event.data)
+    }
+  }
+}
+
+function historyBusy(reason: string): RemoteError<'session/agent-busy'> {
+  return new RemoteError('session/agent-busy', `Session history cannot be cleared while ${reason}.`, { reason })
+}
 
 /** Cold Session identity absent from persistence. */
 export class ApiSessionNotFound extends Error {}
@@ -152,6 +176,7 @@ export async function inspectApiSession(
 export class ApiSessionAgentController {
   private readonly resumes = new Map<SessionId, Promise<Agent>>()
   private readonly claims = new Map<SessionId, Promise<void>>()
+  private readonly clearing = new Set<SessionId>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
   /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
@@ -201,6 +226,7 @@ export class ApiSessionAgentController {
     sessionId: SessionId,
     observation?: SessionObservation,
   ): Promise<ApiSessionAgentResult> {
+    if (this.clearing.has(sessionId)) return { error: historyBusy('clearing history') }
     const live = this.liveAgent(sessionId)
     if (live !== undefined) return live
     const attached = this.ctx.sessions.get(sessionId)
@@ -265,7 +291,73 @@ export class ApiSessionAgentController {
   async createSession(request: ApiSessionCreateRequest): Promise<ApiSessionCreated> {
     const named = request.sessionId
     if (named === undefined) return this.created(await this.createMinted(request.cwd, await this.composeAgent(request.agentPreset)))
+    if (this.clearing.has(named)) throw historyBusy('clearing history')
     return this.inOrder(named, async () => this.created(await this.claim(named, request)))
+  }
+
+  /**
+   * Whether a Session is in its same-id replacement transaction.
+   * @param sessionId - affected Session identity.
+   * @returns whether ordinary activation and removal notifications are paused.
+   */
+  isClearingHistory(sessionId: SessionId): boolean {
+    return this.clearing.has(sessionId)
+  }
+
+  /**
+   * Retire an idle ordinary Session and durably replace its history.
+   * @param sessionId - Session identity to keep.
+   * @param publish - refresh observers before new input can open the replacement.
+   */
+  async clearHistory(sessionId: SessionId, publish: (replacement: Session) => Promise<void>): Promise<void> {
+    const persistence = this.ctx.get('sessionPersistence')
+    if (persistence?.clearHistory === undefined) {
+      throw new RemoteError('session/clear-unavailable', 'This session store does not support clearing history.', { sessionId })
+    }
+    if (this.clearing.has(sessionId) || this.resumes.has(sessionId) || this.claims.has(sessionId)) {
+      throw historyBusy('another session operation is in progress')
+    }
+    this.clearing.add(sessionId)
+    try {
+      const activity = await this.ctx.waterfall('workspace/session-activity', { sessionId }, () => Promise.resolve([]))
+      // Scheduled deliveries have their own durable definitions and can use the replacement once it opens.
+      if (activity.some(({ kind }: { readonly kind: string }) => kind !== 'schedule')) throw historyBusy('the session has active work')
+      const session = this.ctx.sessions.get(sessionId)
+      const agent = this.ctx.agents.get(sessionId)
+      if (session !== undefined && hasApiSessionSubagentOwner(session)) throw apiSessionSubagentOwnershipError(sessionId)
+      if (session !== undefined && (agent?.session !== session || !await this.ctx.agents.retireIdle(agent))) {
+        throw historyBusy('the session is not idle')
+      }
+      const replacement = await persistence.clearHistory(sessionId, ({ meta, events }) => {
+        if (hasApiSessionSubagentOwner({ header: meta })) throw apiSessionSubagentOwnershipError(sessionId)
+        if (session !== undefined && (meta.createdAt !== session.header.createdAt || events.length !== session.seq)) {
+          throw historyBusy('the session changed before the reset')
+        }
+        if (this.ctx.sessions.get(sessionId) !== undefined) throw historyBusy('the session reopened before the reset')
+        const replacement = Session.create(sessionId, undefined, {
+          ...meta,
+          createdAt: Math.max(Date.now(), meta.createdAt + 1),
+          isSeeded: false,
+        })
+        appendResetSettings(replacement, events)
+        replacement.append('session/history-cleared', { startsConversation: true }, { ignorable: true })
+        return replacement
+      })
+      await publish(replacement)
+    } catch (error: unknown) {
+      if (error instanceof SessionPersistenceNotFoundError) {
+        throw new RemoteError('session/not-found', error.message, { sessionId })
+      }
+      if (error instanceof SessionAlreadyOwnedError) {
+        throw new RemoteError('session/writer-held', error.message, { sessionId })
+      }
+      if (error instanceof SessionFormatUnsupportedError) {
+        throw new RemoteError('session/migration-required', error.message, { sessionId })
+      }
+      throw error
+    } finally {
+      this.clearing.delete(sessionId)
+    }
   }
 
   /**
@@ -394,7 +486,7 @@ export class ApiSessionAgentController {
       if (!await this.namesDirectory(observed.header.cwd, request.cwd)) {
         throw new ApiSessionCwdConflict(sessionId, request.cwd, observed.header.cwd)
       }
-      reusable = request.reusable(sessionId) && !observed.events.some(event => event.type === 'turn/start')
+      reusable = request.reusable(sessionId) && !observed.events.some(isConversationActivityEvent)
     }
     const composition = await this.composeAgent(request.agentPreset)
     if (!reusable) return this.createMinted(request.cwd, composition)

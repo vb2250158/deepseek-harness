@@ -363,9 +363,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the awaitable Cordis effect disposer (single-shot; a repeat call returns undefined without awaiting an in-flight teardown). Exact identity is load-bearing: a composite (generator) effect that owns a teardown ORDER — the agent factory\'s lifecycle chain — must yield THIS function so Cordis nests the unregistration at that yield position; yielding a wrapper would leave it disposing as a concurrent sibling on owner unload, unregistering the agent (and emitting `agent/disposed`) while its final turn is still draining.',
       },
       {
-        signature: 'enter(agent: Agent): () => void',
+        signature: 'enter(agent: Agent, retireIdle?: () => Promise<boolean>): () => void',
         description: 'Insert an already-constructed agent without announcing it. This is the advanced ordered-lifecycle primitive used by the async agent factory: it first completes setup while the agent is unpublished, then assigns the returned detach closure into its pre-installed composite teardown before calling announce. Ordinary callers use register.',
-        parameters: [{ name: 'agent', description: 'the prepared, unpublished agent.' }],
+        parameters: [{ name: 'agent', description: 'the prepared, unpublished agent.' }, { name: 'retireIdle', description: 'optional factory-owned retirement of this exact Agent while idle.' }],
         returns: 'an idempotent closure that removes this exact entry and emits `agent/disposed` with listener failures contained. When called from a `agent/created` listener, removal and disposal wait until the serial creation dispatch settles.',
       },
       {
@@ -380,6 +380,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Look up a live agent.',
         parameters: [{ name: 'id', description: 'the shared agent/session id to look up.' }],
         returns: 'the agent, or undefined when no live agent has that id.',
+      },
+      {
+        signature: 'async retireIdle(agent: Agent): Promise<boolean>',
+        description: 'Retire one idle lifecycle through the factory that owns it.',
+        parameters: [{ name: 'agent', description: 'the exact published Agent to retire.' }],
+        returns: 'whether the lifecycle finished retiring.',
       },
       {
         signature: 'list(): Agent[]',
@@ -3509,6 +3515,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the accepted title and durable event sequence.',
       },
       {
+        signature: '@Remote(\'clearHistory\') async clearHistory(sessionId: SessionId): Promise<{ readonly cleared: true }>',
+        description: 'Clear an idle Session\'s history and model context under the original identity.',
+        parameters: [{ name: 'sessionId', description: 'Session to reset.' }],
+        returns: 'acknowledgement after the replacement log is durable.',
+      },
+      {
         signature: '@Remote(\'fork\') async fork(request: SessionForkRequest): Promise<SessionForkValue>',
         description: 'Fork one cold-readable exact event prefix into a new Session. An omitted boundary selects the latest completed-turn prefix; an open cut receives synthetic fork closers.',
         parameters: [{ name: 'request', description: 'source Session, optional exact inclusive event boundary, and migration preflight choice.' }],
@@ -3662,6 +3674,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'id', description: 'the stored session to open.' }, { name: 'access', description: '`read` or `write`.' }, { name: 'options', description: 'optional cancellation.' }],
         returns: 'the open handle.',
         throws: ['{SessionPersistenceNotFoundError} when the session does not exist.', '{SessionAlreadyOwnedError} for `write` when ownership is taken.'],
+      },
+      {
+        signature: 'clearHistory?(id: SessionId, replacement: (stored: SessionInspection) => Session): Promise<Session>',
+        description: 'Replace the current log under exclusive write ownership, when supported by the backend.',
+        parameters: [{ name: 'id', description: 'identity to keep.' }, { name: 'replacement', description: 'builds a new detached lifecycle from the exclusively held snapshot.' }],
+        returns: 'the replacement after its log is durably published.',
       },
       {
         signature: 'abstract flush(): Promise<void>',
@@ -10484,7 +10502,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionSummary',
-    declaration: 'export interface SessionSummary {\n    readonly agentAvailable: boolean;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly sessionId: SessionId;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly projections?: SessionProjectionHints;\n}',
+    declaration: 'export interface SessionSummary {\n    readonly historyCleared?: true;\n    readonly agentAvailable: boolean;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly sessionId: SessionId;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly projections?: SessionProjectionHints;\n}',
   },
   {
     name: 'SessionSurface',

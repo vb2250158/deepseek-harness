@@ -16,6 +16,10 @@ describe('viewer endpoint classification', () => {
     expect(VIEWER_ENDPOINT_CLASSES['pluginInventory/list']).toBe('owner-only')
   })
 
+  it('keeps destructive Session history resets Owner-only', () => {
+    expect(VIEWER_ENDPOINT_CLASSES['session/clearHistory']).toBe('owner-only')
+  })
+
   it('reports the endpoint a classification is missing', () => {
     const incomplete = Object.fromEntries(
       Object.entries(VIEWER_ENDPOINT_CLASSES).filter(([endpoint]) => endpoint !== 'session/prompt'),
